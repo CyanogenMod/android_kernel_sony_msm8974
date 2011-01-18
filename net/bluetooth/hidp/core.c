@@ -569,6 +569,8 @@ static int hidp_session(void *arg)
 	init_waitqueue_entry(&intr_wait, current);
 	add_wait_queue(sk_sleep(ctrl_sk), &ctrl_wait);
 	add_wait_queue(sk_sleep(intr_sk), &intr_wait);
+	session->waiting_for_startup = 0;
+	wake_up_interruptible(&session->startup_queue);
 	while (!atomic_read(&session->terminate)) {
 		set_current_state(TASK_INTERRUPTIBLE);
 
@@ -769,6 +771,8 @@ static struct hid_ll_driver hidp_hid_driver = {
 	.hidinput_input_event = hidp_hidinput_event,
 };
 
+/* This function sets up the hid device. It does not add it
+   to the HID system. That is done in hidp_add_connection(). */
 static int hidp_setup_hid(struct hidp_session *session,
 				struct hidp_connadd_req *req)
 {
@@ -810,15 +814,7 @@ static int hidp_setup_hid(struct hidp_session *session,
 
 	hid->hid_output_raw_report = hidp_output_raw_report;
 
-	err = hid_add_device(hid);
-	if (err < 0)
-		goto failed;
-
 	return 0;
-
-failed:
-	hid_destroy_device(hid);
-	session->hid = NULL;
 
 fault:
 	kfree(session->rd_data);
@@ -874,6 +870,8 @@ int hidp_add_connection(struct hidp_connadd_req *req, struct socket *ctrl_sock, 
 	skb_queue_head_init(&session->ctrl_transmit);
 	skb_queue_head_init(&session->intr_transmit);
 
+	init_waitqueue_head(&session->startup_queue);
+	session->waiting_for_startup = 1;
 	session->flags   = req->flags & (1 << HIDP_BLUETOOTH_VENDOR_ID);
 	session->idle_to = req->idle_to;
 
@@ -921,7 +919,7 @@ err_add_device:
 	hid_destroy_device(session->hid);
 	session->hid = NULL;
 	atomic_inc(&session->terminate);
-	wake_up_process(session->task);
+	hidp_schedule(session);
 
 unlink:
 	hidp_del_timer(session);
