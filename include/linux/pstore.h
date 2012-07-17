@@ -64,14 +64,6 @@ struct pstore_info {
 	void		*data;
 };
 
-
-#ifdef CONFIG_PSTORE_FTRACE
-extern void pstore_ftrace_call(unsigned long ip, unsigned long parent_ip);
-#else
-static inline void pstore_ftrace_call(unsigned long ip, unsigned long parent_ip)
-{ }
-#endif
-
 #ifdef CONFIG_PSTORE
 extern int pstore_register(struct pstore_info *);
 extern bool pstore_cannot_block_path(enum kmsg_dump_reason reason);
