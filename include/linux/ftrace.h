@@ -71,12 +71,17 @@ typedef void (*ftrace_func_t)(unsigned long ip, unsigned long parent_ip,
  *           could be controled by following calls:
  *             ftrace_function_local_enable
  *             ftrace_function_local_disable
+ * RECURSION_SAFE - The ftrace_ops can set this to tell the ftrace infrastructure
+ *            that the call back has its own recursion protection. If it does
+ *            not set this, then the ftrace infrastructure will add recursion
+ *            protection for the caller.
  */
 enum {
 	FTRACE_OPS_FL_ENABLED		= 1 << 0,
 	FTRACE_OPS_FL_GLOBAL		= 1 << 1,
 	FTRACE_OPS_FL_DYNAMIC		= 1 << 2,
 	FTRACE_OPS_FL_CONTROL		= 1 << 3,
+	FTRACE_OPS_FL_RECURSION_SAFE	= 1 << 6,
 };
 
 struct ftrace_ops {
