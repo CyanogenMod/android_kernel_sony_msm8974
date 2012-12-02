@@ -1655,7 +1655,7 @@ again:
 		struct anon_vma_chain *vmac;
 		struct vm_area_struct *vma;
 
-		anon_vma_lock(anon_vma);
+		anon_vma_lock_read(anon_vma);
 		list_for_each_entry(vmac, &anon_vma->head, same_anon_vma) {
 			vma = vmac->vma;
 			if (rmap_item->address < vma->vm_start ||
@@ -1678,7 +1678,7 @@ again:
 			if (!search_new_forks || !mapcount)
 				break;
 		}
-		anon_vma_unlock(anon_vma);
+		anon_vma_unlock_read(anon_vma);
 		if (!mapcount)
 			goto out;
 	}
@@ -1708,7 +1708,7 @@ again:
 		struct anon_vma_chain *vmac;
 		struct vm_area_struct *vma;
 
-		anon_vma_lock(anon_vma);
+		anon_vma_lock_read(anon_vma);
 		list_for_each_entry(vmac, &anon_vma->head, same_anon_vma) {
 			vma = vmac->vma;
 			if (rmap_item->address < vma->vm_start ||
@@ -1726,11 +1726,11 @@ again:
 			ret = try_to_unmap_one(page, vma,
 					rmap_item->address, flags);
 			if (ret != SWAP_AGAIN || !page_mapped(page)) {
-				anon_vma_unlock(anon_vma);
+				anon_vma_unlock_read(anon_vma);
 				goto out;
 			}
 		}
-		anon_vma_unlock(anon_vma);
+		anon_vma_unlock_read(anon_vma);
 	}
 	if (!search_new_forks++)
 		goto again;
@@ -1760,7 +1760,7 @@ again:
 		struct anon_vma_chain *vmac;
 		struct vm_area_struct *vma;
 
-		anon_vma_lock(anon_vma);
+		anon_vma_lock_read(anon_vma);
 		list_for_each_entry(vmac, &anon_vma->head, same_anon_vma) {
 			vma = vmac->vma;
 			if (rmap_item->address < vma->vm_start ||
@@ -1777,11 +1777,11 @@ again:
 
 			ret = rmap_one(page, vma, rmap_item->address, arg);
 			if (ret != SWAP_AGAIN) {
-				anon_vma_unlock(anon_vma);
+				anon_vma_unlock_read(anon_vma);
 				goto out;
 			}
 		}
-		anon_vma_unlock(anon_vma);
+		anon_vma_unlock_read(anon_vma);
 	}
 	if (!search_new_forks++)
 		goto again;

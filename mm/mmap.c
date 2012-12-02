@@ -570,7 +570,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 	 */
 	if (vma->anon_vma && (importer || start != vma->vm_start)) {
 		anon_vma = vma->anon_vma;
-		anon_vma_lock(anon_vma);
+		anon_vma_lock_write(anon_vma);
 	}
 
 	if (root) {
