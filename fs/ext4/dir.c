@@ -319,7 +319,7 @@ static inline loff_t ext4_get_htree_eof(struct file *filp)
  * NOTE: offsets obtained *before* ext4_set_inode_flag(dir, EXT4_INODE_INDEX)
  *       will be invalid once the directory was converted into a dx directory
  */
-loff_t ext4_dir_llseek(struct file *file, loff_t offset, int origin)
+loff_t ext4_dir_llseek(struct file *file, loff_t offset, int whence)
 {
 	struct inode *inode = file->f_mapping->host;
 	loff_t ret = -EINVAL;
@@ -331,7 +331,7 @@ loff_t ext4_dir_llseek(struct file *file, loff_t offset, int origin)
 	 *       as expected, as it is difficult to figure out the
 	 *       correct offset between dx hashes */
 
-	switch (origin) {
+	switch (whence) {
 	case SEEK_END:
 		if (unlikely(offset > 0))
 			goto out_err; /* not supported for directories */
