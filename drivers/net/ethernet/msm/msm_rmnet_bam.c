@@ -991,6 +991,53 @@ static int __init rmnet_init(void)
 			goto error;
 		}
 	}
+	/*Support for new rmnet ports */
+	for (n = 0; n < RMNET_REV_DEVICE_COUNT; n++) {
+		dev = alloc_netdev(sizeof(struct rmnet_private),
+				   "rev_rmnet%d", rmnet_setup);
+
+		if (!dev) {
+			pr_err("%s: no memory for rev netdev %d\n",
+							__func__, n);
+			return -ENOMEM;
+		}
+
+		netdevs_rev[n] = dev;
+		d = &(dev->dev);
+		p = netdev_priv(dev);
+		/* Initial config uses Ethernet */
+		p->operation_mode = RMNET_MODE_LLP_ETH;
+		p->ch_id = n+BAM_DMUX_DATA_REV_RMNET_0;
+		p->waiting_for_ul_skb = NULL;
+		p->in_reset = 0;
+		spin_lock_init(&p->lock);
+		spin_lock_init(&p->tx_queue_lock);
+
+		ret = register_netdev(dev);
+		if (ret) {
+			pr_err("%s: unable to register rev netdev %d rc=%d\n",
+							__func__, n, ret);
+			free_netdev(dev);
+			return ret;
+		}
+		if (rmnet_debug_init(dev))
+			continue;
+		bam_rmnet_rev_drivers[n].probe = bam_rmnet_rev_probe;
+		bam_rmnet_rev_drivers[n].remove = bam_rmnet_rev_remove;
+		tempname = kmalloc(BAM_DMUX_CH_NAME_MAX_LEN, GFP_KERNEL);
+		if (tempname == NULL)
+			return -ENOMEM;
+		scnprintf(tempname, BAM_DMUX_CH_NAME_MAX_LEN, "bam_dmux_ch_%d",
+					(n+BAM_DMUX_DATA_REV_RMNET_0));
+		bam_rmnet_rev_drivers[n].driver.name = tempname;
+		bam_rmnet_rev_drivers[n].driver.owner = THIS_MODULE;
+		ret = platform_driver_register(&bam_rmnet_rev_drivers[n]);
+		if (ret) {
+			pr_err("%s: new rev driver registration failed n=%d rc=%d\n",
+					__func__, n, ret);
+			return ret;
+		}
+	}
 	return 0;
 
 error:
