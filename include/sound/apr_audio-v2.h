@@ -579,6 +579,15 @@ struct adm_cmd_matrix_mute_v5 {
 	/* Clients must set this field to zero.*/
 } __packed;
 
+#define ASM_PARAM_ID_AAC_STEREO_MIX_COEFF_SELECTION_FLAG_V2 (0x00010DD8)
+
+struct asm_aac_stereo_mix_coeff_selection_param_v2 {
+	struct apr_hdr          hdr;
+	u32                     param_id;
+	u32                     param_size;
+	u32                     aac_stereo_mix_coeff_flag;
+} __packed;
+
 /* Allows a client to connect the desired stream to
  * the desired AFE port through the stream router
  *
@@ -593,7 +602,6 @@ struct adm_cmd_matrix_mute_v5 {
  * #ASM_STREAM_CMD_OPEN_READ_COMPRESSED
  * must have been called on this session.
  */
-
 #define ADM_CMD_CONNECT_AFE_PORT_V5	0x0001032E
 #define ADM_CMD_DISCONNECT_AFE_PORT_V5	0x0001032F
 /* Enumeration for the Rx stream router ID.*/
