@@ -584,6 +584,12 @@ config PMIC8058_PWM
 	help
 	  This option enables device driver support for the PWM channels
 	  on Qualcomm PM8058 chip. Pulse Width Modulation is used for
+config FSYNC_CONTROL
+        bool "Support for FSync Control"
+        default y
+        help
+          Say Y here to enable FSync Control
+
 	  purposes including software controlled brightness of backlight,
 	  motor control, and waveform generation.
 
