@@ -225,7 +225,7 @@ struct dwc3_msm {
 	bool			ext_inuse;
 	enum dwc3_id_state	id_state;
 	unsigned long		lpm_flags;
-#define MDWC3_CORECLK_OFF		BIT(0)
+#define MDWC3_PHY_REF_AND_CORECLK_OFF	BIT(0)
 #define MDWC3_TCXO_SHUTDOWN		BIT(1)
 };
 
@@ -1360,8 +1360,14 @@ static void dwc3_msm_ss_phy_reg_init(struct dwc3_msm *msm)
 }
 
 /* Initialize QSCRATCH registers for HSPHY and SSPHY operation */
-static void dwc3_msm_qscratch_reg_init(struct dwc3_msm *msm)
+static void dwc3_msm_qscratch_reg_init(struct dwc3_msm *msm,
+						unsigned event_status)
 {
+	if (event_status == DWC3_CONTROLLER_POST_RESET_EVENT) {
+		dwc3_msm_ss_phy_reg_init(msm);
+		return;
+	}
+
 	/* SSPHY Initialization: Use ref_clk from pads and set its parameters */
 	dwc3_msm_write_reg(msm->base, SS_PHY_CTRL_REG, 0x10210002);
 	msleep(30);
@@ -1372,7 +1378,7 @@ static void dwc3_msm_qscratch_reg_init(struct dwc3_msm *msm)
 	dwc3_msm_write_reg(msm->base, SS_PHY_CTRL_REG, 0x10210002);
 	usleep_range(2000, 2200);
 	/* Ref clock must be stable now, enable ref clock for HS mode */
-	dwc3_msm_write_reg(msm->base, SS_PHY_CTRL_REG, 0x10210102);
+	dwc3_msm_write_reg(msm->base, SS_PHY_CTRL_REG, 0x11210102);
 	usleep_range(2000, 2200);
 	/*
 	 * HSPHY Initialization: Enable UTMI clock and clamp enable HVINTs,
@@ -1380,8 +1386,8 @@ static void dwc3_msm_qscratch_reg_init(struct dwc3_msm *msm)
 	 */
 	dwc3_msm_write_reg(msm->base, HS_PHY_CTRL_REG, 0x5220bb2);
 	usleep_range(2000, 2200);
-	/* Disable (bypass) VBUS and ID filters */
-	dwc3_msm_write_reg(msm->base, QSCRATCH_GENERAL_CFG, 0x78);
+	/* Set XHCI_REV bit (2) to 1 - XHCI version 1.0 */
+	dwc3_msm_write_reg(msm->base, QSCRATCH_GENERAL_CFG, 0x4);
 	/*
 	 * write HSPHY init value to QSCRATCH reg to set HSPHY parameters like
 	 * VBUS valid threshold, disconnect valid threshold, DC voltage level,
@@ -1394,14 +1400,13 @@ static void dwc3_msm_qscratch_reg_init(struct dwc3_msm *msm)
 					PARAMETER_OVERRIDE_X_REG, 0x03FFFFFF,
 					msm->hsphy_init_seq & 0x03FFFFFF);
 
-	/* Enable master clock for RAMs to allow BAM to access RAMs when
-	 * RAM clock gating is enabled via DWC3's GCTL. Otherwise, issues
+	/*
+	 * Enable master clock for RAMs to allow BAM to access RAMs when
+	 * RAM clock gating is enabled via DWC3's GCTL. Otherwise issues
 	 * are seen where RAM clocks get turned OFF in SS mode
 	 */
 	dwc3_msm_write_reg(msm->base, CGCTL_REG,
 		dwc3_msm_read_reg(msm->base, CGCTL_REG) | 0x18);
-
-	dwc3_msm_ss_phy_reg_init(msm);
 }
 
 static void dwc3_msm_notify_event(struct dwc3 *dwc, unsigned event)
@@ -1413,6 +1418,16 @@ static void dwc3_msm_notify_event(struct dwc3 *dwc, unsigned event)
 		dev_info(mdwc->dev, "DWC3_CONTROLLER_ERROR_EVENT received\n");
 		dwc3_msm_dump_phy_info(mdwc);
 		break;
+	case DWC3_CONTROLLER_RESET_EVENT:
+		dev_dbg(mdwc->dev, "DWC3_CONTROLLER_RESET_EVENT received\n");
+		dwc3_msm_qscratch_reg_init(mdwc, DWC3_CONTROLLER_RESET_EVENT);
+		break;
+	case DWC3_CONTROLLER_POST_RESET_EVENT:
+		dev_dbg(mdwc->dev,
+				"DWC3_CONTROLLER_POST_RESET_EVENT received\n");
+		dwc3_msm_qscratch_reg_init(mdwc,
+					DWC3_CONTROLLER_POST_RESET_EVENT);
+		break;
 	default:
 		dev_dbg(mdwc->dev, "unknown dwc3 event\n");
 		break;
@@ -1421,8 +1436,6 @@ static void dwc3_msm_notify_event(struct dwc3 *dwc, unsigned event)
 
 static void dwc3_msm_block_reset(bool core_reset)
 {
-
-	struct dwc3_msm *mdwc = context;
 	int ret  = 0;
 
 	if (core_reset) {
@@ -1436,9 +1449,6 @@ static void dwc3_msm_block_reset(bool core_reset)
 			return;
 
 		usleep_range(10000, 12000);
-
-		/* Reinitialize QSCRATCH registers after block reset */
-		dwc3_msm_qscratch_reg_init(mdwc);
 	}
 
 	/* Reset the DBM */
@@ -1669,6 +1679,7 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 	bool dcp;
 	bool host_bus_suspend;
 	bool host_ss_active;
+	bool host_ss_suspend;
 
 	dev_dbg(mdwc->dev, "%s: entering lpm\n", __func__);
 
@@ -1695,6 +1706,7 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 	      (mdwc->charger.chg_type == DWC3_FLOATED_CHARGER) ||
 	      (mdwc->charger.chg_type == DWC3_PROPRIETARY_CHARGER));
 	host_bus_suspend = mdwc->host_mode == 1;
+	host_ss_suspend = host_bus_suspend && host_ss_active;
 
 	/* Sequence to put SSPHY in low power state:
 	 * 1. Clear REF_SS_PHY_EN in SS_PHY_CTRL_REG
@@ -1702,13 +1714,17 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 	 * 3. Set TEST_POWERED_DOWN in SS_PHY_CTRL_REG to enable PHY retention
 	 * 4. Disable SSPHY ref clk
 	 */
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 8), 0x0);
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 28), 0x0);
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 26),
+	if (!host_ss_suspend) {
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 8),
+									0x0);
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 28),
+									0x0);
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 26),
 								(1 << 26));
-
+	}
 	usleep_range(1000, 1200);
-	clk_disable_unprepare(mdwc->ref_clk);
+	if (!host_ss_suspend)
+		clk_disable_unprepare(mdwc->ref_clk);
 
 	if (host_bus_suspend) {
 		/* Sequence for host bus suspend case:
@@ -1748,9 +1764,9 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 
 	/* make sure above writes are completed before turning off clocks */
 	wmb();
-	if (!host_bus_suspend || !host_ss_active) {
+	if (!host_ss_suspend) {
 		clk_disable_unprepare(mdwc->core_clk);
-		mdwc->lpm_flags |= MDWC3_CORECLK_OFF;
+		mdwc->lpm_flags |= MDWC3_PHY_REF_AND_CORECLK_OFF;
 	}
 	clk_disable_unprepare(mdwc->iface_clk);
 
@@ -1798,6 +1814,7 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	int ret;
 	bool dcp;
 	bool host_bus_suspend;
+	bool resume_from_core_clk_off = false;
 
 	dev_dbg(mdwc->dev, "%s: exiting lpm\n", __func__);
 
@@ -1807,6 +1824,9 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	}
 
 	wake_lock(&mdwc->wlock);
+
+	if (mdwc->lpm_flags & MDWC3_PHY_REF_AND_CORECLK_OFF)
+		resume_from_core_clk_off = true;
 
 	if (mdwc->bus_perf_client) {
 		ret = msm_bus_scale_client_update_request(
@@ -1842,13 +1862,14 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	if (!host_bus_suspend && !dcp)
 		dwc3_hsusb_config_vddcx(1);
 
-	clk_prepare_enable(mdwc->ref_clk);
+	if (mdwc->lpm_flags & MDWC3_PHY_REF_AND_CORECLK_OFF)
+		clk_prepare_enable(mdwc->ref_clk);
 	usleep_range(1000, 1200);
 
 	clk_prepare_enable(mdwc->iface_clk);
-	if (mdwc->lpm_flags & MDWC3_CORECLK_OFF) {
+	if (mdwc->lpm_flags & MDWC3_PHY_REF_AND_CORECLK_OFF) {
 		clk_prepare_enable(mdwc->core_clk);
-		mdwc->lpm_flags &= ~MDWC3_CORECLK_OFF;
+		mdwc->lpm_flags &= ~MDWC3_PHY_REF_AND_CORECLK_OFF;
 	}
 
 	if (host_bus_suspend) {
@@ -1861,10 +1882,6 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 
 		/* Disable DP and DM HV interrupt */
 		dwc3_msm_write_reg(mdwc->base, ALT_INTERRUPT_EN_REG, 0x000);
-
-		/* Clear suspend bit in GUSB2PHYCONFIG register */
-		dwc3_msm_write_readback(mdwc->base, DWC3_GUSB2PHYCFG(0),
-								0x40, 0x0);
 	} else {
 		/* Disable HV interrupt */
 		if (mdwc->otg_xceiv && (!mdwc->ext_xceiv.otg_capability))
@@ -1888,23 +1905,27 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 
 	}
 
-	/* Assert SS PHY RESET */
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 7),
+	if (resume_from_core_clk_off) {
+		/* Assert SS PHY RESET */
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 7),
 								(1 << 7));
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 28),
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 28),
 								(1 << 28));
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 8),
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 8),
 								(1 << 8));
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 26), 0x0);
-	/* 10usec delay required before de-asserting SS PHY RESET */
-	udelay(10);
-	dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 7), 0x0);
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 26),
+									0x0);
+		/* 10usec delay required before de-asserting SS PHY RESET */
+		udelay(10);
+		dwc3_msm_write_readback(mdwc->base, SS_PHY_CTRL_REG, (1 << 7),
+									0x0);
 
-	/*
-	 * Reinitilize SSPHY parameters as SS_PHY RESET will reset
-	 * the internal registers to default values.
-	 */
-	dwc3_msm_ss_phy_reg_init(mdwc);
+		/*
+		 * Reinitilize SSPHY parameters as SS_PHY RESET will reset
+		 * the internal registers to default values.
+		 */
+		dwc3_msm_ss_phy_reg_init(mdwc);
+	}
 	atomic_set(&mdwc->in_lpm, 0);
 
 	/* match disable_irq call from isr */
@@ -2697,8 +2718,6 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "unable to read hsphy init seq\n");
 	else if (!msm->hsphy_init_seq)
 		dev_warn(&pdev->dev, "incorrect hsphyinitseq.Using PORvalue\n");
-
-	dwc3_msm_qscratch_reg_init(msm);
 
 	pm_runtime_set_active(msm->dev);
 	pm_runtime_enable(msm->dev);
