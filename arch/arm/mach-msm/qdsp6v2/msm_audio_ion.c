@@ -48,6 +48,11 @@ int msm_audio_ion_alloc(const char *name, struct ion_client **client,
 {
 	int rc = 0;
 
+	if (!name || !client || !handle || !paddr || !vaddr
+		|| !bufsz || !pa_len) {
+		pr_err("%s: Invalid params\n", __func__);
+		return -EINVAL;
+	}
 	*client = msm_audio_ion_client_create(UINT_MAX, name);
 	if (IS_ERR_OR_NULL((void *)(*client))) {
 		pr_err("%s: ION create client for AUDIO failed\n", __func__);
@@ -98,6 +103,8 @@ err_ion_handle:
 	ion_free(*client, *handle);
 err_ion_client:
 	msm_audio_ion_client_destroy(*client);
+	*handle = NULL;
+	*client = NULL;
 err:
 	return -EINVAL;
 }
@@ -108,10 +115,16 @@ int msm_audio_ion_import(const char *name, struct ion_client **client,
 			ion_phys_addr_t *paddr, size_t *pa_len, void **vaddr)
 {
 	int rc = 0;
+	if (!name || !client || !handle || !paddr || !vaddr || !pa_len) {
+		pr_err("%s: Invalid params\n", __func__);
+		rc = -EINVAL;
+		goto err;
+	}
 
 	*client = msm_audio_ion_client_create(UINT_MAX, name);
 	if (IS_ERR_OR_NULL((void *)(*client))) {
 		pr_err("%s: ION create client for AUDIO failed\n", __func__);
+		rc = -EINVAL;
 		goto err;
 	}
 
@@ -124,8 +137,9 @@ int msm_audio_ion_import(const char *name, struct ion_client **client,
 	if (IS_ERR_OR_NULL((void *) (*handle))) {
 		pr_err("%s: ion import dma buffer failed\n",
 				__func__);
-		goto err_ion_handle;
-		}
+		rc = -EINVAL;
+		goto err_destroy_client;
+	}
 
 	if (ionflag != NULL) {
 		rc = ion_handle_get_flags(*client, *handle, ionflag);
@@ -146,6 +160,7 @@ int msm_audio_ion_import(const char *name, struct ion_client **client,
 	*vaddr = ion_map_kernel(*client, *handle);
 	if (IS_ERR_OR_NULL((void *)*vaddr)) {
 		pr_err("%s: ION memory mapping for AUDIO failed\n", __func__);
+		rc = -ENOMEM;
 		goto err_ion_handle;
 	}
 	pr_debug("%s: mapped address = %p, size=%d\n", __func__, *vaddr, bufsz);
@@ -154,13 +169,20 @@ int msm_audio_ion_import(const char *name, struct ion_client **client,
 
 err_ion_handle:
 	ion_free(*client, *handle);
+err_destroy_client:
 	msm_audio_ion_client_destroy(*client);
+	*client = NULL;
+	*handle = NULL;
 err:
-	return -EINVAL;
+	return rc;
 }
 
 int msm_audio_ion_free(struct ion_client *client, struct ion_handle *handle)
 {
+	if (!client || !handle) {
+		pr_err("%s Invalid params\n", __func__);
+		return -EINVAL;
+	}
 	if (msm_audio_ion_data.smmu_enabled) {
 		/* Need to populate book kept infomation */
 		pr_debug("client=%p, domain=%p, domain_id=%d, group=%p",
