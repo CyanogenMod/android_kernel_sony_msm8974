@@ -101,20 +101,7 @@ static void __hidp_link_session(struct hidp_session *session)
 
 static void __hidp_unlink_session(struct hidp_session *session)
 {
-	bdaddr_t *dst = &session->bdaddr;
-	struct hci_dev *hdev;
-	struct device *dev = NULL;
-
-	hdev = hci_get_route(dst, BDADDR_ANY);
-	if (hdev) {
-		session->conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK, dst);
-		if (session->conn)
-			dev = &session->conn->dev;
-
-		hci_dev_put(hdev);
-	}
-
-	if (dev)
+	if (session->conn)
 		hci_conn_put_device(session->conn);
 
 	list_del(&session->list);
