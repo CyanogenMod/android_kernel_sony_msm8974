@@ -1,4 +1,5 @@
 /* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,6 +30,7 @@
 #include "mdss.h"
 #include "mdss_debug.h"
 #include "mdss_fb.h"
+#include "mdss_dsi.h"
 #include "mdss_mdp.h"
 #include "mdss_mdp_rotator.h"
 
@@ -982,7 +984,7 @@ static int mdss_mdp_overlay_play(struct msm_fb_data_type *mfd,
 
 	ret = mutex_lock_interruptible(&mdp5_data->ov_lock);
 	if (ret)
-		return ret;
+		goto exit;
 
 	if (!mfd->panel_power_on) {
 		ret = -EPERM;
@@ -1002,7 +1004,9 @@ static int mdss_mdp_overlay_play(struct msm_fb_data_type *mfd,
 	} else if (req->id == BORDERFILL_NDX) {
 		pr_debug("borderfill enable\n");
 		mdp5_data->borderfill_enable = true;
+		mutex_unlock(&mdp5_data->ov_lock);
 		ret = mdss_mdp_overlay_free_fb_pipe(mfd);
+		goto exit;
 	} else {
 		ret = mdss_mdp_overlay_queue(mfd, req);
 	}
@@ -1010,6 +1014,7 @@ static int mdss_mdp_overlay_play(struct msm_fb_data_type *mfd,
 done:
 	mutex_unlock(&mdp5_data->ov_lock);
 
+exit:
 	return ret;
 }
 
@@ -1104,15 +1109,30 @@ static int mdss_mdp_overlay_get_fb_pipe(struct msm_fb_data_type *mfd,
 
 static void mdss_mdp_overlay_pan_display(struct msm_fb_data_type *mfd)
 {
+	struct mdss_panel_data *pdata;
 	struct mdss_mdp_data data;
 	struct mdss_mdp_pipe *pipe;
 	struct fb_info *fbi;
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
 	u32 offset;
 	int bpp, ret;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 
 	if (!mfd || !mdp5_data->ctl)
 		return;
+
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+	if (!pdata) {
+		pr_err("no panel connected\n");
+		return;
+	}
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+	if (!ctrl_pdata) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return;
+	}
 
 	fbi = mfd->fbi;
 
@@ -1907,6 +1927,7 @@ static int mdss_mdp_overlay_off(struct msm_fb_data_type *mfd)
 			pr_err("unable to suspend w/pm_runtime_put (%d)\n", rc);
 	}
 
+	mdss_mdp_overlay_free_fb_pipe(mfd);
 	return rc;
 }
 

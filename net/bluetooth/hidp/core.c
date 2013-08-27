@@ -2,6 +2,8 @@
    HIDP implementation for Linux Bluetooth stack (BlueZ).
    Copyright (C) 2003-2004 Marcel Holtmann <marcel@holtmann.org>
    Copyright (c) 2012 The Linux Foundation.  All rights reserved.
+   Copyright 2011,2012 Sony Corporation
+   Copyright (c) 2012 Sony Mobile Communications AB.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License version 2 as
@@ -329,11 +331,21 @@ static int hidp_get_raw_report(struct hid_device *hid,
 	struct sk_buff *skb;
 	size_t len;
 	int numbered_reports = hid->report_enum[report_type].numbered;
+#ifdef CONFIG_HID_SONY_PS3_CTRL_BT
+	int data_size = 1;
+#endif
 
 	switch (report_type) {
 	case HID_FEATURE_REPORT:
 		report_type = HIDP_TRANS_GET_REPORT | HIDP_DATA_RTYPE_FEATURE;
 		break;
+#ifdef CONFIG_HID_SONY_PS3_CTRL_BT
+	case HID_FEATREP_WDATASIZE:
+			report_type = HIDP_TRANS_GET_REPORT
+				| HIDP_DATA_RTYPE_FEATURE | HIDP_DATA_SIZE_TRUE;
+			data_size = 3;
+		break;
+#endif
 	case HID_INPUT_REPORT:
 		report_type = HIDP_TRANS_GET_REPORT | HIDP_DATA_RTYPE_INPUT;
 		break;
@@ -352,7 +364,12 @@ static int hidp_get_raw_report(struct hid_device *hid,
 	session->waiting_report_number = numbered_reports ? report_number : -1;
 	set_bit(HIDP_WAITING_FOR_RETURN, &session->flags);
 	data[0] = report_number;
+#ifndef CONFIG_HID_SONY_PS3_CTRL_BT
 	if (hidp_send_ctrl_message(hid->driver_data, report_type, data, 1))
+#else
+	if (hidp_send_ctrl_message(hid->driver_data, report_type,
+			data, data_size))
+#endif
 		goto err_eio;
 
 	/* Wait for the return of the report. The returned report
