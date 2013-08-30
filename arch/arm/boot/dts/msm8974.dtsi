@@ -2451,6 +2451,13 @@
 		};
 	};
 
+	qcom,avtimer {
+		compatible = "qcom,avtimer";
+		reg = <0xfe053008 0x4>,
+			<0xfe05300c 0x4>;
+		reg-names = "avtimer_lsb_addr", "avtimer_msb_addr";
+	};
+
 	sony,ric_info {
 		compatible = "sony_ric";
 		sony,num-partition = <4>;
