@@ -47,6 +47,10 @@ Optional properties :
 		bits 20-25 PARAMETER_OVERRIDE_D
 - qcom,skip-charger-detection: If present then charger detection using BC1.2
   is not supported and attached host should always be assumed as SDP.
+- qcom,dwc-usb3-msm-tx-fifo-size: If present, represents RAM size available for
+		TX fifo allocation in bytes
+- qcom,dwc-usb3-msm-qdss-tx-fifo-size: If present, represent RAM size available
+		for TX fifo allocation in QDSS composition
 
 Sub nodes:
 - Sub node for "DWC3- USB3 controller".
@@ -69,6 +73,8 @@ Example MSM USB3.0 controller device node :
 		qcom,dwc-usb3-msm-dbm-eps = <4>
 		qcom,vdd-voltage-level = <1 5 7>;
 		qcom,dwc-hsphy-init = <0x00D195A4>;
+		qcom,dwc-usb3-msm-tx-fifo-size = <29696>;
+		qcom,dwc-usb3-msm-qdss-tx-fifo-size = <16384>;
 
 		qcom,msm_bus,name = "usb3";
 		qcom,msm_bus,num_cases = <2>;
