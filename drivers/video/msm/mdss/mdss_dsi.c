@@ -1433,6 +1433,8 @@ int dsi_panel_device_register(struct device_node *pan_node,
 
 	ctrl_pdata->panel_data.intf_ready = mdss_dsi_intf_ready;
 	ctrl_pdata->panel_data.event_handler = mdss_dsi_event_handler;
+	ctrl_pdata->check_status = mdss_dsi_bta_status_check;
+
 	ctrl_pdata->panel_data.detect = spec_pdata->detect;
 	ctrl_pdata->panel_data.update_panel = spec_pdata->update_panel;
 	ctrl_pdata->panel_data.panel_pdev = ctrl_pdev;
