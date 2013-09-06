@@ -300,9 +300,7 @@ struct mdss_panel_info {
 	struct ion_handle *splash_ihdl;
 	u32 panel_power_on;
 
-	/* physical size in mm */
-	__u32 width;
-	__u32 height;
+	uint32_t panel_dead;
 
 	struct lcd_panel_info lcdc;
 	struct fbc_panel_info fbc;
@@ -310,6 +308,10 @@ struct mdss_panel_info {
 	struct lvds_panel_info lvds;
 
 	const char *panel_id_name;
+
+	/* physical size in mm */
+	__u32 width;
+	__u32 height;
 };
 
 struct mdss_panel_data {
