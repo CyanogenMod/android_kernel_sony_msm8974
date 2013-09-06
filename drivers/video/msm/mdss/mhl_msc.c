@@ -43,7 +43,22 @@ struct workqueue_struct *scratchpad_workqueue;
 
 static void mhl_notify_event(struct mhl_tx_ctrl *mhl_ctrl, int event);
 
-#define RCP_KEY_RELEASE_TIME	450
+/*
+ * Android defines [DEFAULT_LONG_PRESS_TIMEOUT = 500].
+ * 450ms is enought not to let system detect LongPress.
+ */
+#define RCP_KEY_RELEASE_TIME1	450
+
+/*
+ * In samsung dongle case, cursor moves a lot than normal situation with
+ * pressing direction key twice in a short time.
+ * Please add following explanation after "twice" .
+ * Android defines [DEFAULT_LONG_PRESS_TIMEOUT = 500], so if release event is
+ * not injected within 500ms, then the time out occurs and system become to
+ * detect the event as LongPress. For that reason, we set the release timer as
+ * 200ms not to let system judge it is LongPress.
+ */
+#define RCP_KEY_RELEASE_TIME2	200
 #define RCP_KEY_INVALID			-1
 
 static DEFINE_MUTEX(rcp_key_release_mutex);
@@ -309,6 +324,8 @@ int mhl_msc_command_done(struct mhl_tx_ctrl *mhl_ctrl,
 			else
 				pr_debug("%s: devcap pow bit unset\n",
 					 __func__);
+			power_supply_set_present(&mhl_ctrl->mhl_psy,
+				!!(req->retval & MHL_DEV_CATEGORY_POW_BIT));
 			break;
 		case DEVCAP_OFFSET_FEATURE_FLAG:
 			mhl_rap_send_msc_msg(mhl_ctrl, MHL_RAP_CONTENT_ON);
@@ -391,10 +408,11 @@ void mhl_screen_notify(struct mhl_tx_ctrl *mhl_ctrl, int screen_mode)
 
 	if (screen_mode) {
 		mhl_ctrl->screen_mode = true;
-		if ((mhl_ctrl->cur_state == POWER_STATE_D0_MHL) &&
-			mhl_ctrl->tmds_ctrl_en) {
-			mhl_tmds_ctrl(mhl_ctrl, TMDS_ENABLE);
-			mhl_drive_hpd(mhl_ctrl, HPD_UP);
+		if (mhl_ctrl->cur_state == POWER_STATE_D0_MHL) {
+			if (mhl_ctrl->tmds_ctrl_en) {
+				mhl_tmds_ctrl(mhl_ctrl, TMDS_ENABLE);
+				mhl_drive_hpd(mhl_ctrl, HPD_UP);
+			}
 			mhl_rap_send_msc_msg(mhl_ctrl, MHL_RAP_CONTENT_ON);
 		}
 	} else {
@@ -575,8 +593,22 @@ static void mhl_handle_input(struct mhl_tx_ctrl *mhl_ctrl,
 		mhl_ctrl->rcp_pre_input_key = input_key_code;
 		mutex_unlock(&rcp_key_release_mutex);
 		/* rcp key release timer start */
-		mod_timer(&mhl_ctrl->rcp_key_release_timer,
-			jiffies + msecs_to_jiffies(RCP_KEY_RELEASE_TIME));
+		switch (input_key_code) {
+		case KEY_UP:
+		case KEY_DOWN:
+		case KEY_LEFT:
+		case KEY_RIGHT:
+		case BTN_LEFT:
+			mod_timer(&mhl_ctrl->rcp_key_release_timer,
+				jiffies +
+				msecs_to_jiffies(RCP_KEY_RELEASE_TIME2));
+			break;
+		default:
+			mod_timer(&mhl_ctrl->rcp_key_release_timer,
+				jiffies +
+				msecs_to_jiffies(RCP_KEY_RELEASE_TIME1));
+			break;
+		}
 	} else {
 		mutex_lock(&rcp_key_release_mutex);
 		mhl_ctrl->rcp_key_release = false;

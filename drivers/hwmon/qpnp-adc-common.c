@@ -158,6 +158,119 @@ static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
 	{790,	377}
 };
 
+static const struct qpnp_vadc_map_pt adcmap_btm_threshold2[] = {
+	{-300,	1686},
+	{-290,	1679},
+	{-280,	1672},
+	{-270,	1665},
+	{-260,	1658},
+	{-250,	1650},
+	{-240,	1641},
+	{-230,	1633},
+	{-220,	1624},
+	{-210,	1615},
+	{-200,	1605},
+	{-190,	1595},
+	{-180,	1585},
+	{-170,	1574},
+	{-160,	1563},
+	{-150,	1552},
+	{-140,	1540},
+	{-130,	1528},
+	{-120,	1515},
+	{-110,	1502},
+	{-100,	1488},
+	{-90,	1475},
+	{-80,	1461},
+	{-70,	1446},
+	{-60,	1431},
+	{-50,	1416},
+	{-40,	1401},
+	{-30,	1385},
+	{-20,	1368},
+	{-10,	1352},
+	{0,	1335},
+	{10,	1318},
+	{20,	1301},
+	{30,	1283},
+	{40,	1265},
+	{50,	1247},
+	{60,	1229},
+	{70,	1211},
+	{80,	1192},
+	{90,	1174},
+	{100,	1155},
+	{110,	1136},
+	{120,	1117},
+	{130,	1098},
+	{140,	1079},
+	{150,	1060},
+	{160,	1041},
+	{170,	1023},
+	{180,	1004},
+	{190,	985},
+	{200,	966},
+	{210,	948},
+	{220,	929},
+	{230,	911},
+	{240,	893},
+	{250,	875},
+	{260,	857},
+	{270,	840},
+	{280,	823},
+	{290,	806},
+	{300,	789},
+	{310,	772},
+	{320,	756},
+	{330,	740},
+	{340,	724},
+	{350,	709},
+	{360,	694},
+	{370,	679},
+	{380,	665},
+	{390,	650},
+	{400,	636},
+	{410,	623},
+	{420,	610},
+	{430,	597},
+	{440,	584},
+	{450,	572},
+	{460,	560},
+	{470,	548},
+	{480,	536},
+	{490,	525},
+	{500,	514},
+	{510,	504},
+	{520,	494},
+	{530,	484},
+	{540,	474},
+	{550,	465},
+	{560,	456},
+	{570,	447},
+	{580,	438},
+	{590,	430},
+	{600,	422},
+	{610,	414},
+	{620,	406},
+	{630,	399},
+	{640,	391},
+	{650,	385},
+	{660,	378},
+	{670,	371},
+	{680,	365},
+	{690,	359},
+	{700,	353},
+	{710,	347},
+	{720,	342},
+	{730,	336},
+	{740,	331},
+	{750,	326},
+	{760,	321},
+	{770,	316},
+	{780,	312},
+	{790,	307}
+};
+
 static const struct qpnp_vadc_map_pt adcmap_qrd_btm_threshold[] = {
 	{-200,	1672},
 	{-180,	1656},
@@ -325,6 +438,8 @@ static const struct qpnp_vadc_map_pt adcmap_emmc_therm[] = {
 	{51,	1200},
 	{44,	1250}
 };
+
+static bool adc_use_old_batt_therm_table;
 
 static int32_t qpnp_adc_map_voltage_temp(const struct qpnp_vadc_map_pt *pts,
 		uint32_t tablesize, int32_t input, int64_t *output)
@@ -576,8 +691,11 @@ int32_t qpnp_adc_scale_batt_therm(int32_t adc_code,
 			adc_properties, chan_properties);
 
 	return qpnp_adc_map_temp_voltage(
-			adcmap_btm_threshold,
-			ARRAY_SIZE(adcmap_btm_threshold),
+			adc_use_old_batt_therm_table ?
+			adcmap_btm_threshold : adcmap_btm_threshold2,
+			adc_use_old_batt_therm_table ?
+			ARRAY_SIZE(adcmap_btm_threshold) :
+			ARRAY_SIZE(adcmap_btm_threshold2),
 			bat_voltage,
 			&adc_chan_result->physical);
 }
@@ -955,8 +1073,11 @@ int32_t qpnp_adc_btm_scaler(struct qpnp_adc_tm_btm_param *param,
 	pr_debug("warm_temp:%d and cool_temp:%d\n", param->high_temp,
 				param->low_temp);
 	rc = qpnp_adc_map_voltage_temp(
-		adcmap_btm_threshold,
-		ARRAY_SIZE(adcmap_btm_threshold),
+		adc_use_old_batt_therm_table ?
+		adcmap_btm_threshold : adcmap_btm_threshold2,
+		adc_use_old_batt_therm_table ?
+		ARRAY_SIZE(adcmap_btm_threshold) :
+		ARRAY_SIZE(adcmap_btm_threshold2),
 		(param->low_temp),
 		&low_output);
 	if (rc) {
@@ -970,8 +1091,11 @@ int32_t qpnp_adc_btm_scaler(struct qpnp_adc_tm_btm_param *param,
 	low_output += btm_param.adc_gnd;
 
 	rc = qpnp_adc_map_voltage_temp(
-		adcmap_btm_threshold,
-		ARRAY_SIZE(adcmap_btm_threshold),
+		adc_use_old_batt_therm_table ?
+		adcmap_btm_threshold : adcmap_btm_threshold2,
+		adc_use_old_batt_therm_table ?
+		ARRAY_SIZE(adcmap_btm_threshold) :
+		ARRAY_SIZE(adcmap_btm_threshold2),
 		(param->high_temp),
 		&high_output);
 	if (rc) {
@@ -1161,3 +1285,9 @@ int32_t qpnp_adc_get_devicetree_data(struct spmi_device *spmi,
 	return 0;
 }
 EXPORT_SYMBOL(qpnp_adc_get_devicetree_data);
+
+void qpnp_adc_therm_table_sel(bool val)
+{
+	adc_use_old_batt_therm_table = val;
+}
+EXPORT_SYMBOL(qpnp_adc_therm_table_sel);

@@ -317,6 +317,9 @@ struct mdss_panel_specific_pdata {
 	int driver_ic;
 	int disp_on_in_hs;
 	bool detected;
+	int cabc_enabled;
+	int wait_time_before_on_cmd;
+	int init_from_begin;
 };
 
 struct dsi_panel_cmds_list {
@@ -332,6 +335,13 @@ struct mdss_panel_common_pdata {
 	int (*reset) (struct mdss_panel_data *pdata, int enable);
 	void (*bl_fnc) (struct mdss_panel_data *pdata, u32 bl_level);
 
+	int cabc_enabled;
+	struct dsi_panel_cmds cabc_early_on_cmds;
+	struct dsi_panel_cmds cabc_on_cmds;
+	struct dsi_panel_cmds cabc_off_cmds;
+	struct dsi_panel_cmds cabc_late_off_cmds;
+	struct dsi_panel_cmds cabc_deferred_on_cmds;
+
 	struct dsi_panel_cmds einit_cmds;
 	struct dsi_panel_cmds init_cmds;
 	struct dsi_panel_cmds on_cmds;
@@ -345,8 +355,8 @@ struct mdss_panel_common_pdata {
 	int driver_ic;
 	int disp_on_in_hs;
 	int panel_detect;
-	char id[MDSS_DSI_LEN];
-	u8 id_num;
+	int wait_time_before_on_cmd;
+	int init_from_begin;
 	int (*pcc_setup) (struct msm_fb_data_type *mfd);
 	struct dsi_panel_cmds uv_read_cmds;
 	struct mdss_pcc_cfg_rgb *wide_tbl;
@@ -398,6 +408,14 @@ struct mdss_dsi_ctrl_pdata {
 	struct mdss_panel_specific_pdata *spec_pdata;
 	u32 dsi_irq_mask;
 	struct mdss_hw *dsi_hw;
+
+	int cabc_active;
+	struct dsi_panel_cmds cabc_early_on_cmds;
+	struct dsi_panel_cmds cabc_on_cmds;
+	struct dsi_panel_cmds cabc_off_cmds;
+	struct dsi_panel_cmds cabc_late_off_cmds;
+	struct dsi_panel_cmds cabc_deferred_on_cmds;
+	struct work_struct cabc_work;
 
 	struct dsi_panel_cmds einit_cmds;
 	struct dsi_panel_cmds init_cmds;

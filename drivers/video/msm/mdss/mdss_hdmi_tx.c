@@ -114,6 +114,33 @@ struct dss_gpio cec_gpio_config[] = {
 	{0, 1, COMPATIBLE_NAME "-cec"}
 };
 
+static void hdmi_tx_send_hdcp_state(struct hdmi_tx_ctrl *hdmi_ctrl,
+	enum hdmi_hdcp_state hdcp_state)
+{
+	char *envp[2];
+
+	switch (hdcp_state) {
+	case HDCP_STATE_AUTHENTICATED:
+		envp[0] = "HDCP_STATE=PASS";
+		envp[1] = NULL;
+		break;
+	case HDCP_STATE_AUTH_FAIL:
+		envp[0] = "HDCP_STATE=FAIL";
+		envp[1] = NULL;
+		break;
+	case HDCP_STATE_INACTIVE:
+	case HDCP_STATE_AUTHENTICATING:
+	default:
+		return;
+	}
+
+	DEV_DBG("%s: Sending %s uevent\n", __func__, envp[0]);
+
+	if (hdmi_ctrl->kobj != NULL) {
+		kobject_uevent_env(hdmi_ctrl->kobj, KOBJ_CHANGE, envp);
+	}
+} /* hdmi_tx_send_hdcp_state */
+
 const char *hdmi_pm_name(enum hdmi_tx_power_module_type module)
 {
 	switch (module) {
@@ -775,6 +802,8 @@ void hdmi_tx_hdcp_cb(void *ptr, enum hdmi_hdcp_state status)
 		break;
 		/* do nothing */
 	}
+	/* send HDCP PASS/FAIL uevent */
+	hdmi_tx_send_hdcp_state(hdmi_ctrl, status);
 }
 
 /* Enable HDMI features */
@@ -2607,11 +2636,22 @@ static irqreturn_t hdmi_tx_isr(int irq, void *data)
 		hdmi_ctrl->hpd_state =
 			(DSS_REG_R(io, HDMI_HPD_INT_STATUS) & BIT(1)) >> 1;
 
-		/*
-		 * Ack the current hpd interrupt and stop listening to
-		 * new hpd interrupt.
-		 */
-		DSS_REG_W(io, HDMI_HPD_INT_CTRL, BIT(0));
+		/* Ack the current hpd */
+		if (hdmi_ctrl->hpd_state) {
+			/*
+			 * Ack the interrupt and enable HPD interrupts
+			 * to make sure to get disconnect interrupt.
+			 */
+			DSS_REG_W(io, HDMI_HPD_INT_CTRL, BIT(0) | BIT(2));
+		} else {
+			/*
+			 * Ack the interrupt and enable HPD interrupts
+			 * to make sure to get connect interrupt.
+			 */
+			DSS_REG_W(io, HDMI_HPD_INT_CTRL,
+				BIT(0) | BIT(2) | BIT(1));
+		}
+
 		queue_work(hdmi_ctrl->workq, &hdmi_ctrl->hpd_int_work);
 	}
 
@@ -2683,7 +2723,12 @@ static int hdmi_tx_dev_init(struct hdmi_tx_ctrl *hdmi_ctrl)
 
 	hdmi_setup_video_mode_lut();
 	mutex_init(&hdmi_ctrl->mutex);
-	hdmi_ctrl->workq = create_workqueue("hdmi_tx_workq");
+	/*
+	 * "hdmi_tx_workq" create as single thread so that connect
+	 * processing and disconnect processing are not executed at the
+	 * same time.
+	 */
+	hdmi_ctrl->workq = create_singlethread_workqueue("hdmi_tx_workq");
 	if (!hdmi_ctrl->workq) {
 		DEV_ERR("%s: hdmi_tx_workq creation failed.\n", __func__);
 		rc = -EPERM;

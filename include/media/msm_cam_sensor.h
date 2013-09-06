@@ -180,9 +180,6 @@ struct msm_camera_i2c_reg_setting {
 	enum msm_camera_i2c_reg_addr_type addr_type;
 	enum msm_camera_i2c_data_type data_type;
 	uint16_t delay;
-/* extension begin */
-	uint16_t slave_addr;
-/* extension end */
 };
 
 struct msm_camera_i2c_seq_reg_array {
@@ -196,6 +193,9 @@ struct msm_camera_i2c_seq_reg_setting {
 	uint16_t size;
 	enum msm_camera_i2c_reg_addr_type addr_type;
 	uint16_t delay;
+/* extension begin */
+	uint16_t slave_addr;
+/* extension end */
 };
 
 struct msm_camera_i2c_array_write_config {
@@ -286,9 +286,6 @@ struct msm_sensor_init_params {
 	enum camb_position_t position;
 	/* sensor mount angle */
 	uint32_t            sensor_mount_angle;
-/* extension begin */
-	uint32_t private_sensor_mount_angle;
-/* extension end */
 };
 
 struct sensorb_cfg_data {
@@ -354,7 +351,7 @@ enum msm_sensor_cfg_type_t {
 	CFG_WRITE_I2C_ARRAY,
 	CFG_SLAVE_WRITE_I2C_ARRAY,
 /* extension begin */
-	CFG_WRITE_I2C_ARRAY_WITH_SID,
+	CFG_WRITE_I2C_SEQ_ARRAY_WITH_SID,
 /* extension end */
 	CFG_WRITE_I2C_SEQ_ARRAY,
 	CFG_POWER_UP,

@@ -62,6 +62,7 @@ struct cxd2235agg_data {
 	struct platform_device *pdev;
 	unsigned int gpios[ARRAY_SIZE(gpio_rsrcs)];
 	struct felica_data felica_data;
+	bool is_enable;
 };
 
 static int felica_cen_init(void *user)
@@ -200,10 +201,17 @@ static int felica_pon_init(void *user)
 	return 0;
 }
 
+static enum gpio_id second_req_ids[] = {
+	INTU_PIN,
+	RFS_PIN,
+	INT_PIN,
+};
+
 static void felica_pon_write(int val, void *user)
 {
-	static bool is_enable;
+	static bool pvdd_enable_oneshot;
 	struct cxd2235agg_data *my_data = user;
+	int i, ret;
 
 	if (!my_data)
 		return;
@@ -211,28 +219,64 @@ static void felica_pon_write(int val, void *user)
 	dev_dbg(&my_data->pdev->dev, ": %s: %d\n", __func__, val);
 
 	if (val) {
-		if (!is_enable) {
+		if (!pvdd_enable_oneshot && !my_data->is_enable) {
 			gpio_set_value_cansleep(my_data->gpios[PVDD_PIN], 1);
+			for (i = 0; i < ARRAY_SIZE(second_req_ids); i++) {
+				ret = gpio_request(
+					my_data->gpios[second_req_ids[i]],
+					gpio_rsrcs[second_req_ids[i]]);
+				if (ret) {
+					dev_err(&my_data->pdev->dev,
+						"%s: request err %s: %d\n",
+						__func__,
+						gpio_rsrcs[second_req_ids[i]],
+						ret);
+					goto error_gpio_second_request;
+				}
+			}
+			my_data->is_enable = true;
+			ret = felica_snfc_irq_start(&my_data->pdev->dev);
+			if (ret) {
+				dev_err(&my_data->pdev->dev,
+					"%s: irq_start err: %d\n", __func__,
+					ret);
+				goto error_irq_start;
+			}
 			cxd2235agg_setup_uart_gpio(my_data, 1);
-			is_enable = true;
+			pvdd_enable_oneshot = true;
 		}
 		gpio_set_value_cansleep(my_data->gpios[PON_PIN], 1);
 	} else {
 		gpio_set_value_cansleep(my_data->gpios[PON_PIN], 0);
 	}
+
+	return;
+
+error_irq_start:
+error_gpio_second_request:
+	for (; i >= 0; --i)
+		gpio_free(my_data->gpios[second_req_ids[i]]);
+	gpio_set_value_cansleep(my_data->gpios[PVDD_PIN], 0);
+	my_data->is_enable = false;
 }
 
 static void felica_pon_release(void *user)
 {
 	struct cxd2235agg_data *my_data = user;
+	int i;
 
 	if (!my_data)
 		return;
 
 	dev_dbg(&my_data->pdev->dev, ": %s\n", __func__);
 
-	gpio_set_value_cansleep(my_data->gpios[PON_PIN], 0);
-	gpio_set_value_cansleep(my_data->gpios[PVDD_PIN], 0);
+	if (my_data->is_enable) {
+		for (i = 0; i < ARRAY_SIZE(second_req_ids); i++)
+			gpio_free(my_data->gpios[second_req_ids[i]]);
+		gpio_set_value_cansleep(my_data->gpios[PON_PIN], 0);
+		gpio_set_value_cansleep(my_data->gpios[PVDD_PIN], 0);
+		my_data->is_enable = false;
+	}
 }
 
 static int felica_rfs_init(void *user)
@@ -253,6 +297,9 @@ static int felica_rfs_read(void *user)
 
 	if (!my_data)
 		return -EINVAL;
+
+	if (!my_data->is_enable)
+		return -EIO;
 
 	dev_dbg(&my_data->pdev->dev, ": %s\n", __func__);
 
@@ -288,6 +335,9 @@ static int felica_int_read(void *user)
 	if (!my_data)
 		return -EINVAL;
 
+	if (!my_data->is_enable)
+		return -EIO;
+
 	dev_dbg(&my_data->pdev->dev, ": %s\n", __func__);
 
 	return gpio_get_value(my_data->gpios[INT_PIN]);
@@ -320,6 +370,9 @@ static int nfc_intu_read(void *user)
 
 	if (!my_data)
 		return -EINVAL;
+
+	if (!my_data->is_enable)
+		return -EIO;
 
 	dev_dbg(&my_data->pdev->dev, ": %s\n", __func__);
 
@@ -442,10 +495,7 @@ static enum gpio_id req_ids[] = {
 	FF_PIN,
 	PON_PIN,
 	LDO_EN_PIN,
-	INTU_PIN,
 	HSEL_PIN,
-	RFS_PIN,
-	INT_PIN,
 	PVDD_PIN,
 	TX_PIN,
 	RX_PIN,
@@ -457,6 +507,8 @@ static int cxd2235agg_dev_init(struct platform_device *pdev,
 	int i, ret, gpio;
 	unsigned int flags;
 	struct device_node *of_node = pdev->dev.of_node;
+
+	my_data->is_enable = false;
 
 	for (i = 0; i < ARRAY_SIZE(gpio_rsrcs); i++) {
 		gpio = of_get_gpio_flags(of_node, i, &flags);
@@ -482,7 +534,7 @@ static int cxd2235agg_dev_init(struct platform_device *pdev,
 	return 0;
 
 error_gpio_request:
-	for (i--; 0 <= i; i--)
+	for (; i >= 0; --i)
 		gpio_free(my_data->gpios[req_ids[i]]);
 error_gpio:
 	return ret;

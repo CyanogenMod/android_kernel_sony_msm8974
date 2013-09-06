@@ -146,6 +146,7 @@ static struct dbs_tuners {
 	unsigned int sampling_down_factor;
 	int          powersave_bias;
 	unsigned int io_is_busy;
+	unsigned int block_inp_time;
 } dbs_tuners_ins = {
 	.up_threshold_multi_core = DEF_FREQUENCY_UP_THRESHOLD,
 	.up_threshold = DEF_FREQUENCY_UP_THRESHOLD,
@@ -158,7 +159,10 @@ static struct dbs_tuners {
 	.sync_freq = 0,
 	.freq_input_boost = INT_MAX,
 	.optimal_freq = 0,
+	.block_inp_time = 10,
 };
+
+struct timer_list inp_filter_timer;
 
 static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 {
@@ -323,6 +327,7 @@ show_one(optimal_freq, optimal_freq);
 show_one(up_threshold_any_cpu_load, up_threshold_any_cpu_load);
 show_one(sync_freq, sync_freq);
 show_one(freq_input_boost, freq_input_boost);
+show_one(block_inp_time, block_inp_time);
 
 static ssize_t show_powersave_bias
 (struct kobject *kobj, struct attribute *attr, char *buf)
@@ -434,6 +439,20 @@ static ssize_t store_io_is_busy(struct kobject *a, struct attribute *b,
 	if (ret != 1)
 		return -EINVAL;
 	dbs_tuners_ins.io_is_busy = !!input;
+	return count;
+}
+
+
+static ssize_t store_block_inp_time(struct kobject *a, struct attribute *b,
+					const char *buf, size_t count)
+{
+	unsigned int input;
+	int ret;
+
+	ret = sscanf(buf, "%u", &input);
+	if (ret != 1)
+		return -EINVAL;
+	dbs_tuners_ins.block_inp_time = input;
 	return count;
 }
 
@@ -696,6 +715,7 @@ define_one_global_rw(optimal_freq);
 define_one_global_rw(up_threshold_any_cpu_load);
 define_one_global_rw(sync_freq);
 define_one_global_rw(freq_input_boost);
+define_one_global_rw(block_inp_time);
 
 static struct attribute *dbs_attributes[] = {
 	&sampling_rate_min.attr,
@@ -711,6 +731,7 @@ static struct attribute *dbs_attributes[] = {
 	&up_threshold_any_cpu_load.attr,
 	&sync_freq.attr,
 	&freq_input_boost.attr,
+	&block_inp_time.attr,
 	NULL
 };
 
@@ -1173,10 +1194,28 @@ bail_acq_sema_failed:
 	return 0;
 }
 
+/*
+*	This is only a dummy function, but needed to compile
+*/
+static void cpufreq_ondemand_inp_filter_timer(unsigned long data)
+	{
+	}
+
 static void dbs_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
 	int i;
+
+	/*
+	*	If the timer is running discard input event
+	*	and prolong timer
+	*/
+	if (timer_pending(&inp_filter_timer) &&
+				dbs_tuners_ins.block_inp_time > 0) {
+		mod_timer(&inp_filter_timer,
+				jiffies + dbs_tuners_ins.block_inp_time);
+		return;
+	}
 
 	if ((dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MAXLEVEL) ||
 		(dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MINLEVEL)) {
@@ -1186,6 +1225,13 @@ static void dbs_input_event(struct input_handle *handle, unsigned int type,
 
 	for_each_online_cpu(i)
 		queue_work_on(i, dbs_wq, &per_cpu(dbs_refresh_work, i).work);
+
+	/*
+	*	Start a timer to filter input events
+	*/
+	if (dbs_tuners_ins.block_inp_time > 0)
+		mod_timer(&inp_filter_timer,
+				jiffies + dbs_tuners_ins.block_inp_time);
 }
 
 static int dbs_input_connect(struct input_handler *handler,
@@ -1363,6 +1409,8 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 
 		mutex_unlock(&dbs_mutex);
 
+		del_timer(&inp_filter_timer);
+
 		break;
 
 	case CPUFREQ_GOV_LIMITS:
@@ -1431,6 +1479,10 @@ static int __init cpufreq_gov_dbs_init(void)
 							 (void *)i,
 							 "dbs_sync/%d", i);
 	}
+
+	inp_filter_timer.data = 0;
+	init_timer(&inp_filter_timer);
+	inp_filter_timer.function = cpufreq_ondemand_inp_filter_timer;
 
 	return cpufreq_register_governor(&cpufreq_gov_ondemand);
 }

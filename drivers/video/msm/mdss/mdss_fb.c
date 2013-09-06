@@ -238,8 +238,8 @@ static void mdss_fb_shutdown(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
 
-	if (mfd->ref_cnt > 1)
-		mfd->ref_cnt = 1;
+	for (; mfd->ref_cnt > 1; mfd->ref_cnt--)
+		pm_runtime_put(mfd->fbi->dev);
 
 	mdss_fb_release(mfd->fbi, 0);
 }
@@ -343,7 +343,17 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	if (mfd->index == 0) {
 		panel_data = dev_get_platdata(&pdata->panel_pdev->dev);
 		if (panel_data) {
+			struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+
+			ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+			if (!ctrl) {
+				pr_err("%s: Invalid input data\n", __func__);
+				return -EINVAL;
+			}
 			if (panel_data->panel_detect) {
+				if (mfd->panel_info->type == MIPI_CMD_PANEL)
+					ctrl->spec_pdata->detected = true;
 				mdss_fb_blank_sub(FB_BLANK_UNBLANK, mfd->fbi,
 					mfd->op_enable);
 				if (pdata->detect)
@@ -355,16 +365,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 				if (pdata->update_panel)
 					pdata->update_panel(pdata);
 			} else {
-				struct mdss_dsi_ctrl_pdata *ctrl = NULL;
-
-				ctrl = container_of(pdata,
-					struct mdss_dsi_ctrl_pdata,
-					panel_data);
-				if (!ctrl) {
-					pr_err("%s: Invalid input data\n",
-						__func__);
-					return -EINVAL;
-				}
 				ctrl->spec_pdata->detected = true;
 			}
 		}
@@ -542,20 +542,6 @@ static int mdss_fb_pm_resume(struct device *dev)
 	return mdss_fb_resume_sub(mfd);
 }
 #endif
-
-static void mdss_fb_shutdown(struct platform_device *pdev)
-{
-	struct msm_fb_data_type *mfd =
-		(struct msm_fb_data_type *)platform_get_drvdata(pdev);
-
-	if (!mfd) {
-		printk(KERN_EMERG "mfd no data\n");
-		return;
-	}
-
-	if (mfd->index == 0)
-		mdss_fb_blank_sub(FB_BLANK_POWERDOWN, mfd->fbi, mfd->op_enable);
-}
 
 static const struct dev_pm_ops mdss_fb_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(mdss_fb_pm_suspend, mdss_fb_pm_resume)
@@ -1114,7 +1100,8 @@ static int mdss_fb_open(struct fb_info *info, int user)
 					   mfd->op_enable);
 		if (result) {
 			pm_runtime_put(info->dev);
-			pr_err("mdss_fb_open: can't turn on display!\n");
+			pr_err("can't turn on fb%d! rc=%d\n", mfd->index,
+				result);
 			return result;
 		}
 	}
@@ -1140,8 +1127,7 @@ static int mdss_fb_release(struct fb_info *info, int user)
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 				       mfd->op_enable);
 		if (ret) {
-			pr_err("can't turn off display attached to fb%d!\n",
-				mfd->index);
+			pr_err("can't turn off fb%d! rc=%d\n", mfd->index, ret);
 			return ret;
 		}
 	}

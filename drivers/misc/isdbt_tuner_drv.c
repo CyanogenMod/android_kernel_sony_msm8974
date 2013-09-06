@@ -34,6 +34,8 @@
  *                002 modified
  *              : 2013/04/10    T.Ooka(*)
  *                003 modified for SOMC platform
+ *              : 2013/07/01    T.Ooka(*)
+ *                004 fix power leakages from GPIOs
  ******************************************************************************/
 #include <asm/irq.h>
 #include <linux/cdev.h>
@@ -67,7 +69,6 @@
 #define D_TUNER_CONFIG_SYSFS_DEV_NAME       "mmtuner_pdev"
 #define D_TUNER_CONFIG_CLASS_NAME           "mmtuner"
 #define D_TUNER_CONFIG_MATCH_TABLE          "sony,ej113"
-#define D_TUNER_CONFIG_INT_NAME             "ISDB-T INT"
 
 #define D_TUNER_CONFIG_DRV_MAJOR             100
 #define D_TUNER_CONFIG_DRV_MINOR             200
@@ -192,6 +193,11 @@ static int tunerpm_dev_init(struct platform_device *pdev,
 		if (ret)
 			goto error_gpio_request;
 	}
+
+	isdbt_tunerpm_power_control(drvdata, 0);
+	isdbt_tunerpm_reset_control(drvdata, 0);
+	isdbt_tunerpm_ant_switch_control(drvdata, 0);
+
 	return 0;
 
 error_gpio_request:
@@ -278,9 +284,6 @@ irqreturn_t tuner_interrupt(int irq, void *dev_id)
 static int tuner_drv_set_interrupt(int int_num)
 {
 	int ret;
-	ret = gpio_request(int_num, D_TUNER_CONFIG_INT_NAME);
-	if (ret)
-		return ret;
 
 	tnr_dev.irq_num = gpio_to_irq(int_num);
 	ret = request_threaded_irq(tnr_dev.irq_num, tuner_interrupt,
@@ -292,10 +295,9 @@ static int tuner_drv_set_interrupt(int int_num)
 	return 0;
 }
 
-static void tuner_drv_release_interrupt(int int_num)
+static void tuner_drv_release_interrupt(void)
 {
 	free_irq(tnr_dev.irq_num, NULL);
-	gpio_free(int_num);
 }
 
 static ssize_t tuner_module_power_ctrl(struct device *dev,
@@ -353,7 +355,7 @@ static ssize_t tuner_module_irq_ctrl(struct device *dev,
 		if (tuner_drv_set_interrupt(drvdata->gpios[TUNER_INT_PIN]))
 			return -EINVAL;
 	} else {
-		tuner_drv_release_interrupt(drvdata->gpios[TUNER_INT_PIN]);
+		tuner_drv_release_interrupt();
 		tnr_dev.irq_flag = TUNER_DRV_IRQ_NOT_DETECTED;
 	}
 
@@ -480,8 +482,12 @@ static int tuner_probe(struct platform_device *pdev)
 		D_TUNER_POWER_CHECK_WAIT_RANGE_US);
 	tuner_drv_ctl_power(drvdata, TUNER_DRV_CTL_POWOFF);
 
+	if (tuner_drv_set_interrupt(drvdata->gpios[TUNER_INT_PIN]))
+		goto err_irq_set;
+
 	return 0;
 
+err_irq_set:
 err_check_power:
 err_create_file:
 err_gpio_init:
@@ -499,6 +505,7 @@ static int __devexit tuner_remove(struct platform_device *pdev)
 	struct tuner_drvdata *drvdata = dev_get_drvdata(&pdev->dev);
 
 	tunerpm_dev_finalize(drvdata);
+	tuner_drv_release_interrupt();
 	i2c_put_adapter(drvdata->adap);
 	unregister_chrdev(D_TUNER_CONFIG_DRV_MAJOR,
 		D_TUNER_CONFIG_DRIVER_NAME);

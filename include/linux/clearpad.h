@@ -92,6 +92,10 @@ struct clearpad_bus_data {
 struct clearpad_data {
 	struct clearpad_platform_data *pdata;
 	struct clearpad_bus_data *bdata;
+	int probe_retry;
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
+	struct platform_device *rmi_dev;
+#endif
 };
 
 #endif

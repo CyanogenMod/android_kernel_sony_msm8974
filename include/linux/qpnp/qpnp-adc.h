@@ -1333,6 +1333,11 @@ int32_t qpnp_vadc_iadc_sync_complete_request(
  * @result:	Voltage in uV that needs compensation.
  */
 int32_t qpnp_vbat_sns_comp_result(int64_t *result);
+/**
+ * qpnp_adc_therm_table_sel() - select of thermistor table
+ * @val:	0: use new table	1: use old table
+ */
+void qpnp_adc_therm_table_sel(bool val);
 #else
 static inline int32_t qpnp_vadc_read(uint32_t channel,
 				struct qpnp_vadc_result *result)

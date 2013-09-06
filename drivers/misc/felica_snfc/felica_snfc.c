@@ -532,7 +532,6 @@ static irqreturn_t felica_int_irq(int irq, void *user)
 static int felica_int_probe_func(struct felica_dev *d)
 {
 	int ret;
-	int state;
 
 	dev_dbg(d->dev, "%s\n", __func__);
 
@@ -561,9 +560,26 @@ static int felica_int_probe_func(struct felica_dev *d)
 		goto err_create_switch_dev;
 	}
 
+	/* Set initial state */
+	switch_set_state(&d->swdev, 0);
+
+	return 0;
+
+err_create_switch_dev:
+	d->felica_data->flint->int_release(d->felica_data->user);
+err_request_int_gpio:
+err_invalid:
+	return ret;
+}
+
+static int felica_int_irq_start(struct felica_dev *d)
+{
+	int ret, state;
+
 	/* Read INT GPIO */
 	state = d->felica_data->flint->int_read(d->felica_data->user);
 	if (0 > state) {
+		dev_err(d->dev, "%s: Error. Read INT.\n", __func__);
 		ret = -EIO;
 		goto err_read_state;
 	}
@@ -596,11 +612,6 @@ err_enable_irq_wake:
 	free_irq(d->felica_data->irq_int, d);
 err_request_int_irq:
 err_read_state:
-	switch_dev_unregister(&d->swdev);
-err_create_switch_dev:
-	d->felica_data->flint->int_release(d->felica_data->user);
-err_request_int_gpio:
-err_invalid:
 	return ret;
 }
 
@@ -615,7 +626,7 @@ static void felica_int_remove_func(struct felica_dev *d)
 	dev_dbg(d->dev, "%s\n", __func__);
 
 	switch_dev_unregister(&d->swdev);
-	if (!(d->irq_shutdown))
+	if (!d->irq_shutdown)
 		felica_int_irq_shutdown(d);
 	d->felica_data->flint->int_release(d->felica_data->user);
 }
@@ -843,6 +854,27 @@ static int felica_rfs_probe_func(struct felica_dev *d)
 		goto err_request_rfs_gpio;
 	}
 
+	/* Create RFS character device (/dev/felica_rfs) */
+	if (misc_register(&d->device_rfs)) {
+		dev_err(d->dev, "%s: Error. Cannot register RFS.\n",
+				__func__);
+		ret = -ENODEV;
+		goto err_create_rfs_dev;
+	}
+
+	return 0;
+
+err_create_rfs_dev:
+	d->felica_data->flrfs->rfs_release(d->felica_data->user);
+err_request_rfs_gpio:
+err_invalid:
+	return ret;
+}
+
+static int felica_rfs_irq_start(struct felica_dev *d)
+{
+	int ret;
+
 	if (FELICA_SNFC == d->felica_data->type) {
 		ret = request_threaded_irq(d->felica_data->irq_rfs, NULL,
 			nfc_rfs_irq,
@@ -865,26 +897,12 @@ static int felica_rfs_probe_func(struct felica_dev *d)
 		}
 	}
 
-	/* Create RFS character device (/dev/felica_rfs) */
-	if (misc_register(&d->device_rfs)) {
-		dev_err(d->dev, "%s: Error. Cannot register RFS.\n",
-				__func__);
-		ret = -ENODEV;
-		goto err_create_rfs_dev;
-	}
-
 	return 0;
 
-err_create_rfs_dev:
-	if (FELICA_SNFC == d->felica_data->type)
-		disable_irq_wake(d->felica_data->irq_rfs);
 err_enable_irq_wake:
 	if (FELICA_SNFC == d->felica_data->type)
 		free_irq(d->felica_data->irq_rfs, d);
 err_request_irq:
-	d->felica_data->flrfs->rfs_release(d->felica_data->user);
-err_request_rfs_gpio:
-err_invalid:
 	return ret;
 }
 
@@ -901,7 +919,7 @@ static void felica_rfs_remove_func(struct felica_dev *d)
 	dev_dbg(d->dev, "%s\n", __func__);
 
 	misc_deregister(&d->device_rfs);
-	if (!(d->irq_shutdown))
+	if (!d->irq_shutdown)
 		felica_rfs_irq_shutdown(d);
 	d->felica_data->flrfs->rfs_release(d->felica_data->user);
 }
@@ -1271,6 +1289,27 @@ static int nfc_intu_poll_probe_func(struct felica_dev *d)
 				__func__);
 		goto err_init_intu_gpio;
 	}
+
+	if (misc_register(&d->device_intu_poll)) {
+		dev_err(d->dev, "%s: Error. Cannot register NFC INTU POLL.\n",
+			__func__);
+		goto err_register;
+	}
+
+	return 0;
+
+err_register:
+	d->felica_data->flintu->intu_release(d->felica_data->user);
+err_init_intu_gpio:
+err_invalid:
+	return ret;
+}
+
+static int nfc_intu_poll_irq_start(struct felica_dev *d)
+{
+
+	int ret;
+
 	d->intu_curr_val =
 		d->felica_data->flintu->intu_read(d->felica_data->user);
 
@@ -1293,22 +1332,11 @@ static int nfc_intu_poll_probe_func(struct felica_dev *d)
 		goto err_enable_irq_wake;
 	}
 
-	if (misc_register(&d->device_intu_poll)) {
-		dev_err(d->dev, "%s: Error. Cannot register NFC INTU POLL.\n",
-			__func__);
-		goto err_register;
-	}
-
 	return 0;
 
-err_register:
-	disable_irq_wake(d->felica_data->irq_intu);
 err_enable_irq_wake:
 	free_irq(d->felica_data->irq_intu, d);
 err_request_irq:
-	d->felica_data->flintu->intu_release(d->felica_data->user);
-err_init_intu_gpio:
-err_invalid:
 	return ret;
 }
 
@@ -1323,7 +1351,7 @@ static void nfc_intu_poll_remove_func(struct felica_dev *d)
 	dev_dbg(d->dev, "%s\n", __func__);
 
 	misc_deregister(&d->device_intu_poll);
-	if (!(d->irq_shutdown))
+	if (!d->irq_shutdown)
 		nfc_intu_poll_irq_shutdown(d);
 	d->felica_data->flintu->intu_release(d->felica_data->user);
 }
@@ -1519,7 +1547,7 @@ int felica_snfc_register(struct device *dev, struct felica_data *felica_data)
 		goto err_alloc;
 	}
 	d->felica_data = felica_data;
-	d->irq_shutdown = false;
+	d->irq_shutdown = true;
 
 	d->device_cen.minor = MISC_DYNAMIC_MINOR;
 	d->device_cen.name = "felica_cen";
@@ -1683,6 +1711,51 @@ int felica_snfc_unregister(struct device *dev)
 }
 EXPORT_SYMBOL(felica_snfc_unregister);
 
+int felica_snfc_irq_start(struct device *dev)
+{
+	int ret;
+	struct felica_dev *d = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+
+	if (!dev || !reg_device || reg_device != dev)
+		return -EINVAL;
+
+	if (d->irq_shutdown) {
+		ret = felica_int_irq_start(d);
+		if (ret) {
+			dev_err(dev, "%s: failed to start INT irq.\n",
+				__func__);
+			goto err_int_irq;
+		}
+		if (FELICA_SNFC == d->felica_data->type) {
+			ret = nfc_intu_poll_irq_start(d);
+			if (ret) {
+				dev_err(dev, "%s: failed to start INTU irq.\n",
+					__func__);
+				goto err_intu_irq;
+			}
+		}
+		ret = felica_rfs_irq_start(d);
+		if (ret) {
+			dev_err(dev, "%s: failed to start RFS irq.\n",
+				__func__);
+			goto err_rfs_irq;
+		}
+		d->irq_shutdown = false;
+	}
+	return 0;
+
+err_rfs_irq:
+	if (FELICA_SNFC == d->felica_data->type)
+		nfc_intu_poll_irq_shutdown(d);
+err_intu_irq:
+	felica_int_irq_shutdown(d);
+err_int_irq:
+	return ret;
+}
+EXPORT_SYMBOL(felica_snfc_irq_start);
+
 int felica_snfc_irq_shutdown(struct device *dev)
 {
 	struct felica_dev *d = dev_get_drvdata(dev);
@@ -1692,7 +1765,7 @@ int felica_snfc_irq_shutdown(struct device *dev)
 	if (!dev || !reg_device || reg_device != dev)
 		return -EINVAL;
 
-	if (!(d->irq_shutdown)) {
+	if (!d->irq_shutdown) {
 		felica_int_irq_shutdown(d);
 		if (FELICA_SNFC == d->felica_data->type)
 			nfc_intu_poll_irq_shutdown(d);

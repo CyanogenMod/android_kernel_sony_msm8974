@@ -154,11 +154,18 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 {
 	struct rmidev_data *data = filp->private_data;
 	ssize_t retval  = 0;
-	unsigned char tmpbuf[count+1];
+	unsigned char tmpbuf[RMI_CHAR_DEV_TMPBUF_SZ];
+
+	if (*f_pos > REG_ADDR_LIMIT) {
+		retval = -EINVAL;
+		goto exit;
+	}
 
 	/* limit offset to REG_ADDR_LIMIT-1 */
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
+	if (count > RMI_CHAR_DEV_TMPBUF_SZ)
+		count = RMI_CHAR_DEV_TMPBUF_SZ;
 
 	if (count == 0)
 		goto exit;
@@ -204,11 +211,18 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 {
 	struct rmidev_data *data = filp->private_data;
 	ssize_t retval  = 0;
-	unsigned char tmpbuf[count+1];
+	unsigned char tmpbuf[RMI_CHAR_DEV_TMPBUF_SZ];
+
+	if (*f_pos > REG_ADDR_LIMIT) {
+		retval = -EINVAL;
+		goto exit;
+	}
 
 	/* limit offset to REG_ADDR_LIMIT-1 */
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
+	if (count > RMI_CHAR_DEV_TMPBUF_SZ)
+		count = RMI_CHAR_DEV_TMPBUF_SZ;
 
 	if (count == 0)
 		goto exit;

@@ -36,6 +36,7 @@ struct sony_camera_module {
 	struct sony_camera_seq	*seq_on;
 	struct sony_camera_seq	*seq_off;
 	uint32_t		mount_angle;
+	uint32_t		sensor_rotation;
 };
 
 struct sony_camera_info {

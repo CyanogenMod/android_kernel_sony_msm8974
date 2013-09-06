@@ -83,6 +83,7 @@ struct felica_data {
 	unsigned int irq_intu;
 };
 
+int felica_snfc_irq_start(struct device *dev);
 int felica_snfc_irq_shutdown(struct device *dev);
 int felica_snfc_unregister(struct device *dev);
 int felica_snfc_register(struct device *dev, struct felica_data *felica_data);

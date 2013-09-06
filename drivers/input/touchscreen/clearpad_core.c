@@ -54,6 +54,7 @@
 #define SYNAPTICS_MAX_INTERRUPT_SOURCE_COUNT	0x7
 #define SYNAPTICS_STRING_LENGTH			128
 #define SYNAPTICS_RETRY_NUM_OF_INITIAL_CHECK	2
+#define SYNAPTICS_RETRY_NUM_OF_PROBE_CHECK	3
 #define SYNAPTICS_FINGER_OFF(n, x, s) \
 	((((n) / 4) + !!(n % 4)) + (s) * (x))
 #define SYNAPTICS_REG_MAX \
@@ -417,6 +418,7 @@ struct synaptics_clearpad {
 	struct regulator *vreg_touch_vdd;
 	struct regulator *vreg_touch_vio;
 	struct input_dev *input;
+	struct input_dev *input_pen;
 	struct platform_device *pdev;
 	struct clearpad_platform_data *pdata;
 	struct clearpad_bus_data *bdata;
@@ -428,9 +430,6 @@ struct synaptics_clearpad {
 	struct synaptics_flash_image flash;
 	struct synaptics_easy_wakeup_config easy_wakeup_config;
 	struct evgen_block *evgen_blocks;
-#ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
-	struct platform_device *rmi_dev;
-#endif
 	bool fwdata_available;
 	enum synaptics_flash_modes flash_mode;
 	struct synaptics_extents extents;
@@ -439,6 +438,9 @@ struct synaptics_clearpad {
 	int irq_mask;
 #ifdef CONFIG_FB
 	struct notifier_block fb_notif;
+	bool pm_suspended;
+	struct work_struct notify_resume;
+	struct work_struct notify_suspend;
 #endif
 	char fwname[SYNAPTICS_STRING_LENGTH + 1];
 	char result_info[SYNAPTICS_STRING_LENGTH + 1];
@@ -457,6 +459,7 @@ struct synaptics_clearpad {
 	bool dev_busy;
 	bool irq_pending;
 	u8 default_reporting_mode;
+	u32 por_delay_after;
 };
 
 static void synaptics_funcarea_initialize(struct synaptics_clearpad *this);
@@ -729,7 +732,7 @@ static int synaptics_clearpad_set_pen(struct synaptics_clearpad *this)
 			dev_warn(&this->pdev->dev, "pen is not supported\n");
 		}
 	} else if (this->chip == SYN_CHIP_3400) {
-		rc = synaptics_put_bit(this, SYNF(F12_2D, CTRL, 0x08),
+		rc = synaptics_put_bit(this, SYNF(F12_2D, CTRL, 0x07),
 				this->pen_enabled ?
 				PEN_DETECT_F12_INTERRUPT :
 				PEN_DETECT_INT_DISABLE,
@@ -1806,15 +1809,13 @@ static int synaptics_clearpad_set_power(struct synaptics_clearpad *this)
 	int rc = 0;
 	int active;
 	bool should_wake;
-	int users;
 
 	LOCK(this);
 	active = this->active;
-	users = this->input ? this->input->users : 0;
 
 	LOG_STAT(this, "powered %d, users %d, standby %d\n",
 		 !!(active & SYN_ACTIVE_POWER),
-		 users,
+		 this->input->users + this->input_pen->users,
 		 !!(active & SYN_STANDBY));
 
 	dev_info(&this->pdev->dev, "%s: state=%s\n", __func__,
@@ -1847,19 +1848,18 @@ static void synaptics_clearpad_reset_power(struct synaptics_clearpad *this)
 
 	dev_info(&this->pdev->dev, "power on reset\n");
 
+	spin_lock_irqsave(&this->slock, flags);
+	this->dev_busy = false;
+	this->irq_pending = false;
+	spin_unlock_irqrestore(&this->slock, flags);
+
 	if (clearpad_vreg_reset(this)) {
 		dev_err(&this->pdev->dev, "vreg reset failed\n");
 	} else {
 		this->page_num = 0;
-
-		spin_lock_irqsave(&this->slock, flags);
-		this->dev_busy = false;
-		this->irq_pending = false;
-		spin_unlock_irqrestore(&this->slock, flags);
-
 		synaptics_clearpad_set_irq(this,
 			this->pdt[SYN_F01_RMI].irq_mask, true);
-		msleep(300);
+		msleep(this->por_delay_after);
 	}
 }
 
@@ -1956,8 +1956,29 @@ static void synaptics_funcarea_initialize(struct synaptics_clearpad *this)
 					0, SYNAPTICS_MAX_W_VALUE + 1, 0, 0);
 			input_set_abs_params(this->input, ABS_MT_ORIENTATION,
 					-1, 1, 0, 0);
-			input_set_abs_params(this->input,
-					ABS_MT_TOOL_TYPE, 0, MT_TOOL_MAX, 0, 0);
+			input_set_abs_params(this->input, ABS_MT_TOOL_TYPE,
+					MT_TOOL_FINGER, MT_TOOL_FINGER, 0, 0);
+
+			input_mt_init_slots(this->input_pen,
+						this->extents.n_fingers);
+			input_set_abs_params(this->input_pen, ABS_MT_POSITION_X,
+					     pointer_area.x1,
+					     pointer_area.x2, 0, 0);
+			input_set_abs_params(this->input_pen, ABS_MT_POSITION_Y,
+					     pointer_area.y1,
+					     pointer_area.y2, 0, 0);
+			input_set_abs_params(this->input_pen, ABS_MT_PRESSURE,
+					0, SYNAPTICS_MAX_Z_VALUE, 0, 0);
+			input_set_abs_params(this->input_pen,
+					ABS_MT_TOUCH_MAJOR, 0,
+					SYNAPTICS_MAX_W_VALUE + 1, 0, 0);
+			input_set_abs_params(this->input_pen,
+					ABS_MT_TOUCH_MINOR, 0,
+					SYNAPTICS_MAX_W_VALUE + 1, 0, 0);
+			input_set_abs_params(this->input_pen,
+					ABS_MT_ORIENTATION, -1, 1, 0, 0);
+			input_set_abs_params(this->input_pen, ABS_MT_TOOL_TYPE,
+					0, MT_TOOL_PEN, 0, 0);
 			break;
 		case SYN_FUNCAREA_BUTTON:
 			button = (struct synaptics_button_data *)funcarea->data;
@@ -2031,6 +2052,8 @@ static void synaptics_funcarea_down(struct synaptics_clearpad *this,
 	struct synaptics_button_data *button;
 	struct synaptics_pointer_data *pointer_data;
 	struct synaptics_point *cur = &pointer->cur;
+	struct input_dev *idev;
+	bool valid;
 
 	switch (pointer->funcarea->func) {
 	case SYN_FUNCAREA_INSENSIBLE:
@@ -2045,22 +2068,29 @@ static void synaptics_funcarea_down(struct synaptics_clearpad *this,
 			cur->x -= pointer_data->offset_x;
 			cur->y -= pointer_data->offset_y;
 		}
-		if (cur->tool == SYN_TOOL_FINGER)
+		if (cur->tool == SYN_TOOL_FINGER) {
 			cur->tool = MT_TOOL_FINGER;
-		else
+			idev = this->input;
+		} else {
 			cur->tool = MT_TOOL_PEN;
-		LOG_EVENT(this, "pt[%d]: (x,y)=(%d,%d) w=(%d,%d) z=%d t=%d\n",
-		cur->id, cur->x, cur->y, cur->wx, cur->wy, cur->z, cur->tool);
+			idev = this->input_pen;
+		}
+		valid = idev->users > 0;
+		LOG_EVENT(this, "%s[%d]: (x,y)=(%d,%d) w=(%d,%d) z=%d t=%d\n",
+			  valid ? "pt" : "unused pt", cur->id, cur->x, cur->y,
+			  cur->wx, cur->wy, cur->z, cur->tool);
+		if (!valid)
+			break;
 		touch_major = max(cur->wx, cur->wy) + 1;
 		touch_minor = min(cur->wx, cur->wy) + 1;
-		input_mt_slot(this->input, cur->id);
-		input_mt_report_slot_state(this->input, cur->tool, true);
-		input_report_abs(this->input, ABS_MT_POSITION_X, cur->x);
-		input_report_abs(this->input, ABS_MT_POSITION_Y, cur->y);
-		input_report_abs(this->input, ABS_MT_PRESSURE, cur->z);
-		input_report_abs(this->input, ABS_MT_TOUCH_MAJOR, touch_major);
-		input_report_abs(this->input, ABS_MT_TOUCH_MINOR, touch_minor);
-		input_report_abs(this->input, ABS_MT_ORIENTATION,
+		input_mt_slot(idev, cur->id);
+		input_mt_report_slot_state(idev, cur->tool, true);
+		input_report_abs(idev, ABS_MT_POSITION_X, cur->x);
+		input_report_abs(idev, ABS_MT_POSITION_Y, cur->y);
+		input_report_abs(idev, ABS_MT_PRESSURE, cur->z);
+		input_report_abs(idev, ABS_MT_TOUCH_MAJOR, touch_major);
+		input_report_abs(idev, ABS_MT_TOUCH_MINOR, touch_minor);
+		input_report_abs(idev, ABS_MT_ORIENTATION,
 				 (cur->wx > cur->wy));
 		break;
 	case SYN_FUNCAREA_BUTTON:
@@ -2079,16 +2109,25 @@ static void synaptics_funcarea_up(struct synaptics_clearpad *this,
 				  struct synaptics_pointer *pointer)
 {
 	struct synaptics_button_data *button;
+	struct input_dev *idev;
+	struct synaptics_point *cur = &pointer->cur;
+	bool valid;
 
 	switch (pointer->funcarea->func) {
 	case SYN_FUNCAREA_INSENSIBLE:
 		LOG_EVENT(this, "insensible up\n");
 		break;
 	case SYN_FUNCAREA_POINTER:
-		LOG_EVENT(this, "pointer up\n");
-		input_mt_slot(this->input, pointer->cur.id);
-		input_mt_report_slot_state(this->input,
-				pointer->cur.tool, false);
+		if (cur->tool == MT_TOOL_FINGER)
+			idev = this->input;
+		else
+			idev = this->input_pen;
+		valid = idev->users > 0;
+		LOG_EVENT(this, "%s up\n", valid ? "pt" : "unused pt");
+		if (!valid)
+			break;
+		input_mt_slot(idev, pointer->cur.id);
+		input_mt_report_slot_state(idev, pointer->cur.tool, false);
 		break;
 	case SYN_FUNCAREA_BUTTON:
 		LOG_EVENT(this, "button up\n");
@@ -2126,17 +2165,23 @@ static void synaptics_funcarea_out(struct synaptics_clearpad *this,
 static void synaptics_report_button(struct synaptics_clearpad *this,
 		struct synaptics_button_data *button)
 {
+	bool valid = this->input->users > 0;
+
 	if (button->down) {
 		if (!button->down_report) {
 			button->down_report = true;
-			input_report_key(this->input, button->code, 1);
-			LOG_EVENT(this, "key(%d): down\n", button->code);
+			if (valid)
+				input_report_key(this->input, button->code, 1);
+			LOG_EVENT(this, "%s(%d): down\n",
+				  valid ? "key" : "unused key", button->code);
 		}
 	} else {
 		if (button->down_report) {
 			button->down_report = false;
-			input_report_key(this->input, button->code, 0);
-			LOG_EVENT(this, "key(%d): up\n", button->code);
+			if (valid)
+				input_report_key(this->input, button->code, 0);
+			LOG_EVENT(this, "%s(%d): up\n",
+				  valid ? "key" : "unused key", button->code);
 		}
 	}
 }
@@ -2174,7 +2219,10 @@ static void synaptics_funcarea_invalidate_all(struct synaptics_clearpad *this)
 			synaptics_funcarea_up(this, pointer);
 	}
 	synaptics_funcarea_report_extra_events(this);
-	input_sync(this->input);
+	if (this->input->users)
+		input_sync(this->input);
+	if (this->input_pen->users)
+		input_sync(this->input_pen);
 }
 
 static void synaptics_parse_finger_n_f11(struct synaptics_clearpad *this,
@@ -2495,7 +2543,10 @@ static int synaptics_clearpad_process_F11_2D(struct synaptics_clearpad *this)
 		synaptics_report_finger_n(this, this->reg_buf, i);
 
 	synaptics_funcarea_report_extra_events(this);
-	input_sync(this->input);
+	if (this->input->users)
+		input_sync(this->input);
+	if (this->input_pen->users)
+		input_sync(this->input_pen);
 exit:
 	return rc;
 }
@@ -2507,12 +2558,15 @@ static int synaptics_clearpad_process_F12_2D(struct synaptics_clearpad *this)
 	rc = synaptics_clearpad_read_fingers_f12(this);
 	if (rc)
 		goto exit;
-	input_sync(this->input);
+	if (this->input->users)
+		input_sync(this->input);
+	if (this->input_pen->users)
+		input_sync(this->input_pen);
 exit:
 	return rc;
 }
 
-static void synaptics_clearpad_process_irq(struct synaptics_clearpad *this)
+static int synaptics_clearpad_process_irq(struct synaptics_clearpad *this)
 {
 	int rc;
 	u8 interrupt;
@@ -2562,15 +2616,20 @@ static void synaptics_clearpad_process_irq(struct synaptics_clearpad *this)
 		goto unlock;
 	}
 
+	rc = 0;
+
 	dev_info(&this->pdev->dev, "no work, interrupt=[0x%02x]\n", interrupt);
 unlock:
-	if (rc)
+	if (rc) {
+		dev_err(&this->pdev->dev, "%s: error %d\n", __func__, rc);
 		synaptics_clearpad_reset_power(this);
+	}
 
 	UNLOCK(this);
 
 	if (this->pdata->watchdog_enable)
 		synaptics_clearpad_wd_update(this, false);
+	return rc;
 }
 
 static irqreturn_t synaptics_clearpad_threaded_handler(int irq, void *dev_id)
@@ -2580,7 +2639,7 @@ static irqreturn_t synaptics_clearpad_threaded_handler(int irq, void *dev_id)
 	unsigned long flags;
 
 	do {
-		synaptics_clearpad_process_irq(this);
+		(void)synaptics_clearpad_process_irq(this);
 
 		spin_lock_irqsave(&this->slock, flags);
 		if (likely(!this->irq_pending)) {
@@ -3158,41 +3217,45 @@ static void clearpad_touch_config_dt(struct synaptics_clearpad *this)
 	if (of_property_read_u32(devnode, "preset_n_bytes_per_object",
 		&this->extents.n_bytes_per_object))
 		dev_warn(&this->pdev->dev, "no n_bytes_per_object config\n");
+
+	if (of_property_read_u32(devnode, "por_delay_after",
+		&this->por_delay_after))
+		dev_warn(&this->pdev->dev, "no por_delay_after config\n");
 }
 
-static int synaptics_clearpad_input_init(struct synaptics_clearpad *this)
+static int synaptics_clearpad_input_init(struct synaptics_clearpad *this,
+					struct input_dev *idev)
 {
 	int rc;
 
-	this->input = input_allocate_device();
-	if (!this->input) {
-		rc = -ENOMEM;
-		goto exit;
-	}
+	set_bit(EV_ABS, idev->evbit);
 
-	input_set_drvdata(this->input, this);
-
-	this->input->open = synaptics_clearpad_device_open;
-	this->input->close = synaptics_clearpad_device_close;
-	this->input->name = CLEARPAD_NAME;
-	this->input->id.vendor = SYNAPTICS_CLEARPAD_VENDOR;
-	this->input->id.product = 1;
-	this->input->id.version = 1;
-	this->input->id.bustype = this->bdata->bustype;
-	set_bit(EV_ABS, this->input->evbit);
-
-	set_bit(ABS_MT_TRACKING_ID, this->input->absbit);
-	set_bit(ABS_MT_ORIENTATION, this->input->absbit);
-	set_bit(ABS_MT_PRESSURE, this->input->absbit);
-	set_bit(ABS_MT_TOUCH_MAJOR, this->input->absbit);
-	set_bit(ABS_MT_TOUCH_MINOR, this->input->absbit);
-	set_bit(ABS_MT_TOOL_TYPE, this->input->absbit);
+	set_bit(ABS_MT_TRACKING_ID, idev->absbit);
+	set_bit(ABS_MT_ORIENTATION, idev->absbit);
+	set_bit(ABS_MT_PRESSURE, idev->absbit);
+	set_bit(ABS_MT_TOUCH_MAJOR, idev->absbit);
+	set_bit(ABS_MT_TOUCH_MINOR, idev->absbit);
+	set_bit(ABS_MT_TOOL_TYPE, idev->absbit);
 
 	dev_info(&this->pdev->dev, "Touch area [%d, %d, %d, %d]\n",
 		 this->extents.x_min, this->extents.y_min,
 		 this->extents.x_max, this->extents.y_max);
 
-	synaptics_funcarea_initialize(this);
+	rc = input_register_device(idev);
+	if (rc) {
+		dev_err(&this->pdev->dev,
+		       "failed to register device\n");
+		input_set_drvdata(idev, NULL);
+		goto exit;
+	}
+
+exit:
+	return rc;
+}
+
+static int synaptics_clearpad_input_ev_init(struct synaptics_clearpad *this)
+{
+	int rc = 0;
 
 	this->evgen_blocks = clearpad_evgen_block_get(
 		this->device_info.customer_family,
@@ -3201,15 +3264,6 @@ static int synaptics_clearpad_input_init(struct synaptics_clearpad *this)
 		 this->evgen_blocks ? "used" : "null");
 	evgen_initialize(this->input, this->evgen_blocks);
 
-	rc = input_register_device(this->input);
-	if (rc) {
-		dev_err(&this->pdev->dev,
-		       "failed to register device\n");
-		input_set_drvdata(this->input, NULL);
-		input_free_device(this->input);
-		goto exit;
-	}
-
 	if (this->evgen_blocks) {
 		rc = device_create_file(&this->input->dev,
 				&clearpad_wakeup_gesture_attr);
@@ -3217,7 +3271,7 @@ static int synaptics_clearpad_input_init(struct synaptics_clearpad *this)
 			dev_err(&this->pdev->dev,
 				"sysfs_create_file failed: %d\n", rc);
 	}
-exit:
+
 	return rc;
 }
 
@@ -3236,6 +3290,9 @@ static int synaptics_clearpad_suspend(struct device *dev)
 
 	LOG_STAT(this, "active: %x (task: %s)\n",
 		 this->active, task_name[this->task]);
+#ifdef CONFIG_FB
+	this->pm_suspended = true;
+#endif
 	UNLOCK(this);
 
 	rc = synaptics_clearpad_set_power(this);
@@ -3257,6 +3314,9 @@ static int synaptics_clearpad_resume(struct device *dev)
 		 this->active, task_name[this->task]);
 
 	synaptics_funcarea_invalidate_all(this);
+#ifdef CONFIG_FB
+	this->pm_suspended = false;
+#endif
 	UNLOCK(this);
 
 	rc = synaptics_clearpad_set_power(this);
@@ -3267,9 +3327,8 @@ static int synaptics_clearpad_pm_suspend(struct device *dev)
 {
 	struct synaptics_clearpad *this = dev_get_drvdata(dev);
 	unsigned long flags;
-#ifndef CONFIG_FB
 	int rc = 0;
-#endif
+
 	spin_lock_irqsave(&this->slock, flags);
 	if (unlikely(this->dev_busy)) {
 		dev_info(dev, "Busy to suspend\n");
@@ -3279,11 +3338,13 @@ static int synaptics_clearpad_pm_suspend(struct device *dev)
 	this->dev_busy = true;
 	spin_unlock_irqrestore(&this->slock, flags);
 
-#ifndef CONFIG_FB
-	rc = synaptics_clearpad_suspend(&this->pdev->dev);
+#ifdef CONFIG_FB
+	if (!this->pm_suspended)
+#endif
+		rc = synaptics_clearpad_suspend(&this->pdev->dev);
 	if (rc)
 		return rc;
-#endif
+
 	if (device_may_wakeup(dev)) {
 		enable_irq_wake(this->irq);
 		dev_info(&this->pdev->dev, "enable irq wake");
@@ -3296,18 +3357,13 @@ static int synaptics_clearpad_pm_resume(struct device *dev)
 	struct synaptics_clearpad *this = dev_get_drvdata(dev);
 	unsigned long flags;
 	bool irq_pending;
-#ifndef CONFIG_FB
 	int rc = 0;
-#endif
+
 	if (device_may_wakeup(dev)) {
 		disable_irq_wake(this->irq);
 		dev_info(&this->pdev->dev, "disable irq wake");
 	}
-#ifndef CONFIG_FB
-	rc = synaptics_clearpad_resume(&this->pdev->dev);
-	if (rc)
-		return rc;
-#endif
+
 	spin_lock_irqsave(&this->slock, flags);
 	irq_pending = this->irq_pending;
 	this->irq_pending = false;
@@ -3316,8 +3372,13 @@ static int synaptics_clearpad_pm_resume(struct device *dev)
 
 	if (unlikely(irq_pending)) {
 		dev_dbg(&this->pdev->dev, "Process pending IRQ\n");
-		synaptics_clearpad_process_irq(this);
+		rc = synaptics_clearpad_process_irq(this);
 	}
+
+#ifdef CONFIG_FB
+	if (irq_pending)
+#endif
+		(void)(rc ? rc : synaptics_clearpad_resume(&this->pdev->dev));
 	return 0;
 }
 
@@ -3332,6 +3393,24 @@ static int synaptics_clearpad_pm_suspend_noirq(struct device *dev)
 }
 
 #ifdef CONFIG_FB
+static void synaptics_notify_resume(struct work_struct *work)
+{
+	struct synaptics_clearpad *this = container_of(work,
+			struct synaptics_clearpad, notify_resume);
+
+	if (this->pm_suspended)
+		synaptics_clearpad_resume(&this->pdev->dev);
+}
+
+static void synaptics_notify_suspend(struct work_struct *work)
+{
+	struct synaptics_clearpad *this = container_of(work,
+			struct synaptics_clearpad, notify_suspend);
+
+	if (!this->pm_suspended)
+		synaptics_clearpad_suspend(&this->pdev->dev);
+}
+
 static int synaptics_fb_notifier_callback(struct notifier_block *self,
 				unsigned long event, void *data)
 {
@@ -3343,10 +3422,15 @@ static int synaptics_fb_notifier_callback(struct notifier_block *self,
 	if (evdata && evdata->data && event == FB_EVENT_BLANK && this &&
 			this->pdev) {
 		blank = evdata->data;
-		if (*blank == FB_BLANK_UNBLANK)
-			synaptics_clearpad_resume(&this->pdev->dev);
-		else if (*blank == FB_BLANK_POWERDOWN)
-			synaptics_clearpad_suspend(&this->pdev->dev);
+		if (*blank == FB_BLANK_UNBLANK) {
+			cancel_work_sync(&this->notify_suspend);
+			cancel_work_sync(&this->notify_resume);
+			schedule_work(&this->notify_resume);
+		} else if (*blank == FB_BLANK_POWERDOWN) {
+			cancel_work_sync(&this->notify_resume);
+			cancel_work_sync(&this->notify_suspend);
+			schedule_work(&this->notify_suspend);
+		}
 	}
 
 	return 0;
@@ -3893,10 +3977,16 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 	struct kobject *parent;
 	char *symlink_name;
 	int rc;
+	bool retry = false;
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
+	struct platform_device *rmi_dev;
+#endif
 
 	this = kzalloc(sizeof(struct synaptics_clearpad), GFP_KERNEL);
 	if (!this) {
+		dev_err(&pdev->dev, "no memory available\n");
 		rc = -ENOMEM;
+		retry = true;
 		goto exit;
 	}
 
@@ -3928,39 +4018,40 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 			sizeof(this->easy_wakeup_config));
 
 #ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
-	this->rmi_dev = platform_device_alloc(CLEARPAD_RMI_DEV_NAME, -1);
-	if (!this->rmi_dev) {
-		rc = -ENOMEM;
-		goto err_free;
-	}
+	if (!cdata->rmi_dev) {
+		rmi_dev = platform_device_alloc(CLEARPAD_RMI_DEV_NAME, -1);
+		if (!rmi_dev) {
+			rc = -ENOMEM;
+			goto err_free;
+		}
 
-	this->rmi_dev->dev.parent = &pdev->dev;
-	rc = platform_device_add_data(this->rmi_dev, cdata,
-					sizeof(struct clearpad_data));
-	if (rc)
-		goto err_device_put;
+		rmi_dev->dev.parent = &pdev->dev;
+		rc = platform_device_add_data(rmi_dev, cdata,
+						sizeof(struct clearpad_data));
+		if (rc)
+			goto err_device_put;
 
-	rc = platform_device_add(this->rmi_dev);
-	if (rc)
-		goto err_device_put;
+		rc = platform_device_add(rmi_dev);
+		if (rc)
+			goto err_device_put;
 
-	if (!this->rmi_dev->dev.driver) {
-		rc = -ENODEV;
-		goto err_device_del;
+		if (!rmi_dev->dev.driver) {
+			rc = -ENODEV;
+			goto err_device_del;
+		}
+		cdata->rmi_dev = rmi_dev;
 	}
 #endif
 
 	rc = clearpad_vreg_configure(this, 1);
 	if (rc) {
-		dev_err(&this->pdev->dev,
-		       "failed vreg init\n");
+		dev_err(&this->pdev->dev, "failed vreg init\n");
 		goto err_device_del;
 	}
 
 	rc = clearpad_gpio_configure(this, 1);
 	if (rc) {
-		dev_err(&this->pdev->dev,
-		       "failed gpio init\n");
+		dev_err(&this->pdev->dev, "failed gpio init\n");
 		goto err_vreg_teardown;
 	}
 
@@ -3976,22 +4067,68 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 
 	LOCK(this);
 	rc = synaptics_clearpad_initialize(this);
-	LOG_CHECK(this, "rc=%d\n", rc);
 	UNLOCK(this);
-	if (rc)
+	if (rc) {
+		dev_err(&this->pdev->dev, "faild clearpad initialization\n");
+		retry = true;
 		goto err_gpio_teardown;
+	}
 
-	rc = synaptics_clearpad_input_init(this);
-	if (rc)
+	this->input = input_allocate_device();
+	if (!this->input) {
+		rc = -ENOMEM;
 		goto err_gpio_teardown;
+	}
+
+	input_set_drvdata(this->input, this);
+
+	this->input->open = synaptics_clearpad_device_open;
+	this->input->close = synaptics_clearpad_device_close;
+	this->input->name = CLEARPAD_NAME;
+	this->input->id.vendor = SYNAPTICS_CLEARPAD_VENDOR;
+	this->input->id.product = 1;
+	this->input->id.version = 1;
+	this->input->id.bustype = this->bdata->bustype;
+
+	this->input_pen = input_allocate_device();
+	if (!this->input_pen) {
+		rc = -ENOMEM;
+		goto err_input_device;
+	}
+
+	input_set_drvdata(this->input_pen, this);
+
+	this->input_pen->name = "clearpad_pen";
+
+	synaptics_funcarea_initialize(this);
+
+	rc = synaptics_clearpad_input_init(this, this->input);
+	if (rc) {
+		input_free_device(this->input);
+		goto err_gpio_teardown;
+	}
+
+	rc = synaptics_clearpad_input_init(this, this->input_pen);
+	if (rc) {
+		input_free_device(this->input_pen);
+		goto err_input_device;
+	}
+
+	rc = synaptics_clearpad_input_ev_init(this);
+	if (rc)
+		goto err_input_device_pen;
 
 	this->state = SYN_STATE_RUNNING;
 
 #ifdef CONFIG_FB
 	this->fb_notif.notifier_call = synaptics_fb_notifier_callback;
 	rc = fb_register_client(&this->fb_notif);
-	if (rc)
+	if (rc) {
 		dev_err(&this->pdev->dev, "Unable to register fb_notifier\n");
+	} else {
+		INIT_WORK(&this->notify_resume, synaptics_notify_resume);
+		INIT_WORK(&this->notify_suspend, synaptics_notify_suspend);
+	}
 #endif
 
 	/* sysfs */
@@ -4021,15 +4158,16 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 				this->pdev->dev.driver->name,
 				&this->pdev->dev);
 	if (rc) {
-		dev_err(&this->pdev->dev,
-		       "irq %d busy?\n", this->irq);
+		dev_err(&this->pdev->dev, "irq %d busy?\n", this->irq);
 		goto err_sysfs_remove_link;
 	}
 	disable_irq_nosync(this->irq);
 
 	rc = synaptics_clearpad_set_power(this);
-	if (rc)
+	if (rc) {
+		retry = true;
 		goto err_irq;
+	}
 
 	goto exit;
 
@@ -4046,26 +4184,41 @@ err_unregister_fb:
 #ifdef CONFIG_FB
 	fb_unregister_client(&this->fb_notif);
 #endif
+err_input_device_pen:
+	input_unregister_device(this->input_pen);
+err_input_device:
 	input_unregister_device(this->input);
 err_gpio_teardown:
 	clearpad_gpio_configure(this, 0);
 err_vreg_teardown:
 	clearpad_vreg_configure(this, 0);
 err_device_del:
-	platform_device_del(this->rmi_dev);
-err_device_put:
 #ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
-	platform_device_put(this->rmi_dev);
+	if (!cdata->rmi_dev)
+		platform_device_del(rmi_dev);
+err_device_put:
+	if (!cdata->rmi_dev)
+		platform_device_put(rmi_dev);
 #endif
 err_free:
 	dev_set_drvdata(&pdev->dev, NULL);
 	kfree(this);
 exit:
+	if (retry) {
+		if (cdata->probe_retry < SYNAPTICS_RETRY_NUM_OF_PROBE_CHECK) {
+			rc = -EPROBE_DEFER;
+			cdata->probe_retry++;
+			msleep(50);
+		}
+	}
 	return rc;
 }
 
 static int __devexit clearpad_remove(struct platform_device *pdev)
 {
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
+	struct clearpad_data *cdata = pdev->dev.platform_data;
+#endif
 	struct synaptics_clearpad *this = dev_get_drvdata(&pdev->dev);
 	char *symlink_name = this->pdata->symlink_name ? : CLEARPAD_NAME;
 
@@ -4079,19 +4232,22 @@ static int __devexit clearpad_remove(struct platform_device *pdev)
 	remove_sysfs_entries(this);
 #ifdef CONFIG_FB
 	fb_unregister_client(&this->fb_notif);
+	cancel_work_sync(&this->notify_resume);
+	cancel_work_sync(&this->notify_suspend);
 #endif
 	input_unregister_device(this->input);
+	input_unregister_device(this->input_pen);
 	clearpad_gpio_configure(this, 0);
 	clearpad_vreg_configure(this, 0);
 #ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
-	platform_device_put(this->rmi_dev);
+	platform_device_put(cdata->rmi_dev);
+	cdata->rmi_dev = NULL;
 #endif
 	dev_set_drvdata(&pdev->dev, NULL);
 	kfree(this);
 
 	return 0;
 }
-
 
 static const struct dev_pm_ops synaptics_clearpad_pm = {
 	.suspend = synaptics_clearpad_pm_suspend,

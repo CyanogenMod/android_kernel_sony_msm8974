@@ -793,6 +793,17 @@ int subsystem_restart(const char *name)
 }
 EXPORT_SYMBOL(subsystem_restart);
 
+int subsystem_crash_reason(const char *name, char *msg)
+{
+	struct subsys_device *dev = find_subsys(name);
+
+	if (!dev)
+		return -ENODEV;
+	update_crash_reason(dev, msg, SUBSYS_CRASH_REASON_LEN);
+	return 0;
+}
+EXPORT_SYMBOL(subsystem_crash_reason);
+
 int subsystem_crashed(const char *name)
 {
 	struct subsys_device *dev = find_subsys(name);

@@ -75,6 +75,13 @@ struct sony_camera_data {
 	struct device			info_dev;
 };
 
+struct camera_dev_info {
+	uint32_t			mount_angle;
+	uint32_t			sensor_rotation;
+	uint32_t			eeprom_size;
+	uint8_t				eeprom[EEPROM_MAX_DATA_LEN];
+};
+
 static struct sony_camera_info *camera_info;
 static struct sony_camera_data camera_data[];
 static struct device *camera_device;
@@ -215,6 +222,15 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 			goto fail;
 		}
 
+		rc = of_property_read_u32(of_node_modules,
+				"sensor_rotation",
+				&camera_info[id].modules[i].sensor_rotation);
+
+		if (rc < 0) {
+			LOGE("%s failed %d\n", __func__, __LINE__);
+			goto fail;
+		}
+
 		of_node_modules_power_off = of_find_node_by_name(
 						of_node_modules,
 						"power_off");
@@ -226,7 +242,7 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 
 		count = of_property_count_strings(of_node_modules_power_off,
 						"commands");
-		if (!count) {
+		if (count < 0) {
 			LOGE("%s failed power off commands 0\n", __func__);
 			rc = -EFAULT;
 			goto fail;
@@ -274,7 +290,7 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 
 		count = of_property_count_strings(of_node_modules_power_on,
 						"commands");
-		if (!count) {
+		if (count < 0) {
 			LOGE("%s failed power on commands 0\n", __func__);
 			rc = -EFAULT;
 			goto fail;
@@ -707,6 +723,7 @@ static ssize_t sony_camera_info_read(struct device *ldev,
 	char sensor_name[32];
 	int id = 0;
 	uint16_t info_len = 0;
+	struct camera_dev_info *info = (struct camera_dev_info *)buf;
 
 	memset(sensor_name, 0, sizeof(sensor_name));
 	for (id = 0; id < sensor_num; id++) {
@@ -714,9 +731,15 @@ static ssize_t sony_camera_info_read(struct device *ldev,
 				CAMERA_DEV_NAME, id);
 		if (!strncmp(ldev->kobj.name,
 			sensor_name, sizeof(sensor_name))) {
-			memcpy(buf, camera_data[id].eeprom,
+			info->mount_angle =
+				camera_data[id].module->mount_angle;
+			info->sensor_rotation =
+				camera_data[id].module->sensor_rotation;
+			memset(info->eeprom, 0, sizeof(info->eeprom));
+			memcpy(info->eeprom, camera_data[id].eeprom,
 				camera_data[id].eeprom_len);
-			info_len = camera_data[id].eeprom_len;
+			info->eeprom_size = camera_data[id].eeprom_len;
+			info_len = sizeof(struct camera_dev_info);
 			break;
 		}
 	}
@@ -1151,8 +1174,6 @@ static int sony_camera_platform_probe(struct platform_device *pdev)
 	}
 
 	sensor_init_params = s_ctrl->sensordata->sensor_init_params;
-	sensor_init_params->private_sensor_mount_angle =
-			camera_data[id].module->mount_angle;
 	camera_data[id].probe_done = true;
 	LOGI("camera %d probe ok\n", id);
 

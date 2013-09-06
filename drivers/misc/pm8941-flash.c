@@ -128,6 +128,11 @@ struct flash_config_data {
 	}	vph_pwr_droop;
 };
 
+struct regulator_ctrl {
+	struct regulator	*regulator;
+	bool			requested;
+};
+
 struct pm8941_flash_data {
 	struct miscdevice	cdev;
 	struct spmi_device	*spmi_dev;
@@ -137,62 +142,93 @@ struct pm8941_flash_data {
 	bool			scheduled;
 	int			turn_off_delay_ms;
 	struct flash_config_data	flash_cfg;
-	struct regulator	*reg_boost;
-	bool			requested_boost;
+	struct regulator_ctrl	boost_for_torch;
+	struct regulator_ctrl	boost_for_flash;
 };
 
 #define pm8941_dev_err(data, format, arg...) \
 	dev_err(&data->spmi_dev->dev, format, ## arg)
 
 
-static int pm8941_power_init(struct pm8941_flash_data *data)
+static int pm8941_regulator_init(struct device *dev,
+		struct regulator_ctrl *ctrl, const char *regulator_name)
 {
-	int rc;
+	int rc = 0;
 
-	if (data->reg_boost)
+	if (ctrl->regulator)
 		return 0;
 
-	data->reg_boost
-		= devm_regulator_get(&data->spmi_dev->dev, "8941_boost");
-	if (IS_ERR_OR_NULL(data->reg_boost)) {
-		rc = PTR_ERR(data->reg_boost);
-		pm8941_dev_err(data, "%s: regulator_get failed on %s. rc=%d\n",
-			__func__, "pm8941_boost", rc);
+	ctrl->regulator = regulator_get(dev, regulator_name);
+	if (IS_ERR_OR_NULL(ctrl->regulator)) {
+		rc = PTR_ERR(ctrl->regulator);
+		dev_err(dev, "%s: regulator_get failed on %s. rc=%d\n",
+			__func__, regulator_name, rc);
 		rc = rc ? rc : -ENODEV;
 		goto err_boost;
 	} else {
-		rc = regulator_set_voltage(data->reg_boost, 5000000, 5000000);
+		rc = regulator_set_voltage(ctrl->regulator, 5000000, 5000000);
 		if (rc)
 			goto err_boost_set;
 	}
 	return rc;
 err_boost_set:
-	regulator_put(data->reg_boost);
+	regulator_put(ctrl->regulator);
 err_boost:
-	data->reg_boost = NULL;
+	ctrl->regulator = NULL;
 
 	return rc;
 }
 
-static int pm8941_power_cotrol(struct pm8941_flash_data *data, bool enable)
+static void pm8941_regulator_exit(struct device *dev,
+		struct regulator_ctrl *ctrl)
+{
+	if (ctrl->regulator) {
+		regulator_put(ctrl->regulator);
+		ctrl->regulator = NULL;
+	}
+}
+
+static int pm8941_power_init(struct pm8941_flash_data *data)
+{
+	int rc;
+
+	rc =
+	pm8941_regulator_init(&data->spmi_dev->dev, &data->boost_for_torch,
+		"torch");
+	rc = rc ? rc :
+	pm8941_regulator_init(&data->spmi_dev->dev, &data->boost_for_flash,
+		"flash");
+
+	return rc;
+}
+
+static int pm8941_regulator_enable(struct device *dev,
+		struct regulator_ctrl *ctrl)
 {
 	int rc = 0;
 
-	if (enable && !data->requested_boost) {
-		rc = regulator_enable(data->reg_boost);
-		if (rc)
-			pm8941_dev_err(data, "%s: enable failed. rc=%d\n",
-			__func__, rc);
-		else
-			data->requested_boost = true;
-	} else if (!enable && data->requested_boost) {
-		rc = regulator_disable(data->reg_boost);
-		if (rc)
-			pm8941_dev_err(data, "%s: disable failed. rc=%d\n",
-			__func__, rc);
-		else
-			data->requested_boost = false;
-	}
+	if (!ctrl || ctrl->requested)
+		return rc;
+	rc = regulator_enable(ctrl->regulator);
+	if (rc)
+		dev_err(dev, "%s: failed. rc=%d\n", __func__, rc);
+	else
+		ctrl->requested = true;
+	return rc;
+}
+
+static int pm8941_regulator_disable(struct device *dev,
+		struct regulator_ctrl *ctrl)
+{
+	int rc = 0;
+
+	if (!ctrl || !ctrl->requested)
+		return rc;
+	rc = regulator_disable(ctrl->regulator);
+	if (rc)
+		dev_err(dev, "%s: failed. rc=%d\n", __func__, rc);
+	else
+		ctrl->requested = false;
 	return rc;
 }
 
@@ -358,6 +394,20 @@ static ssize_t pm8941_get_mask_curr(struct device *ldev,
 	return pm8941_get_reg_common(ldev, CLAMP_CURRENT, attr, buf);
 }
 
+static bool is_hw_strobe(struct pm8941_flash_data *data)
+{
+	u8 val;
+	int rc;
+
+	rc = pm_reg_read(data, STROBE_CONTROL, &val);
+	if (rc) {
+		pm8941_dev_err(data, "reg read failed(%d)\n", rc);
+		return false;
+	}
+	val &= STROBE_SELECT_HW;
+	return val ? true : false;
+}
+
 static void flash_turn_off_delayed(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -373,6 +423,9 @@ static void flash_turn_off_delayed(struct work_struct *work)
 	rc = rc ? rc :
 		pm_reg_write(data, ENABLE_CONTROL,
 		MODULE_DISABLE | CURR_MAX_200mA);
+	rc = rc ? rc :
+		pm8941_regulator_disable(&data->spmi_dev->dev,
+		&data->boost_for_flash);
 	if (rc)
 		pm8941_dev_err(data, "reg write failed(%d)\n", rc);
 	mutex_unlock(&data->lock);
@@ -408,13 +461,20 @@ static ssize_t pm8941_set_mode(struct device *ldev,
 		if (rc)
 			goto error;
 
-		rc = pm8941_power_cotrol(data, false);
+		rc = pm8941_regulator_disable(&data->spmi_dev->dev,
+			&data->boost_for_torch);
+		rc = rc ? rc :
+			pm8941_regulator_disable(&data->spmi_dev->dev,
+			&data->boost_for_flash);
 		if (rc)
 			goto exit;
 	}
 
 	switch (mode) {
 	case FLASH_MODE_FLASH:
+		rc = rc ? rc :
+			pm8941_regulator_enable(&data->spmi_dev->dev,
+				&data->boost_for_flash);
 		rc = rc ? rc :
 			pm_reg_write(data, TMR_CONTROL, ENABLE_FLASH_TIMER);
 		rc = rc ? rc :
@@ -430,14 +490,20 @@ static ssize_t pm8941_set_mode(struct device *ldev,
 			pm_reg_masked_write(data, STROBE_CONTROL,
 			ENABLE_CURRENT_OUT, ENABLE_CURRENT_OUT);
 
-		data->scheduled = true;
-		INIT_DELAYED_WORK(&data->dwork, flash_turn_off_delayed);
-		schedule_delayed_work(&data->dwork,
-			msecs_to_jiffies(data->turn_off_delay_ms));
+		if (!is_hw_strobe(data)) {
+			data->scheduled = true;
+			INIT_DELAYED_WORK(&data->dwork, flash_turn_off_delayed);
+			schedule_delayed_work(&data->dwork,
+				msecs_to_jiffies(data->turn_off_delay_ms));
+		}
 		break;
 	case FLASH_MODE_TORCH:
 		rc = rc ? rc :
-			pm8941_power_cotrol(data, true);
+			pm_reg_masked_write(data, STROBE_CONTROL,
+				STROBE_SELECT_HW, STROBE_SELECT_SW);
+		rc = rc ? rc :
+			pm8941_regulator_enable(&data->spmi_dev->dev,
+				&data->boost_for_torch);
 		rc = rc ? rc :
 			pm_reg_write(data, MAX_CURRENT, 0xF);
 		rc = rc ? rc :
@@ -916,8 +982,7 @@ static int __devinit pm8941_flash_probe(struct spmi_device *spmi)
 	if (node == NULL)
 		return -ENODEV;
 
-	data = devm_kzalloc(&spmi->dev, sizeof(struct pm8941_flash_data),
-		GFP_KERNEL);
+	data = kzalloc(sizeof(struct pm8941_flash_data), GFP_KERNEL);
 	if (!data) {
 		dev_err(&spmi->dev, "Unable to allocate memory\n");
 		return -ENOMEM;
@@ -959,7 +1024,8 @@ static int __devinit pm8941_flash_probe(struct spmi_device *spmi)
 
 	mutex_init(&data->lock);
 	data->scheduled = false;
-	data->requested_boost = false;
+	data->boost_for_torch.requested = false;
+	data->boost_for_flash.requested = false;
 
 	rc =  pm8941_flash_initialize(data);
 	if (rc < 0)
@@ -981,10 +1047,9 @@ static int __devinit pm8941_flash_probe(struct spmi_device *spmi)
 remove_attributes:
 	pm8941_attributes_remove(data);
 fail_id_check:
-	if (data->reg_boost) {
-		regulator_put(data->reg_boost);
-		data->reg_boost = NULL;
-	}
+	pm8941_regulator_exit(&data->spmi_dev->dev, &data->boost_for_flash);
+	pm8941_regulator_exit(&data->spmi_dev->dev, &data->boost_for_torch);
+	kfree(data);
 	return rc;
 }
 
@@ -994,10 +1059,9 @@ static int __devexit pm8941_flash_remove(struct spmi_device *spmi)
 
 	misc_deregister(&data->cdev);
 	pm8941_attributes_remove(data);
-	if (data->reg_boost) {
-		regulator_put(data->reg_boost);
-		data->reg_boost = NULL;
-	}
+	pm8941_regulator_exit(&data->spmi_dev->dev, &data->boost_for_flash);
+	pm8941_regulator_exit(&data->spmi_dev->dev, &data->boost_for_torch);
+	kfree(data);
 
 	return 0;
 }

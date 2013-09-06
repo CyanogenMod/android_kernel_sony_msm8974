@@ -51,6 +51,7 @@
 			interrupt-parent = <&msmgpio>;
 			interrupts = <61 0x2>;
 			touch_vdd-supply = <&pm8941_l22>;
+			touch_vdd-supply_name = "touch_vdd";
 			gpio_tirq = <61>;
 			gpio_pwr_en = <85>;
 			num_fw_mappings = <4>;
@@ -263,6 +264,7 @@
 
 				GENERIC {
 					mount_angle = <270>;
+					sensor_rotation = <180>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -304,6 +306,7 @@
 				};
 				SOI08BS2 {
 					mount_angle = <270>;
+					sensor_rotation = <180>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -394,6 +397,7 @@
 
 				GENERIC {
 					mount_angle = <270>;
+					sensor_rotation = <180>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -431,6 +435,7 @@
 				};
 				LGI02BN0 {
 					mount_angle = <270>;
+					sensor_rotation = <180>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -468,6 +473,7 @@
 				};
 				SEM02BN0 {
 					mount_angle = <270>;
+					sensor_rotation = <180>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -505,6 +511,7 @@
 				};
 				LGI02BN1 {
 					mount_angle = <90>;
+					sensor_rotation = <0>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -542,6 +549,7 @@
 				};
 				SEM02BN1 {
 					mount_angle = <90>;
+					sensor_rotation = <0>;
 					power_off {
 						commands =
 								"I2C_WRITE",
@@ -655,14 +663,16 @@
 	qcom,ibatterm-ma = <150>;
 	qcom,ibatsafe-ma = <2000>;
 	qcom,maxinput-dc-ma = <1800>;
-	qcom,cool-bat-mv = <4350>;
+	qcom,maxinput-usb-ma = <1500>;
+	qcom,cool-bat-mv = <4200>;
 	qcom,ibatmax-warm-ma = <900>;
-	qcom,warm-bat-mv = <4350>;
+	qcom,warm-bat-mv = <4200>;
 	qcom,ibatmax-cool-ma = <900>;
 	qcom,vbatdet-delta-mv = <20>;
 	qcom,vbatdet-delta-soc = <1>;
 	qcom,thermal-mitigation = <2000 1500 1100 900 700 500 300 200 100 0>;
 	qcom,tchg-mins = <512>;
+	qcom,warm-disable-charging;
 };
 
 &pm8941_bms {
@@ -1002,6 +1012,9 @@
 		iadc@3600 {
 			qcom,rsense = <10000000>;
 		};
+		vadc@3100 {
+			qcom,use-old-batt-therm-table;
+		};
 	};
 
 	qcom,pm8941@1 {
@@ -1048,6 +1061,7 @@
 				linux,name = "wled:backlight";
 				linux,default-trigger = "bkl-trigger";
 				qcom,cs-out-en = <1>;
+				qcom,cabc-en = <1>;
 				qcom,op-fdbck = <0>;
 				qcom,default-state = "on";
 				qcom,max-current = <20>;
@@ -1345,22 +1359,21 @@
 
 &usb_otg {
 	qcom,hsusb-otg-phy-init-seq = <0x74 0x80
-					0x66 0x81
+					0x06 0x81
 					0x30 0x82
 					0x13 0x83
 					0xffffffff>;
 };
 
 &usb3 {
-	qcom,dwc-hsphy-init = <0x00D0CDA7>;
+	qcom,dwc-hsphy-init = <0x00D0CC27>;
 	interrupt-parent = <&usb3>;
-	interrupts = <0 1 2>;
+	interrupts = <0 1>;
 	#interrupt-cells = <1>;
 	interrupt-map-mask = <0x0 0xffffffff>;
 	interrupt-map = <0x0 0 &intc 0 133 0
-			 0x0 1 &spmi_bus 0x0 0x0 0x9 0x0
-			 0x0 2 &spmi_bus 0x0 0x1 0x83 0x2>;
-	interrupt-names = "hs_phy_irq", "pmic_id_irq", "ocp_irq";
+			 0x0 1 &spmi_bus 0x0 0x0 0x9 0x0>;
+	interrupt-names = "hs_phy_irq", "pmic_id_irq";
 	qcom,misc-ref = <&pm8941_misc>;
 };
 

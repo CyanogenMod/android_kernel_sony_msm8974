@@ -119,13 +119,13 @@ static int mdss_mdp_cmd_tearcheck_cfg(struct mdss_mdp_mixer *mixer,
 
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_VSYNC, cfg);
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_HEIGHT,
-				ctx->height - 1); /* set to verh height */
+				0xfff0); /* set to verh height */
 
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_VSYNC_INIT_VAL,
 						ctx->height);
 
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_RD_PTR_IRQ,
-						500);
+						ctx->height + 1);
 
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_START_POS,
 						ctx->height);

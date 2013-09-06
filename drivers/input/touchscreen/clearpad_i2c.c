@@ -169,6 +169,10 @@ static int __devinit clearpad_i2c_probe(struct i2c_client *client,
 	struct clearpad_data clearpad_data = {
 		.pdata = NULL,
 		.bdata = &clearpad_i2c_bus_data,
+		.probe_retry = 0,
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD_RMI_DEV
+		.rmi_dev = NULL,
+#endif
 	};
 	struct clearpad_i2c *this;
 	int rc;
@@ -218,15 +222,9 @@ static int __devinit clearpad_i2c_probe(struct i2c_client *client,
 	if (rc)
 		goto err_device_put;
 
-	if (!this->pdev->dev.driver) {
-		rc = -ENODEV;
-		goto err_device_del;
-	}
 	dev_info(&client->dev, "%s: sucess\n", __func__);
 	goto exit;
 
-err_device_del:
-	platform_device_del(this->pdev);
 err_device_put:
 	platform_device_put(this->pdev);
 err_free:

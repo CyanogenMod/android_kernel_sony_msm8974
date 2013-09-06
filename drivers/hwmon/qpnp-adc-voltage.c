@@ -1159,6 +1159,9 @@ static int __devinit qpnp_vadc_probe(struct spmi_device *spmi)
 	}
 	mutex_init(&vadc->adc->adc_lock);
 
+	qpnp_adc_therm_table_sel(of_property_read_bool(node,
+				"qcom,use-old-batt-therm-table"));
+
 	rc = devm_request_irq(&spmi->dev, vadc->adc->adc_irq_eoc,
 				qpnp_vadc_isr, IRQF_TRIGGER_RISING,
 				"qpnp_vadc_interrupt", vadc);

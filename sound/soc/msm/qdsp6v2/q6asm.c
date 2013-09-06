@@ -65,12 +65,6 @@ struct asm_buffer_node {
 };
 
 /* SOMC effect control start */
-#if defined(CONFIG_MACH_SONY_TOGARI_ROW)
-	static int use_sony_popp_topology = 1;
-#else
-	static int use_sony_popp_topology;
-#endif
-
 #define INVALID_SESSION -1
 struct sony_volume_control {
 	uint32_t module;
@@ -409,6 +403,50 @@ fail_cmd:
 	return rc;
 }
 
+static int sony_set_volume(struct audio_client *ac, int volume)
+{
+	struct asm_volume_ctrl_master_gain vol;
+	int sz = 0;
+	int rc  = 0;
+
+	sz = sizeof(struct asm_volume_ctrl_master_gain);
+	q6asm_add_hdr_async(ac, &vol.hdr, sz, TRUE);
+	vol.hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS_V2;
+	vol.param.data_payload_addr_lsw = 0;
+	vol.param.data_payload_addr_msw = 0;
+
+
+	vol.param.mem_map_handle = 0;
+	vol.param.data_payload_size = sizeof(vol) -
+				sizeof(vol.hdr) - sizeof(vol.param);
+	vol.data.module_id = ASM_MODULE_ID_CA_VPT;
+	vol.data.param_id = ASM_PARAM_ID_VOL_CTRL_MASTER_GAIN;
+	vol.data.param_size = vol.param.data_payload_size - sizeof(vol.data);
+	vol.data.reserved = 0;
+	vol.master_gain = volume;
+
+	rc = apr_send_pkt(ac->apr, (uint32_t *) &vol);
+	if (rc < 0) {
+		pr_err("%s: set-params send failed paramid[0x%x]\n", __func__,
+						vol.data.param_id);
+		rc = -EINVAL;
+		goto fail_cmd;
+	}
+
+	rc = wait_event_timeout(ac->cmd_wait,
+			(atomic_read(&ac->cmd_state) == 0), 5*HZ);
+	if (!rc) {
+		pr_err("%s: timeout, set-params paramid[0x%x]\n", __func__,
+						vol.data.param_id);
+		rc = -EINVAL;
+		goto fail_cmd;
+	}
+	rc = 0;
+
+fail_cmd:
+	return rc;
+}
+
 void sony_vol_module_update(void *client, uint32_t module)
 {
 	int rc = 0;
@@ -427,7 +465,10 @@ void sony_vol_module_update(void *client, uint32_t module)
 		volume_control[ac->session].module = module;
 		left_vol = ((volume_control[ac->session].volume >> 16) & 0xFFFF);
 		right_vol = (volume_control[ac->session].volume & 0xFFFF);
-		rc = q6asm_set_lrgain(ac, left_vol, right_vol);
+		if (left_vol != right_vol)
+			rc = q6asm_set_lrgain(ac, left_vol, right_vol);
+		else
+			rc = q6asm_set_volume(ac, left_vol);
 		if (rc < 0) {
 			pr_err("%s: Send Volume command failed rc=%d\n",
 						__func__, rc);
@@ -439,8 +480,11 @@ void sony_send_max_vol(void *client)
 {
 	struct audio_client *ac = NULL;
 	struct asm_volume_ctrl_lr_chan_gain lrgain;
+	struct asm_volume_ctrl_master_gain vol;
 	int sz = 0;
 	int rc  = 0;
+	int left_vol = 0;
+	int right_vol = 0;
 
 	pr_debug("%s\n", __func__);
 	if (client == NULL) {
@@ -449,33 +493,69 @@ void sony_send_max_vol(void *client)
 	}
 	ac = (struct audio_client *)client;
 
-	sz = sizeof(struct asm_volume_ctrl_lr_chan_gain);
-	q6asm_add_hdr_async(ac, &lrgain.hdr, sz, TRUE);
-	lrgain.hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS_V2;
-	lrgain.param.data_payload_addr_lsw = 0;
-	lrgain.param.data_payload_addr_msw = 0;
-	lrgain.param.mem_map_handle = 0;
-	lrgain.param.data_payload_size = sizeof(lrgain) -
-				sizeof(lrgain.hdr) - sizeof(lrgain.param);
-	lrgain.data.module_id = ASM_MODULE_ID_VOL_CTRL;
-	lrgain.data.param_id = ASM_PARAM_ID_VOL_CTRL_LR_CHANNEL_GAIN;
-	lrgain.data.param_size = lrgain.param.data_payload_size -
-				sizeof(lrgain.data);
-	lrgain.data.reserved = 0;
-	lrgain.l_chan_gain = 0x2000;
-	lrgain.r_chan_gain = 0x2000;
-	rc = apr_send_pkt(ac->apr, (uint32_t *) &lrgain);
-	if (rc < 0) {
-		pr_err("%s: set-params send failed paramid[0x%x]\n",
-			__func__, lrgain.data.param_id);
-		return;
-	}
+	left_vol =
+		((volume_control[ac->session].volume >> 16) & 0xFFFF);
+	right_vol = (volume_control[ac->session].volume & 0xFFFF);
 
-	rc = wait_event_timeout(ac->cmd_wait,
-			(atomic_read(&ac->cmd_state) == 0), 5*HZ);
-	if (!rc) {
-		pr_err("%s: timeout, set-params paramid[0x%x]\n",
-			__func__, lrgain.data.param_id);
+	if (left_vol != right_vol) {
+		sz = sizeof(struct asm_volume_ctrl_lr_chan_gain);
+		q6asm_add_hdr_async(ac, &lrgain.hdr, sz, TRUE);
+		lrgain.hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS_V2;
+		lrgain.param.data_payload_addr_lsw = 0;
+		lrgain.param.data_payload_addr_msw = 0;
+		lrgain.param.mem_map_handle = 0;
+		lrgain.param.data_payload_size = sizeof(lrgain) -
+			sizeof(lrgain.hdr) - sizeof(lrgain.param);
+		lrgain.data.module_id = ASM_MODULE_ID_VOL_CTRL;
+		lrgain.data.param_id = ASM_PARAM_ID_VOL_CTRL_LR_CHANNEL_GAIN;
+		lrgain.data.param_size = lrgain.param.data_payload_size -
+					sizeof(lrgain.data);
+		lrgain.data.reserved = 0;
+		lrgain.l_chan_gain = 0x2000;
+		lrgain.r_chan_gain = 0x2000;
+		rc = apr_send_pkt(ac->apr, (uint32_t *) &lrgain);
+		if (rc < 0) {
+			pr_err("%s: set-params send failed paramid[0x%x]\n",
+				__func__, lrgain.data.param_id);
+			return;
+		}
+
+		rc = wait_event_timeout(ac->cmd_wait,
+				(atomic_read(&ac->cmd_state) == 0), 5*HZ);
+		if (!rc) {
+			pr_err("%s: timeout, set-params paramid[0x%x]\n",
+				__func__, lrgain.data.param_id);
+		}
+	} else {
+		sz = sizeof(struct asm_volume_ctrl_master_gain);
+		q6asm_add_hdr_async(ac, &vol.hdr, sz, TRUE);
+		vol.hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS_V2;
+		vol.param.data_payload_addr_lsw = 0;
+		vol.param.data_payload_addr_msw = 0;
+		vol.param.mem_map_handle = 0;
+		vol.param.data_payload_size = sizeof(vol) -
+					sizeof(vol.hdr) - sizeof(vol.param);
+		vol.data.module_id = ASM_MODULE_ID_VOL_CTRL;
+		vol.data.param_id = ASM_PARAM_ID_VOL_CTRL_MASTER_GAIN;
+		vol.data.param_size =
+			vol.param.data_payload_size - sizeof(vol.data);
+		vol.data.reserved = 0;
+		vol.master_gain = 0x2000;
+
+		rc = apr_send_pkt(ac->apr, (uint32_t *) &vol);
+		if (rc < 0) {
+			pr_err("%s: set-params send failed paramid[0x%x]\n",
+				__func__, vol.data.param_id);
+			return;
+		}
+
+		rc = wait_event_timeout(ac->cmd_wait,
+				(atomic_read(&ac->cmd_state) == 0), 5*HZ);
+		if (!rc) {
+			pr_err("%s: timeout, set-params paramid[0x%x]\n",
+				__func__, vol.data.param_id);
+			rc = -EINVAL;
+		}
 	}
 }
 
@@ -1661,10 +1741,7 @@ static int __q6asm_open_write(struct audio_client *ac, uint32_t format,
 	open.sink_endpointype = ASM_END_POINT_DEVICE_MATRIX;
 	open.bits_per_sample = bits_per_sample;
 
-	if (use_sony_popp_topology)
-		open.postprocopo_id = ASM_STREAM_POSTPROC_TOPO_ID_SONY;
-	else
-		open.postprocopo_id = get_asm_topology();
+	open.postprocopo_id = ASM_STREAM_POSTPROC_TOPO_ID_SONY;
 
 	if (open.postprocopo_id == 0)
 		open.postprocopo_id = ASM_STREAM_POSTPROC_TOPO_ID_DEFAULT;
@@ -3056,7 +3133,7 @@ int q6asm_set_lrgain(struct audio_client *ac, int left_gain, int right_gain)
 	volume_control[ac->session].volume = ((left_gain << 16) | right_gain);
 	if (volume_control[ac->session].module == ASM_MODULE_ID_CA_VPT) {
 		/* Send average volume to ClearAudioVPT module */
-		rc = q6asm_set_volume(ac, (left_gain + right_gain) / 2);
+		rc = sony_set_volume(ac, (left_gain + right_gain) / 2);
 		if (rc < 0) {
 			pr_err("%s: Send volume failed for CA\n",
 					__func__);
@@ -3148,6 +3225,17 @@ int q6asm_set_volume(struct audio_client *ac, int volume)
 	int sz = 0;
 	int rc  = 0;
 
+	volume_control[ac->session].volume = ((volume << 16) | volume);
+	if (volume_control[ac->session].module == ASM_MODULE_ID_CA_VPT) {
+		rc = sony_set_volume(ac, volume);
+		if (rc < 0) {
+			pr_err("%s: Send volume failed for CA\n",
+					__func__);
+			rc = -EINVAL;
+		}
+		return rc;
+	}
+
 	sz = sizeof(struct asm_volume_ctrl_master_gain);
 	q6asm_add_hdr_async(ac, &vol.hdr, sz, TRUE);
 	vol.hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS_V2;
@@ -3158,7 +3246,7 @@ int q6asm_set_volume(struct audio_client *ac, int volume)
 	vol.param.mem_map_handle = 0;
 	vol.param.data_payload_size = sizeof(vol) -
 				sizeof(vol.hdr) - sizeof(vol.param);
-	vol.data.module_id = volume_control[ac->session].module;
+	vol.data.module_id = ASM_MODULE_ID_VOL_CTRL;
 	vol.data.param_id = ASM_PARAM_ID_VOL_CTRL_MASTER_GAIN;
 	vol.data.param_size = vol.param.data_payload_size - sizeof(vol.data);
 	vol.data.reserved = 0;

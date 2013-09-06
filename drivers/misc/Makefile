@@ -77,4 +77,5 @@ obj-$(CONFIG_TI_DRV2667) += ti_drv2667.o
 obj-$(CONFIG_QPNP_MISC) += qpnp-misc.o
 obj-$(CONFIG_RPM975H16E4A_IRDA) += rpm975h16e4a.o
 obj-$(CONFIG_SOMC_ISDBT_TUNER) += isdbt_tuner_drv.o
+obj-$(CONFIG_SOMC_ONESEG_TUNER) += oneseg_tuner_drv.o
 obj-y				+= felica_snfc/

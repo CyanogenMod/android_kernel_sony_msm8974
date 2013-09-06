@@ -97,9 +97,6 @@
 #include "f_uac1.c"
 #endif
 #include "f_ncm.c"
-#ifdef CONFIG_USB_ANDROID_DTF
-#include "f_dtf.c"
-#endif /* CONFIG_USB_ANDROID_DTF */
 
 MODULE_AUTHOR("Mike Lockwood");
 MODULE_DESCRIPTION("Android Composite USB Driver");
@@ -2122,33 +2119,6 @@ static struct android_usb_function uasp_function = {
 	.bind_config	= uasp_function_bind_config,
 };
 
-#ifdef CONFIG_USB_ANDROID_DTF
-/* DTF */
-static int dtf_function_init(struct android_usb_function *f,
-				struct usb_composite_dev *cdev)
-{
-	return dtf_setup();
-}
-
-static void dtf_function_cleanup(struct android_usb_function *f)
-{
-	dtf_cleanup();
-}
-
-static int dtf_function_bind_config(struct android_usb_function *f,
-				struct usb_configuration *c)
-{
-	return dtf_bind_config(c);
-}
-
-static struct android_usb_function dtf_function = {
-	.name           = "dtf",
-	.init           = dtf_function_init,
-	.cleanup        = dtf_function_cleanup,
-	.bind_config    = dtf_function_bind_config,
-};
-#endif /* CONFIG_USB_ANDROID_DTF */
-
 static struct android_usb_function *supported_functions[] = {
 	&mbim_function,
 	&ecm_qc_function,
@@ -2179,9 +2149,6 @@ static struct android_usb_function *supported_functions[] = {
 	&audio_source_function,
 #endif
 	&uasp_function,
-#ifdef CONFIG_USB_ANDROID_DTF
-	&dtf_function,
-#endif /* CONFIG_USB_ANDROID_DTF */
 	NULL
 };
 
