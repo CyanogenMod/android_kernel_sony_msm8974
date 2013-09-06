@@ -402,9 +402,7 @@ static int mdss_dsi_intf_ready(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
-	if (ctrl_pdata->spec_pdata->disp_on_in_hs)
-		ctrl_pdata->spec_pdata->disp_on(pdata);
+	ctrl_pdata->spec_pdata->disp_on(pdata);
 
 	return 0;
 }
@@ -433,12 +431,24 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 				ctrl_pdata, ctrl_pdata->ndx);
 
 	if (pdata->panel_info.type == MIPI_CMD_PANEL)
-		mdss_dsi_clk_ctrl(ctrl_pdata, 0);
+		mdss_dsi_clk_ctrl(ctrl_pdata, 1);
 
 	/* disable DSI controller */
 	mdss_dsi_controller_cfg(0, pdata);
 
 	mdss_dsi_clk_ctrl(ctrl_pdata, 0);
+
+	ret = mdss_dsi_enable_bus_clocks(ctrl_pdata);
+	if (ret) {
+		pr_err("%s: failed to enable bus clocks. rc=%d\n", __func__,
+			ret);
+#ifndef CONFIG_FB_MSM_MDSS_SPECIFIC_PANEL
+		ret = mdss_dsi_panel_power_on(pdata, 0);
+#else
+		ret = ctrl_pdata->spec_pdata->panel_power_on(pdata, 0);
+#endif
+		return ret;
+	}
 
 	/* disable DSI phy */
 	mdss_dsi_phy_enable(ctrl_pdata->ctrl_base, 0);
@@ -515,6 +525,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	mdss_dsi_phy_sw_reset((ctrl_pdata->ctrl_base));
 	mdss_dsi_phy_init(pdata);
+	mdss_dsi_disable_bus_clocks(ctrl_pdata);
 
 	mdss_dsi_clk_ctrl(ctrl_pdata, 1);
 
@@ -595,7 +606,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 	}
 
 	if (pdata->panel_info.type == MIPI_CMD_PANEL)
-		mdss_dsi_clk_ctrl(ctrl_pdata, 1);
+		mdss_dsi_clk_ctrl(ctrl_pdata, 0);
 
 	pr_debug("%s-:\n", __func__);
 	return 0;
@@ -1212,9 +1223,19 @@ int dsi_panel_device_register(struct platform_device *pdev,
 
 	ctrl_pdata->einit_cmds = panel_data->einit_cmds;
 	ctrl_pdata->init_cmds = panel_data->init_cmds;
+
+	ctrl_pdata->cabc_early_on_cmds = panel_data->cabc_early_on_cmds;
+	ctrl_pdata->cabc_on_cmds = panel_data->cabc_on_cmds;
+	ctrl_pdata->cabc_off_cmds = panel_data->cabc_off_cmds;
+	ctrl_pdata->cabc_late_off_cmds = panel_data->cabc_late_off_cmds;
+	ctrl_pdata->spec_pdata->cabc_enabled = panel_data->cabc_enabled;
+
 	ctrl_pdata->on_cmds = panel_data->on_cmds;
 	ctrl_pdata->off_cmds = panel_data->off_cmds;
 	ctrl_pdata->id_read_cmds = panel_data->id_read_cmds;
+
+	ctrl_pdata->spec_pdata->wait_time_before_on_cmd =
+				panel_data->wait_time_before_on_cmd;
 
 	memcpy(&((ctrl_pdata->panel_data).panel_info),
 				&(panel_data->panel_info),
@@ -1235,6 +1256,7 @@ int dsi_panel_device_register(struct platform_device *pdev,
 	ctrl_pdata->spec_pdata->update_fps = panel_data->update_fps;
 	ctrl_pdata->spec_pdata->driver_ic = panel_data->driver_ic;
 	ctrl_pdata->spec_pdata->disp_on_in_hs = panel_data->disp_on_in_hs;
+	ctrl_pdata->spec_pdata->init_from_begin = panel_data->init_from_begin;
 	ctrl_pdata->spec_pdata->detected = false;
 
 	if (ctrl_pdata->bklt_ctrl == BL_PWM)
@@ -1274,20 +1296,6 @@ int dsi_panel_device_register(struct platform_device *pdev,
 			return rc;
 		}
 
-		rc = mdss_dsi_enable_bus_clocks(ctrl_pdata);
-		if (rc) {
-			pr_err("%s: failed to enable bus clocks. rc=%d\n",
-				__func__, rc);
-#ifndef CONFIG_FB_MSM_MDSS_SPECIFIC_PANEL
-			rc = mdss_dsi_panel_power_on(
-				&(ctrl_pdata->panel_data), 0);
-#else
-			rc = ctrl_pdata->spec_pdata->panel_power_on(
-				&(ctrl_pdata->panel_data), 0);
-#endif
-			return rc;
-		}
-
 		mdss_dsi_clk_ctrl(ctrl_pdata, 1);
 		ctrl_pdata->ctrl_state |=
 			(CTRL_STATE_PANEL_INIT | CTRL_STATE_MDP_ACTIVE);
@@ -1316,7 +1324,7 @@ int dsi_panel_device_register(struct platform_device *pdev,
 		ctrl_pdata->ndx = 1;
 	}
 
-	pr_debug("%s: Panal data initialized\n", __func__);
+	pr_debug("%s: Panel data initialized\n", __func__);
 	return 0;
 }
 

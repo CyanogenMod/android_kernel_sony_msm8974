@@ -31,15 +31,17 @@
 #include <media/videobuf2-msm-mem.h>
 #include <media/msmb_camera.h>
 
+#if defined(CONFIG_SONY_CAM_V4L2)
+#define MSM_POST_EVT_TIMEOUT 2000
+#else
 #define MSM_POST_EVT_TIMEOUT 5000
+#endif
 #define MSM_POST_EVT_NOTIMEOUT 0xFFFFFFFF
 
 struct msm_video_device {
 	struct video_device *vdev;
 	atomic_t opened;
-#if defined(CONFIG_SONY_CAM_V4L2)
 	atomic_t stream_cnt;
-#endif
 };
 
 struct msm_queue_head {

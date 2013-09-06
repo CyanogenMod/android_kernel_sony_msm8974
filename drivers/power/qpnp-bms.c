@@ -1457,8 +1457,6 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 	int rc;
 	bool charging, charging_since_last_report;
 
-	soc = chip->calculated_soc;
-
 	rc = qpnp_vadc_read(LR_MUX1_BATT_THERM, &result);
 
 	if (rc) {
@@ -1471,6 +1469,8 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 	batt_temp = (int)result.physical;
 
 	mutex_lock(&chip->last_soc_mutex);
+	soc = chip->calculated_soc;
+
 	last_change_sec = chip->last_soc_change_sec;
 	calculate_delta_time(&last_change_sec, &time_since_last_change_sec);
 
@@ -1538,7 +1538,7 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 			soc = chip->last_soc + soc_change;
 	}
 
-	if (chip->last_soc != soc)
+	if (chip->last_soc != soc && !chip->last_soc_unbound)
 		chip->last_soc_change_sec = last_change_sec;
 
 	pr_debug("last_soc = %d, calculated_soc = %d, soc = %d, time since last change = %d\n",
@@ -1564,18 +1564,18 @@ static int report_state_of_charge(struct qpnp_bms_chip *chip)
 		return report_cc_based_soc(chip);
 }
 
-#define VBATT_ERROR_MARGIN	20000
+#define VDD_MAX_ERR		5000
+#define VDD_STEP_SIZE		10000
 static int charging_adjustments(struct qpnp_bms_chip *chip,
 				struct soc_params *params, int soc,
 				int vbat_uv, int ibat_ua, int batt_temp)
 {
 	int chg_soc, soc_ibat, batt_terminal_uv, weight_ibat, weight_cc;
 
-	batt_terminal_uv = vbat_uv + VBATT_ERROR_MARGIN
-				+ (ibat_ua * chip->r_conn_mohm) / 1000;
+	batt_terminal_uv = vbat_uv + (ibat_ua * chip->r_conn_mohm) / 1000;
 
 	if (chip->soc_at_cv == -EINVAL) {
-		if (batt_terminal_uv >= chip->max_voltage_uv) {
+		if (batt_terminal_uv >= chip->max_voltage_uv - VDD_MAX_ERR) {
 			chip->soc_at_cv = soc;
 			chip->prev_chg_soc = soc;
 			chip->ibat_at_cv_ua = ibat_ua;
@@ -1599,7 +1599,7 @@ static int charging_adjustments(struct qpnp_bms_chip *chip,
 	 * if voltage lessened (possibly because of a system load)
 	 * keep reporting the prev chg soc
 	 */
-	if (batt_terminal_uv <= chip->prev_batt_terminal_uv) {
+	if (batt_terminal_uv <= chip->prev_batt_terminal_uv - VDD_STEP_SIZE) {
 		pr_debug("batt_terminal_uv %d < (max = %d - 10000); CC CHG SOC %d\n",
 			batt_terminal_uv, chip->prev_batt_terminal_uv,
 			chip->prev_chg_soc);
@@ -1614,7 +1614,9 @@ static int charging_adjustments(struct qpnp_bms_chip *chip,
 	weight_ibat = bound_soc(linear_interpolate(1, chip->soc_at_cv,
 					100, 100, chip->prev_chg_soc));
 	weight_cc = 100 - weight_ibat;
-	chg_soc = bound_soc((soc_ibat * weight_ibat + weight_cc * soc)/100);
+	chg_soc = bound_soc(DIV_ROUND_CLOSEST(soc_ibat * weight_ibat
+			+ weight_cc * soc, 100));
+
 	pr_debug("weight_ibat = %d, weight_cc = %d, soc_ibat = %d, soc_cc = %d\n",
 			weight_ibat, weight_cc, soc_ibat, soc);
 
@@ -1892,6 +1894,7 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	int soc, new_ocv_uv;
 	int shutdown_soc, new_calculated_soc, remaining_usable_charge_uah;
 	struct soc_params params;
+	bool soc_changed = false;
 
 	if (!is_battery_present(chip)) {
 		pr_debug("battery gone, reporting 100\n");
@@ -1994,8 +1997,11 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 						new_calculated_soc);
 
 done_calculating:
-	pr_debug("CC based calculated SOC = %d\n", chip->calculated_soc);
 	mutex_lock(&chip->last_soc_mutex);
+	if (chip->calculated_soc != new_calculated_soc)
+		soc_changed = true;
+	chip->calculated_soc = new_calculated_soc;
+	pr_debug("CC based calculated SOC = %d\n", chip->calculated_soc);
 	if (chip->last_soc_invalid) {
 		chip->last_soc_invalid = false;
 		chip->last_soc = -EINVAL;
@@ -2017,14 +2023,12 @@ done_calculating:
 	}
 	mutex_unlock(&chip->last_soc_mutex);
 
-	if ((new_calculated_soc != chip->calculated_soc
+	if ((soc_changed == true
 			|| chip->somc_params.output_batt_log)
 			&& chip->bms_psy.name != NULL) {
 		power_supply_changed(&chip->bms_psy);
 		pr_debug("power supply changed\n");
-		chip->calculated_soc = new_calculated_soc;
 	} else {
-		chip->calculated_soc = new_calculated_soc;
 		/*
 		 * Call report state of charge anyways to periodically update
 		 * reported SoC. This prevents reported SoC from being stuck
@@ -2263,7 +2267,8 @@ static void btm_notify_vbat(enum qpnp_tm_state state, void *ctx)
 	} else {
 		pr_debug("unknown voltage notification state: %d\n", state);
 	}
-	power_supply_changed(&chip->bms_psy);
+	if (chip->bms_psy.name != NULL)
+		power_supply_changed(&chip->bms_psy);
 }
 
 static int reset_vbat_monitoring(struct qpnp_bms_chip *chip)

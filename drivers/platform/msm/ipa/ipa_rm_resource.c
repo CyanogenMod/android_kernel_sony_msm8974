@@ -171,10 +171,13 @@ bail:
  *	all registered clients of given producer
  * @producer: producer
  * @event: event to notify
+ * @notify_registered_only: notify only clients registered by
+ *	ipa_rm_register()
  */
 void ipa_rm_resource_producer_notify_clients(
 				struct ipa_rm_resource_prod *producer,
-				enum ipa_rm_event event)
+				enum ipa_rm_event event,
+				bool notify_registered_only)
 {
 	struct ipa_rm_notification_info *reg_info, *reg_info_cloned;
 	struct list_head *pos, *q;
@@ -184,6 +187,8 @@ void ipa_rm_resource_producer_notify_clients(
 		reg_info = list_entry(pos,
 					struct ipa_rm_notification_info,
 					link);
+		if (notify_registered_only && !reg_info->explicit)
+			continue;
 		reg_info_cloned = kzalloc(sizeof(*reg_info_cloned), GFP_ATOMIC);
 		if (!reg_info_cloned)
 			goto clone_list_failed;
@@ -224,7 +229,8 @@ static int ipa_rm_resource_producer_create(struct ipa_rm_resource **resource,
 	rwlock_init(&(*producer)->event_listeners_lock);
 	INIT_LIST_HEAD(&((*producer)->event_listeners));
 	result = ipa_rm_resource_producer_register(*producer,
-			&(create_params->reg_params));
+			&(create_params->reg_params),
+			false);
 	if (result)
 		goto register_fail;
 	(*resource) = (struct ipa_rm_resource *) (*producer);
@@ -391,6 +397,7 @@ int ipa_rm_resource_delete(struct ipa_rm_resource *resource)
  * ipa_rm_resource_register() - register resource
  * @resource: [in] resource
  * @reg_params: [in] registration parameters
+ * @explicit: [in] registered explicitly by ipa_rm_register()
  *
  * Returns: 0 on success, negative on failure
  *
@@ -398,7 +405,8 @@ int ipa_rm_resource_delete(struct ipa_rm_resource *resource)
  *
  */
 int ipa_rm_resource_producer_register(struct ipa_rm_resource_prod *producer,
-		struct ipa_rm_register_params *reg_params)
+		struct ipa_rm_register_params *reg_params,
+		bool explicit)
 {
 	int result = 0;
 	struct ipa_rm_notification_info *reg_info;
@@ -430,6 +438,7 @@ int ipa_rm_resource_producer_register(struct ipa_rm_resource_prod *producer,
 	}
 	reg_info->reg_params.user_data = reg_params->user_data;
 	reg_info->reg_params.notify_cb = reg_params->notify_cb;
+	reg_info->explicit = explicit;
 	INIT_LIST_HEAD(&reg_info->link);
 	write_lock(&producer->event_listeners_lock);
 	list_add(&reg_info->link, &producer->event_listeners);
@@ -516,10 +525,11 @@ int ipa_rm_resource_add_dependency(struct ipa_rm_resource *resource,
 		consumer_result = ipa_rm_resource_consumer_request(
 				(struct ipa_rm_resource_cons *)depends_on);
 		spin_lock_irqsave(&resource->state_lock, flags);
-		if (consumer_result != -EINPROGRESS)
+		if (consumer_result != -EINPROGRESS) {
 			resource->state = prev_state;
 			((struct ipa_rm_resource_prod *)
 					resource)->pending_request--;
+		}
 		result = consumer_result;
 		break;
 	}
@@ -610,7 +620,8 @@ int ipa_rm_resource_delete_dependency(struct ipa_rm_resource *resource,
 		ipa_rm_peers_list_has_last_peer(resource->peers_list)) {
 		(void) ipa_rm_wq_send_cmd(IPA_RM_WQ_NOTIFY_PROD,
 				resource->name,
-				resource->state);
+				resource->state,
+				false);
 		result = -EINPROGRESS;
 	}
 	spin_unlock_irqrestore(&resource->state_lock, flags);
@@ -647,8 +658,12 @@ int ipa_rm_resource_producer_request(struct ipa_rm_resource_prod *producer)
 	if (ipa_rm_peers_list_is_empty(producer->resource.peers_list)) {
 		spin_lock_irqsave(&producer->resource.state_lock, flags);
 		producer->resource.state = IPA_RM_GRANTED;
-		spin_unlock_irqrestore(&producer->resource.state_lock, flags);
-		return 0;
+		(void) ipa_rm_wq_send_cmd(IPA_RM_WQ_NOTIFY_PROD,
+			producer->resource.name,
+			IPA_RM_RESOURCE_GRANTED,
+			true);
+		result = 0;
+		goto unlock_and_bail;
 	}
 	spin_lock_irqsave(&producer->resource.state_lock, flags);
 	IPADBG("IPA RM ::ipa_rm_resource_producer_request state [%d]\n",
@@ -699,10 +714,13 @@ int ipa_rm_resource_producer_request(struct ipa_rm_resource_prod *producer)
 		}
 	}
 	spin_lock_irqsave(&producer->resource.state_lock, flags);
-	if (producer->pending_request == 0)
+	if (producer->pending_request == 0) {
 		producer->resource.state = IPA_RM_GRANTED;
-	spin_unlock_irqrestore(&producer->resource.state_lock, flags);
-	goto bail;
+		(void) ipa_rm_wq_send_cmd(IPA_RM_WQ_NOTIFY_PROD,
+			producer->resource.name,
+			IPA_RM_RESOURCE_GRANTED,
+			true);
+	}
 unlock_and_bail:
 	spin_unlock_irqrestore(&producer->resource.state_lock, flags);
 bail:
@@ -730,6 +748,10 @@ int ipa_rm_resource_producer_release(struct ipa_rm_resource_prod *producer)
 	if (ipa_rm_peers_list_is_empty(producer->resource.peers_list)) {
 		spin_lock_irqsave(&producer->resource.state_lock, flags);
 		producer->resource.state = IPA_RM_RELEASED;
+		(void) ipa_rm_wq_send_cmd(IPA_RM_WQ_NOTIFY_PROD,
+			producer->resource.name,
+			IPA_RM_RESOURCE_RELEASED,
+			true);
 		spin_unlock_irqrestore(&producer->resource.state_lock, flags);
 		return 0;
 	}
@@ -776,10 +798,13 @@ int ipa_rm_resource_producer_release(struct ipa_rm_resource_prod *producer)
 		}
 	}
 	spin_lock_irqsave(&producer->resource.state_lock, flags);
-	if (producer->pending_release == 0)
+	if (producer->pending_release == 0) {
 		producer->resource.state = IPA_RM_RELEASED;
-	spin_unlock_irqrestore(&producer->resource.state_lock, flags);
-	return result;
+		(void) ipa_rm_wq_send_cmd(IPA_RM_WQ_NOTIFY_PROD,
+			producer->resource.name,
+			IPA_RM_RESOURCE_RELEASED,
+			true);
+	}
 bail:
 	spin_unlock_irqrestore(&producer->resource.state_lock, flags);
 	IPADBG("IPA RM ::ipa_rm_resource_producer_release EXIT[%d]\n", result);
@@ -805,7 +830,8 @@ static void ipa_rm_resource_producer_handle_cb(
 					&producer->resource.state_lock, flags);
 				ipa_rm_resource_producer_notify_clients(
 						producer,
-						IPA_RM_RESOURCE_GRANTED);
+						IPA_RM_RESOURCE_GRANTED,
+						false);
 				goto bail;
 			}
 		}
@@ -822,7 +848,8 @@ static void ipa_rm_resource_producer_handle_cb(
 					&producer->resource.state_lock, flags);
 				ipa_rm_resource_producer_notify_clients(
 						producer,
-						IPA_RM_RESOURCE_RELEASED);
+						IPA_RM_RESOURCE_RELEASED,
+						false);
 				goto bail;
 			}
 		}
@@ -886,4 +913,198 @@ void ipa_rm_resource_consumer_handle_cb(struct ipa_rm_resource_cons *consumer,
 bail:
 	spin_unlock_irqrestore(&consumer->resource.state_lock, flags);
 	return;
+}
+
+/*
+ * ipa_rm_resource_producer_print_stat() - print the
+ * resource status and all his dependencies
+ *
+ * @resource: [in] Resource resource
+ * @buff: [in] The buf used to print
+ * @size: [in] Buf size
+ *
+ * Returns: number of bytes used on success, negative on failure
+ */
+
+int ipa_rm_resource_producer_print_stat(
+				struct ipa_rm_resource *resource,
+				char *buf,
+				int size){
+
+	int i, nbytes, cnt = 0;
+	unsigned long flags;
+	struct ipa_rm_resource *consumer;
+
+	if (!buf || size < 0)
+		return -EINVAL;
+	switch (resource->name) {
+	case IPA_RM_RESOURCE_BRIDGE_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"BRIDGE_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_A2_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"A2_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_USB_PROD:
+			nbytes = scnprintf(buf + cnt, size - cnt,
+			 "USB_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_HSIC_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			 "HSIC_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_STD_ECM_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			 "STD_ECM_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_0_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			 "WWAN_0_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_1_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"WWAN_1_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_2_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"WWAN_2_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_3_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+				 "WWAN_3_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_4_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"WWAN_4_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_5_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			 "WWAN_5_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_6_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"WWAN_6_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WWAN_7_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			 "WWAN_7_PROD[");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RESOURCE_WLAN_PROD:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			 "WLAN_PROD[");
+		cnt += nbytes;
+		break;
+	default:
+		return -EPERM;
+	}
+	spin_lock_irqsave(&resource->state_lock, flags);
+	switch (resource->state) {
+	case IPA_RM_RELEASED:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"Released] -> ");
+		cnt += nbytes;
+		break;
+	case IPA_RM_REQUEST_IN_PROGRESS:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"Request In Progress] -> ");
+		cnt += nbytes;
+		break;
+	case IPA_RM_GRANTED:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"Granted] -> ");
+		cnt += nbytes;
+		break;
+	case IPA_RM_RELEASE_IN_PROGRESS:
+		nbytes = scnprintf(buf + cnt, size - cnt,
+			"Release In Progress] -> ");
+		cnt += nbytes;
+		break;
+	default:
+		spin_unlock_irqrestore(
+			&resource->state_lock,
+			flags);
+		return -EPERM;
+	}
+	spin_unlock_irqrestore(
+			&resource->state_lock,
+			flags);
+	for (i = 0; i < resource->peers_list->max_peers; ++i) {
+		consumer =
+			ipa_rm_peers_list_get_resource(
+			i,
+			resource->peers_list);
+		if (consumer) {
+			switch (consumer->name) {
+			case IPA_RM_RESOURCE_A2_CONS:
+				nbytes = scnprintf(buf + cnt,
+						size - cnt,
+						 " A2_CONS[");
+				cnt += nbytes;
+				break;
+			case IPA_RM_RESOURCE_USB_CONS:
+				nbytes = scnprintf(buf + cnt,
+						size - cnt,
+						 " USB_CONS[");
+				cnt += nbytes;
+				break;
+			case IPA_RM_RESOURCE_HSIC_CONS:
+				nbytes = scnprintf(buf + cnt,
+						size - cnt,
+						 " HSIC_CONS[");
+				cnt += nbytes;
+				break;
+			default:
+				return -EPERM;
+			}
+			spin_lock_irqsave(&consumer->state_lock, flags);
+			switch (consumer->state) {
+			case IPA_RM_RELEASED:
+				nbytes = scnprintf(buf + cnt, size - cnt,
+					"Released], ");
+				cnt += nbytes;
+				break;
+			case IPA_RM_REQUEST_IN_PROGRESS:
+				nbytes = scnprintf(buf + cnt, size - cnt,
+						"Request In Progress], ");
+				cnt += nbytes;
+					break;
+			case IPA_RM_GRANTED:
+				nbytes = scnprintf(buf + cnt, size - cnt,
+						"Granted], ");
+				cnt += nbytes;
+				break;
+			case IPA_RM_RELEASE_IN_PROGRESS:
+				nbytes = scnprintf(buf + cnt, size - cnt,
+						"Release In Progress], ");
+				cnt += nbytes;
+				break;
+			default:
+				spin_unlock_irqrestore(
+						&consumer->state_lock,
+						flags);
+				return -EPERM;
+			}
+			spin_unlock_irqrestore(
+					&consumer->state_lock,
+					flags);
+		}
+	}
+	nbytes = scnprintf(buf + cnt, size - cnt,
+			 "\n");
+	cnt += nbytes;
+	return cnt;
 }

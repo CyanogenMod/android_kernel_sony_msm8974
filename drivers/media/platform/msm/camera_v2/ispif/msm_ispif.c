@@ -56,7 +56,7 @@ static void msm_ispif_io_dump_reg(struct ispif_device *ispif)
 static inline int msm_ispif_is_intf_valid(uint32_t csid_version,
 	uint8_t intf_type)
 {
-	return (csid_version <= CSID_VERSION_V2 && intf_type != VFE0) ?
+	return (csid_version <= CSID_VERSION_V22 && intf_type != VFE0) ?
 		false : true;
 }
 
@@ -68,7 +68,7 @@ static int msm_ispif_clk_ahb_enable(struct ispif_device *ispif, int enable)
 {
 	int rc = 0;
 
-	if (ispif->csid_version < CSID_VERSION_V3) {
+	if (ispif->csid_version < CSID_VERSION_V30) {
 		/* Older ISPIF versiond don't need ahb clokc */
 		return 0;
 	}
@@ -408,14 +408,14 @@ static int msm_ispif_config(struct ispif_device *ispif,
 
 		if ((intftype >= INTF_MAX) ||
 			(vfe_intf >=  ispif->vfe_info.num_vfe) ||
-			(ispif->csid_version <= CSID_VERSION_V2 &&
+			(ispif->csid_version <= CSID_VERSION_V22 &&
 			(vfe_intf > VFE0))) {
 			pr_err("%s: VFEID %d and CSID version %d mismatch\n",
 				__func__, vfe_intf, ispif->csid_version);
 			return -EINVAL;
 		}
 
-		if (ispif->csid_version >= CSID_VERSION_V3)
+		if (ispif->csid_version >= CSID_VERSION_V30)
 				msm_ispif_select_clk_mux(ispif, intftype,
 				params->entries[i].csid, vfe_intf);
 
@@ -489,11 +489,7 @@ static void msm_ispif_intf_cmd(struct ispif_device *ispif, uint32_t cmd_bits,
 		vfe_intf = params->entries[i].vfe_intf;
 		for (k = 0; k < params->entries[i].num_cids; k++) {
 			cid = params->entries[i].cids[k];
-#if defined(CONFIG_SONY_CAM_V4L2)
 			vc = cid / 4;
-#else
-			vc = cid % 4;
-#endif
 			if (intf_type == RDI2) {
 				/* zero out two bits */
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd1 &=
@@ -578,6 +574,10 @@ static int msm_ispif_stop_frame_boundary(struct ispif_device *ispif,
 	uint16_t cid_mask = 0;
 	uint32_t intf_addr;
 	enum msm_ispif_vfe_intf vfe_intf;
+#if defined(CONFIG_SONY_CAM_V4L2)
+	int retry_cnt = 0;
+	int retry_max = 20;
+#endif
 
 	BUG_ON(!ispif);
 	BUG_ON(!params);
@@ -630,10 +630,24 @@ static int msm_ispif_stop_frame_boundary(struct ispif_device *ispif,
 			goto end;
 		}
 
+#if defined(CONFIG_SONY_CAM_V4L2)
+		for (retry_cnt = 0; retry_cnt < retry_max; retry_cnt++) {
+			if ((msm_camera_io_r(ispif->base + intf_addr) & 0xF)
+				== 0xF) {
+				break;
+			}
+			CDBG("%s: Wait for %d Idle\n", __func__,
+				params->entries[i].intftype);
+			msleep(20);
+		}
+		if (retry_cnt == retry_max)
+			pr_err("%s: retry over\n", __func__);
+#else
 		/* todo_bug_fix? very bad. use readl_poll_timeout */
 		while ((msm_camera_io_r(ispif->base + intf_addr) & 0xF) != 0xF)
 			CDBG("%s: Wait for %d Idle\n", __func__,
 				params->entries[i].intftype);
+#endif
 
 		/* disable CIDs in CID_MASK register */
 		msm_ispif_enable_intf_cids(ispif, params->entries[i].intftype,
@@ -781,7 +795,7 @@ static int msm_ispif_init(struct ispif_device *ispif,
 
 	ispif->csid_version = csid_version;
 
-	if (ispif->csid_version >= CSID_VERSION_V3) {
+	if (ispif->csid_version >= CSID_VERSION_V30) {
 		if (!ispif->clk_mux_mem || !ispif->clk_mux_io) {
 			pr_err("%s csi clk mux mem %p io %p\n", __func__,
 				ispif->clk_mux_mem, ispif->clk_mux_io);

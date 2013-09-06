@@ -11,6 +11,7 @@
 #define ISP_NATIVE_BUF_BIT    0x10000
 #define ISP0_BIT              0x20000
 #define ISP1_BIT              0x40000
+#define ISP_META_CHANNEL_BIT  0x80000
 #define ISP_STATS_STREAM_BIT  0x80000000
 
 enum ISP_START_PIXEL_PATTERN {
@@ -161,12 +162,20 @@ enum msm_vfe_axi_stream_update_type {
 	ENABLE_STREAM_BUF_DIVERT,
 	DISABLE_STREAM_BUF_DIVERT,
 	UPDATE_STREAM_FRAMEDROP_PATTERN,
+	UPDATE_STREAM_AXI_CONFIG,
+};
+
+struct msm_vfe_axi_stream_cfg_update_info {
+	uint32_t stream_handle;
+	uint32_t output_format;
+	enum msm_vfe_frame_skip_pattern skip_pattern;
+	struct msm_vfe_axi_plane_cfg plane_cfg[MAX_PLANES_PER_STREAM];
 };
 
 struct msm_vfe_axi_stream_update_cmd {
-	uint32_t stream_handle;
+	uint32_t num_streams;
 	enum msm_vfe_axi_stream_update_type update_type;
-	enum msm_vfe_frame_skip_pattern skip_pattern;
+	struct msm_vfe_axi_stream_cfg_update_info update_info[MAX_NUM_STREAM];
 };
 
 enum msm_isp_stats_type {
@@ -317,6 +326,7 @@ struct msm_isp_buf_event {
 	uint32_t session_id;
 	uint32_t stream_id;
 	uint32_t handle;
+	uint32_t output_format;
 	int8_t buf_idx;
 };
 struct msm_isp_stats_event {
@@ -335,6 +345,8 @@ struct msm_isp_event_data {
 	 *which use monotonic clock
 	 */
 	struct timeval timestamp;
+	/* Monotonic timestamp since bootup */
+	struct timeval mono_timestamp;
 	/* if pix is a src frame_id is from camif */
 	uint32_t frame_id;
 	union {
@@ -362,6 +374,9 @@ struct msm_isp_event_data {
 #define V4L2_PIX_FMT_QGBRG12 v4l2_fourcc('Q', 'G', 'B', '2')
 #define V4L2_PIX_FMT_QGRBG12 v4l2_fourcc('Q', 'G', 'R', '2')
 #define V4L2_PIX_FMT_QRGGB12 v4l2_fourcc('Q', 'R', 'G', '2')
+#define V4L2_PIX_FMT_NV14 v4l2_fourcc('N', 'V', '1', '4')
+#define V4L2_PIX_FMT_NV41 v4l2_fourcc('N', 'V', '4', '1')
+#define V4L2_PIX_FMT_META v4l2_fourcc('Q', 'M', 'E', 'T')
 
 #define VIDIOC_MSM_VFE_REG_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE, struct msm_vfe_cfg_cmd2)

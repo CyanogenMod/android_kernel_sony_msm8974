@@ -28,6 +28,7 @@
 	aliases {
 		sdhc1 = &sdhc_1; /* SDC1 eMMC slot */
 		sdhc2 = &sdhc_2; /* SDC2 SD card slot */
+		spi4 = &spi_4;
 	};
 
 	soc: soc { };
@@ -500,6 +501,29 @@
 		qcom,i2c-bus-freq = <100000>;
 	};
 
+	spi_4: spi@f9926000 { /* BLSP1 QUP4 */
+		compatible = "qcom,spi-qup-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "spi_physical", "spi_bam_physical";
+		reg = <0xf9926000 0x1000>,
+		      <0xf9904000 0x15000>;
+		interrupt-names = "spi_irq", "spi_bam_irq";
+		interrupts = <0 98 0>, <0 238 0>;
+		spi-max-frequency = <50000000>;
+
+		gpios = <&msmgpio 89 0>, /* CLK  */
+			<&msmgpio 87 0>, /* MISO */
+			<&msmgpio 86 0>; /* MOSI */
+		cs-gpios = <&msmgpio 88 0>;
+
+		qcom,infinite-mode = <0>;
+		qcom,use-bam;
+		qcom,ver-reg-exists;
+		qcom,bam-consumer-pipe-index = <18>;
+		qcom,bam-producer-pipe-index = <19>;
+	};
+
 	qcom,pronto@fb21b000 {
 		compatible = "qcom,pil-pronto";
 		reg = <0xfb21b000 0x3000>,
@@ -695,6 +719,7 @@
 		qcom,gpio-err-fatal = <&smp2pgpio_ssr_smp2p_1_in 0 0>;
 		qcom,gpio-err-ready = <&smp2pgpio_ssr_smp2p_1_in 1 0>;
 		qcom,gpio-proxy-unvote = <&smp2pgpio_ssr_smp2p_1_in 2 0>;
+		qcom,gpio-stop-ack = <&smp2pgpio_ssr_smp2p_1_in 3 0>;
 
 		/* GPIO output to mss */
 		qcom,gpio-force-stop = <&smp2pgpio_ssr_smp2p_1_out 0 0>;
@@ -775,6 +800,12 @@
                 compatible = "qcom,msm-rng";
                 reg = <0xf9bff000 0x200>;
                 qcom,msm-rng-iface-clk;
+                qcom,msm-bus,name = "msm-rng-noc";
+                qcom,msm-bus,num-cases = <2>;
+                qcom,msm-bus,num-paths = <1>;
+                qcom,msm-bus,vectors-KBps =
+                                <1 618 0 0>,
+                                <1 618 0 800>;
         };
 
 	qcom,msm-rtb {
@@ -980,6 +1011,67 @@
 		qcom,hw-settle-time = <2>;
 		qcom,fast-avg-setup = <0>;
 	};
+
+	chan@13 {
+		label = "pa_therm0";
+		reg = <0x13>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <0>;
+		qcom,calibration-type = "ratiometric";
+		qcom,scale-function = <2>;
+		qcom,hw-settle-time = <2>;
+		qcom,fast-avg-setup = <0>;
+	};
 };
 
+&pm8110_adc_tm {
+	/* Channel Node */
+	chan@30 {
+		label = "batt_therm";
+		reg = <0x30>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <0>;
+		qcom,calibration-type = "ratiometric";
+		qcom,scale-function = <1>;
+		qcom,hw-settle-time = <2>;
+		qcom,fast-avg-setup = <3>;
+		qcom,btm-channel-number = <0x48>;
+	};
 
+	chan@8 {
+		label = "die_temp";
+		reg = <8>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <0>;
+		qcom,calibration-type = "absolute";
+		qcom,scale-function = <3>;
+		qcom,hw-settle-time = <0>;
+		qcom,fast-avg-setup = <3>;
+		qcom,btm-channel-number = <0x68>;
+	};
+
+	chan@6 {
+		label = "vbat_sns";
+		reg = <6>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <1>;
+		qcom,calibration-type = "absolute";
+		qcom,scale-function = <0>;
+		qcom,hw-settle-time = <0>;
+		qcom,fast-avg-setup = <3>;
+		qcom,btm-channel-number = <0x70>;
+	};
+
+	chan@13 {
+		label = "pa_therm0";
+		reg = <0x13>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <0>;
+		qcom,calibration-type = "ratiometric";
+		qcom,scale-function = <2>;
+		qcom,hw-settle-time = <2>;
+		qcom,fast-avg-setup = <0>;
+		qcom,btm-channel-number = <0x78>;
+		qcom,thermal-node;
+	};
+};

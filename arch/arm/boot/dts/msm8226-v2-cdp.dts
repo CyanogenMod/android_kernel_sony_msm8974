@@ -11,14 +11,15 @@
  */
 
 /dts-v1/;
-/include/ "msm8226.dtsi"
-/include/ "msm8226-qrd.dtsi"
+/include/ "msm8226-v2.dtsi"
+/include/ "msm8226-cdp.dtsi"
 
 / {
-	model = "Qualcomm MSM 8226 QRD";
-	compatible = "qcom,msm8226-qrd", "qcom,msm8226", "qcom,qrd";
-	qcom,msm-id = <145 11 0>,
-		      <158 11 0>,
-		      <159 11 0>,
-		      <198 11 0>;
+	model = "Qualcomm MSM 8226v2 CDP";
+	compatible = "qcom,msm8226-cdp", "qcom,msm8226", "qcom,cdp";
+	qcom,msm-id = <145 1 0x20000>,
+		      <158 1 0x20000>,
+		      <159 1 0x20000>,
+		      <198 1 0x20000>,
+		      <205 1 0x20000>;
 };

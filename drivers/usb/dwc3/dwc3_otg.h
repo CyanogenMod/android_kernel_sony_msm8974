@@ -54,7 +54,7 @@ struct dwc3_otg {
 	struct power_supply	*dc_psy;
 	struct completion	dwc3_xcvr_vbus_init;
 	int			host_bus_suspend;
-	int			chgdet_retry_count;
+	int			charger_retry_count;
 };
 
 /**
@@ -66,7 +66,9 @@ struct dwc3_otg {
  * DWC3_DCP_CHARGER	Dedicated charger port (AC charger/ Wall charger).
  * DWC3_CDP_CHARGER	Charging downstream port. Enumeration can happen and
  *                      IDEV_CHG_MAX can be drawn irrespective of USB state.
- * DWC3_UNSUPPORTED_CHARGER Unsupported charger.
+ * DWC3_PROPRIETARY_CHARGER A proprietary charger pull DP and DM to specific
+ *                     voltages between 2.0-3.3v for identification.
+ * DWC3_FLOATED_CHARGER Non standard charger whose data lines are floating.
  */
 enum dwc3_chg_type {
 	DWC3_INVALID_CHARGER = 0,
@@ -74,7 +76,7 @@ enum dwc3_chg_type {
 	DWC3_DCP_CHARGER,
 	DWC3_CDP_CHARGER,
 	DWC3_PROPRIETARY_CHARGER,
-	DWC3_UNSUPPORTED_CHARGER,
+	DWC3_FLOATED_CHARGER,
 };
 
 struct dwc3_charger {

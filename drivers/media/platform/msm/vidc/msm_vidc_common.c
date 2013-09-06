@@ -46,6 +46,28 @@
 	u32 __mbs = (__h >> 4) * (__w >> 4);\
 	__mbs;\
 })
+static bool is_turbo_requested(struct msm_vidc_core *core,
+		enum session_type type)
+{
+	struct msm_vidc_inst *inst = NULL;
+
+	list_for_each_entry(inst, &core->instances, list) {
+		bool wants_turbo = false;
+
+		mutex_lock(&inst->lock);
+		if (inst->session_type == type &&
+			inst->state >= MSM_VIDC_OPEN_DONE &&
+			inst->state < MSM_VIDC_STOP_DONE) {
+			wants_turbo = inst->flags & VIDC_TURBO;
+		}
+		mutex_unlock(&inst->lock);
+
+		if (wants_turbo)
+			return true;
+	}
+
+	return false;
+}
 
 static int msm_comm_get_load(struct msm_vidc_core *core,
 	enum session_type type)
@@ -61,29 +83,8 @@ static int msm_comm_get_load(struct msm_vidc_core *core,
 		if (inst->session_type == type &&
 			inst->state >= MSM_VIDC_OPEN_DONE &&
 			inst->state < MSM_VIDC_STOP_DONE) {
-			int stride, scanlines, rc;
-			struct hfi_device *hdev;
-
-			hdev = inst->core->device;
-			if (!hdev) {
-				dprintk(VIDC_ERR,
-						"No hdev (probably in bad state)\n");
-				return -EINVAL;
-			}
-
-			rc = call_hfi_op(hdev, get_stride_scanline,
-					COLOR_FMT_NV12,
-					inst->prop.width, inst->prop.height,
-					&stride, &scanlines);
-			if (rc) {
-				dprintk(VIDC_WARN,
-						"Failed to determine stride/scan when getting load. Perf. might be affected\n");
-				stride = inst->prop.width;
-				scanlines = inst->prop.height;
-			}
-
-			num_mbs_per_sec += NUM_MBS_PER_SEC(stride, scanlines,
-					inst->prop.fps);
+			num_mbs_per_sec += NUM_MBS_PER_SEC(inst->prop.height,
+					inst->prop.width, inst->prop.fps);
 		}
 		mutex_unlock(&inst->lock);
 	}
@@ -108,7 +109,10 @@ static int msm_comm_scale_bus(struct msm_vidc_core *core,
 		return -EINVAL;
 	}
 
-	load = msm_comm_get_load(core, type);
+	if (is_turbo_requested(core, type))
+		load = core->resources.max_load;
+	else
+		load = msm_comm_get_load(core, type);
 
 	rc = call_hfi_op(hdev, scale_bus, hdev->hfi_device_data,
 					 load, type, mtype);
@@ -717,13 +721,36 @@ static void handle_ebd(enum command_response cmd, void *data)
 	struct msm_vidc_cb_data_done *response = data;
 	struct vb2_buffer *vb;
 	struct msm_vidc_inst *inst;
+	struct vidc_hal_ebd *empty_buf_done;
+
 	if (!response) {
 		dprintk(VIDC_ERR, "Invalid response from vidc_hal\n");
 		return;
 	}
 	vb = response->clnt_data;
 	inst = (struct msm_vidc_inst *)response->session_id;
+	if (!inst) {
+		dprintk(VIDC_ERR, "%s Invalid response from vidc_hal\n",
+			__func__);
+		return;
+	}
 	if (vb) {
+		vb->v4l2_buf.flags = 0;
+		empty_buf_done = (struct vidc_hal_ebd *)&response->input_done;
+		if (empty_buf_done) {
+			if (empty_buf_done->status == VIDC_ERR_NOT_SUPPORTED) {
+				dprintk(VIDC_INFO,
+					"Failed : Unsupported input stream\n");
+				vb->v4l2_buf.flags |=
+					V4L2_QCOM_BUF_INPUT_UNSUPPORTED;
+			}
+			if (empty_buf_done->status == VIDC_ERR_BITSTREAM_ERR) {
+				dprintk(VIDC_INFO,
+					"Failed : Corrupted input stream\n");
+				vb->v4l2_buf.flags |=
+					V4L2_QCOM_BUF_DATA_CORRUPT;
+			}
+		}
 		mutex_lock(&inst->bufq[OUTPUT_PORT].lock);
 		vb2_buffer_done(vb, VB2_BUF_STATE_DONE);
 		mutex_unlock(&inst->bufq[OUTPUT_PORT].lock);
@@ -776,6 +803,8 @@ static void handle_fbd(enum command_response cmd, void *data)
 			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_FLAG_DECODEONLY;
 		if (fill_buf_done->flags1 & HAL_BUFFERFLAG_DATACORRUPT)
 			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_DATA_CORRUPT;
+		if (fill_buf_done->flags1 & HAL_BUFFERFLAG_DROP_FRAME)
+			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_DROP_FRAME;
 		switch (fill_buf_done->picture_type) {
 		case HAL_PICTURE_IDR:
 			vb->v4l2_buf.flags |= V4L2_QCOM_BUF_FLAG_IDRFRAME;
@@ -955,8 +984,14 @@ static int msm_comm_scale_clocks(struct msm_vidc_core *core)
 			__func__, hdev);
 		return -EINVAL;
 	}
-	num_mbs_per_sec = msm_comm_get_load(core, MSM_VIDC_ENCODER);
-	num_mbs_per_sec += msm_comm_get_load(core, MSM_VIDC_DECODER);
+
+	if (is_turbo_requested(core, MSM_VIDC_ENCODER) ||
+			is_turbo_requested(core, MSM_VIDC_DECODER)) {
+		num_mbs_per_sec = core->resources.max_load;
+	} else {
+		num_mbs_per_sec = msm_comm_get_load(core, MSM_VIDC_ENCODER);
+		num_mbs_per_sec += msm_comm_get_load(core, MSM_VIDC_DECODER);
+	}
 
 	dprintk(VIDC_INFO, "num_mbs_per_sec = %d\n", num_mbs_per_sec);
 	rc = call_hfi_op(hdev, scale_clocks,
@@ -1565,7 +1600,7 @@ static int set_scratch_buffers(struct msm_vidc_inst *inst,
 		scratch_buf->buffer_count_actual,
 		scratch_buf->buffer_size);
 
-	if (inst->mode == VIDC_SECURE)
+	if (inst->flags & VIDC_SECURE)
 		smem_flags |= SMEM_SECURE;
 
 	if (scratch_buf->buffer_size) {
@@ -1653,7 +1688,7 @@ static int set_persist_buffers(struct msm_vidc_inst *inst,
 		return rc;
 	}
 
-	if (inst->mode == VIDC_SECURE)
+	if (inst->flags & VIDC_SECURE)
 		smem_flags |= SMEM_SECURE;
 
 	if (persist_buf->buffer_size) {
@@ -1892,6 +1927,12 @@ int msm_comm_qbuf(struct vb2_buffer *vb)
 				frame_data.flags |= HAL_BUFFERFLAG_CODECCONFIG;
 				dprintk(VIDC_DBG,
 					"Received CODECCONFIG on output cap\n");
+			}
+			if (vb->v4l2_buf.flags &
+					V4L2_QCOM_BUF_FLAG_DECODEONLY) {
+				frame_data.flags |= HAL_BUFFERFLAG_DECODEONLY;
+				dprintk(VIDC_DBG,
+					"Received DECODEONLY on output cap\n");
 			}
 			if (vb->v4l2_buf.flags &
 				V4L2_QCOM_BUF_TIMESTAMP_INVALID)

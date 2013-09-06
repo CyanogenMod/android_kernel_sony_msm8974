@@ -1,5 +1,4 @@
 /* Copyright (c) 2002,2007-2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,15 +9,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * NOTE: This file has been modified by Sony Mobile Communications AB.
- * Modifications are licensed under the License.
  */
 #ifndef __KGSL_DEVICE_H
 #define __KGSL_DEVICE_H
 
 #include <linux/idr.h>
 #include <linux/pm_qos.h>
-#include <linux/notifier.h>
+#include <linux/sched.h>
 
 #include "kgsl.h"
 #include "kgsl_mmu.h"
@@ -107,11 +104,10 @@ struct kgsl_functable {
 	   calling the hook */
 	void (*setstate) (struct kgsl_device *device, unsigned int context_id,
 			uint32_t flags);
-	int (*drawctxt_create) (struct kgsl_device *device,
-		struct kgsl_pagetable *pagetable, struct kgsl_context *context,
-		uint32_t *flags);
-	void (*drawctxt_destroy) (struct kgsl_device *device,
-		struct kgsl_context *context);
+	struct kgsl_context *(*drawctxt_create) (struct kgsl_device_private *,
+						uint32_t *flags);
+	void (*drawctxt_detach) (struct kgsl_context *context);
+	void (*drawctxt_destroy) (struct kgsl_context *context);
 	long (*ioctl) (struct kgsl_device_private *dev_priv,
 		unsigned int cmd, void *data);
 	int (*setproperty) (struct kgsl_device *device,
@@ -176,7 +172,9 @@ struct kgsl_device {
 	struct completion hwaccess_gate;
 	const struct kgsl_functable *ftbl;
 	struct work_struct idle_check_ws;
+	struct work_struct hang_check_ws;
 	struct timer_list idle_timer;
+	struct timer_list hang_timer;
 	struct kgsl_pwrctrl pwrctrl;
 	int open_count;
 
@@ -193,6 +191,7 @@ struct kgsl_device {
 	struct completion ft_gate;
 	struct dentry *d_debugfs;
 	struct idr context_idr;
+	rwlock_t context_lock;
 
 	void *snapshot;		/* Pointer to the snapshot memory region */
 	int snapshot_maxsize;   /* Max size of the snapshot region */
@@ -230,8 +229,7 @@ struct kgsl_device {
 	int pm_ib_enabled;
 
 	int reset_counter; /* Track how many GPU core resets have occured */
-
-	struct notifier_block fb_notif;
+	int cff_dump_enable;
 };
 
 void kgsl_process_events(struct work_struct *work);
@@ -242,6 +240,8 @@ void kgsl_process_events(struct work_struct *work);
 	.ft_gate = COMPLETION_INITIALIZER((_dev).ft_gate),\
 	.idle_check_ws = __WORK_INITIALIZER((_dev).idle_check_ws,\
 			kgsl_idle_check),\
+	.hang_check_ws = __WORK_INITIALIZER((_dev).hang_check_ws,\
+			kgsl_hang_check),\
 	.ts_expired_ws  = __WORK_INITIALIZER((_dev).ts_expired_ws,\
 			kgsl_process_events),\
 	.context_idr = IDR_INIT((_dev).context_idr),\
@@ -254,31 +254,44 @@ void kgsl_process_events(struct work_struct *work);
 	.ver_minor = DRIVER_VERSION_MINOR
 
 
+/* bits for struct kgsl_context.priv */
+/* the context has been destroyed by userspace and is no longer using the gpu */
+#define KGSL_CONTEXT_DETACHED 0
+/* the context has caused a pagefault */
+#define KGSL_CONTEXT_PAGEFAULT 1
+
 /**
  * struct kgsl_context - Master structure for a KGSL context object
- * @refcount - kref object for reference counting the context
- * @id - integer identifier for the context
- * @dev_priv - pointer to the owning device instance
- * @devctxt - pointer to the device specific context information
- * @reset_status - status indication whether a gpu reset occured and whether
+ * @refcount: kref object for reference counting the context
+ * @id: integer identifier for the context
+ * @priv: in-kernel context flags, use KGSL_CONTEXT_* values
+ * @dev_priv: pointer to the owning device instance
+ * @reset_status: status indication whether a gpu reset occured and whether
  * this context was responsible for causing it
- * @wait_on_invalid_ts - flag indicating if this context has tried to wait on a
+ * @wait_on_invalid_ts: flag indicating if this context has tried to wait on a
  * bad timestamp
- * @timeline - sync timeline used to create fences that can be signaled when a
+ * @timeline: sync timeline used to create fences that can be signaled when a
  * sync_pt timestamp expires
- * @events - list head of pending events for this context
- * @events_list - list node for the list of all contexts that have pending events
+ * @events: list head of pending events for this context
+ * @events_list: list node for the list of all contexts that have pending events
+ * @pid: process that owns this context.
+ * @pagefault: flag set if this context caused a pagefault.
+ * @pagefault_ts: global timestamp of the pagefault, if KGSL_CONTEXT_PAGEFAULT
+ * is set.
  */
 struct kgsl_context {
 	struct kref refcount;
 	uint32_t id;
-	struct kgsl_device_private *dev_priv;
-	void *devctxt;
+	pid_t pid;
+	unsigned long priv;
+	struct kgsl_device *device;
+	struct kgsl_pagetable *pagetable;
 	unsigned int reset_status;
 	bool wait_on_invalid_ts;
 	struct sync_timeline *timeline;
 	struct list_head events;
 	struct list_head events_list;
+	unsigned int pagefault_ts;
 };
 
 struct kgsl_process_private {
@@ -403,17 +416,7 @@ static inline int kgsl_create_device_workqueue(struct kgsl_device *device)
 	return 0;
 }
 
-static inline struct kgsl_context *
-kgsl_find_context(struct kgsl_device_private *dev_priv, uint32_t id)
-{
-	struct kgsl_context *ctxt =
-		idr_find(&dev_priv->device->context_idr, id);
 
-	/* Make sure that the context belongs to the current instance so
-	   that other processes can't guess context IDs and mess things up */
-
-	return  (ctxt && ctxt->dev_priv == dev_priv) ? ctxt : NULL;
-}
 
 int kgsl_check_timestamp(struct kgsl_device *device,
 		struct kgsl_context *context, unsigned int timestamp);
@@ -437,32 +440,111 @@ kgsl_device_get_drvdata(struct kgsl_device *dev)
 	return pdev->dev.platform_data;
 }
 
-/**
- * kgsl_context_get - Get context reference count
- * @context
- *
- * Asynchronous code that holds a pointer to a context
- * must hold a reference count on it. The kgsl device
- * mutex must be held while the context reference count
- * is changed.
- */
-static inline void
-kgsl_context_get(struct kgsl_context *context)
-{
-	kref_get(&context->refcount);
-}
-
 void kgsl_context_destroy(struct kref *kref);
 
+int kgsl_context_init(struct kgsl_device_private *, struct kgsl_context
+		*context);
+
 /**
- * kgsl_context_put - Release context reference count
- * @context
+ * kgsl_context_put() - Release context reference count
+ * @context: Pointer to the KGSL context to be released
  *
+ * Reduce the reference count on a KGSL context and destroy it if it is no
+ * longer needed
  */
 static inline void
 kgsl_context_put(struct kgsl_context *context)
 {
-	kref_put(&context->refcount, kgsl_context_destroy);
+	if (context)
+		kref_put(&context->refcount, kgsl_context_destroy);
+}
+
+/**
+ * kgsl_context_detached() - check if a context is detached
+ * @context: the context
+ *
+ * Check if a context has been destroyed by userspace and is only waiting
+ * for reference counts to go away. This check is used to weed out
+ * contexts that shouldn't use the gpu so NULL is considered detached.
+ */
+static inline bool kgsl_context_detached(struct kgsl_context *context)
+{
+	return (context == NULL || test_bit(KGSL_CONTEXT_DETACHED,
+						&context->priv));
+}
+
+
+/**
+ * kgsl_context_get() - get a pointer to a KGSL context
+ * @device: Pointer to the KGSL device that owns the context
+ * @id: Context ID
+ *
+ * Find the context associated with the given ID number, increase the reference
+ * count on it and return it.  The caller must make sure that this call is
+ * paired with a kgsl_context_put.  This function is for internal use because it
+ * doesn't validate the ownership of the context with the calling process - use
+ * kgsl_context_get_owner for that
+ */
+static inline struct kgsl_context *kgsl_context_get(struct kgsl_device *device,
+		uint32_t id)
+{
+	struct kgsl_context *context = NULL;
+
+	read_lock(&device->context_lock);
+
+	context = idr_find(&device->context_idr, id);
+
+	/* Don't return a context that has been detached */
+	if (kgsl_context_detached(context))
+		context = NULL;
+	else
+		kref_get(&context->refcount);
+
+	read_unlock(&device->context_lock);
+
+	return context;
+}
+
+/**
+* _kgsl_context_get() - lightweight function to just increment the ref count
+* @context: Pointer to the KGSL context
+*
+* Get a reference to the specified KGSL context structure. This is a
+* lightweight way to just increase the refcount on a known context rather than
+* walking through kgsl_context_get and searching the iterator
+*/
+static inline void _kgsl_context_get(struct kgsl_context *context)
+{
+	if (context)
+		kref_get(&context->refcount);
+}
+
+/**
+ * kgsl_context_get_owner() - get a pointer to a KGSL context in a specific
+ * process
+ * @dev_priv: Pointer to the process struct
+ * @id: Context ID to return
+ *
+ * Find the context associated with the given ID number, increase the reference
+ * count on it and return it.  The caller must make sure that this call is
+ * paired with a kgsl_context_put. This function validates that the context id
+ * given is owned by the dev_priv instancet that is passed in.  See
+ * kgsl_context_get for the internal version that doesn't do the check
+ */
+static inline struct kgsl_context *kgsl_context_get_owner(
+		struct kgsl_device_private *dev_priv, uint32_t id)
+{
+	struct kgsl_context *context;
+
+	context = kgsl_context_get(dev_priv->device, id);
+
+	/* Verify that the context belongs to current calling process. */
+	if (context != NULL && context->pid != dev_priv->process_priv->pid) {
+		kgsl_context_put(context);
+		return NULL;
+	}
+
+	return context;
 }
 
 #endif  /* __KGSL_DEVICE_H */

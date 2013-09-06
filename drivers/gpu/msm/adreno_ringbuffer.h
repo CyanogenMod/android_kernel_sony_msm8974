@@ -60,11 +60,11 @@ struct adreno_ringbuffer {
 };
 
 
-#define GSL_RB_WRITE(ring, gpuaddr, data) \
+#define GSL_RB_WRITE(device, ring, gpuaddr, data) \
 	do { \
 		*ring = data; \
 		wmb(); \
-		kgsl_cffdump_setmem(gpuaddr, data, 4); \
+		kgsl_cffdump_setmem(device, gpuaddr, data, 4); \
 		ring++; \
 		gpuaddr += sizeof(uint); \
 	} while (0)
@@ -96,6 +96,8 @@ int adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 				unsigned int flags);
 
 int adreno_ringbuffer_init(struct kgsl_device *device);
+
+int adreno_ringbuffer_warm_start(struct adreno_ringbuffer *rb);
 
 int adreno_ringbuffer_start(struct adreno_ringbuffer *rb);
 

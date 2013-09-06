@@ -1496,7 +1496,7 @@ static const char *chg_to_string(enum dwc3_chg_type chg_type)
 	case DWC3_DCP_CHARGER:		return "USB_DCP_CHARGER";
 	case DWC3_CDP_CHARGER:		return "USB_CDP_CHARGER";
 	case DWC3_PROPRIETARY_CHARGER:	return "USB_PROPRIETARY_CHARGER";
-	case DWC3_UNSUPPORTED_CHARGER:	return "INVALID_CHARGER";
+	case DWC3_FLOATED_CHARGER:	return "USB_FLOATED_CHARGER";
 	default:			return "UNKNOWN_CHARGER";
 	}
 }
@@ -1510,6 +1510,7 @@ static void dwc3_chg_detect_work(struct work_struct *w)
 {
 	struct dwc3_msm *mdwc = container_of(w, struct dwc3_msm, chg_work.work);
 	bool is_dcd = false, tmout, vout;
+	static bool dcd;
 	unsigned long delay;
 
 	dev_dbg(mdwc->dev, "chg detection work\n");
@@ -1525,24 +1526,13 @@ static void dwc3_chg_detect_work(struct work_struct *w)
 		is_dcd = dwc3_chg_check_dcd(mdwc);
 		tmout = ++mdwc->dcd_retries == DWC3_CHG_DCD_MAX_RETRIES;
 		if (is_dcd || tmout) {
+			if (is_dcd)
+				dcd = true;
+			else
+				dcd = false;
 			dwc3_chg_disable_dcd(mdwc);
+			usleep_range(1000, 1200);
 			if (dwc3_chg_det_check_linestate(mdwc)) {
-				dwc3_chg_enable_primary_det(mdwc);
-				usleep_range(1000, 1200);
-				vout = dwc3_chg_det_check_output(mdwc);
-				if (!vout) {
-					dwc3_chg_enable_secondary_det(mdwc);
-					usleep_range(1000, 1200);
-					vout = dwc3_chg_det_check_output(mdwc);
-					if (!vout) {
-						mdwc->charger.chg_type =
-						DWC3_UNSUPPORTED_CHARGER;
-						mdwc->chg_state =
-							USB_CHG_STATE_DETECTED;
-						delay = 0;
-						break;
-					}
-				}
 				mdwc->charger.chg_type =
 						DWC3_PROPRIETARY_CHARGER;
 				mdwc->chg_state = USB_CHG_STATE_DETECTED;
@@ -1563,7 +1553,15 @@ static void dwc3_chg_detect_work(struct work_struct *w)
 			delay = DWC3_CHG_SECONDARY_DET_TIME;
 			mdwc->chg_state = USB_CHG_STATE_PRIMARY_DONE;
 		} else {
-			mdwc->charger.chg_type = DWC3_SDP_CHARGER;
+			/*
+			 * Detect floating charger only if propreitary
+			 * charger detection is enabled.
+			 */
+			if (!dcd && prop_chg_detect)
+				mdwc->charger.chg_type =
+						DWC3_FLOATED_CHARGER;
+			else
+				mdwc->charger.chg_type = DWC3_SDP_CHARGER;
 			mdwc->chg_state = USB_CHG_STATE_DETECTED;
 			delay = 0;
 		}
@@ -1643,6 +1641,7 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc)
 	}
 
 	dcp = ((mdwc->charger.chg_type == DWC3_DCP_CHARGER) ||
+	      (mdwc->charger.chg_type == DWC3_FLOATED_CHARGER) ||
 	      (mdwc->charger.chg_type == DWC3_PROPRIETARY_CHARGER));
 	host_bus_suspend = mdwc->host_mode == 1;
 
@@ -1766,6 +1765,7 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	}
 
 	dcp = ((mdwc->charger.chg_type == DWC3_DCP_CHARGER) ||
+	      (mdwc->charger.chg_type == DWC3_FLOATED_CHARGER) ||
 	      (mdwc->charger.chg_type == DWC3_PROPRIETARY_CHARGER));
 	host_bus_suspend = mdwc->host_mode == 1;
 
@@ -2128,9 +2128,9 @@ static void dwc3_msm_external_power_changed(struct power_supply *psy)
 		dwc3_start_chg_det(&mdwc->charger, false);
 		mdwc->ext_vbus_psy->get_property(mdwc->ext_vbus_psy,
 					POWER_SUPPLY_PROP_CURRENT_MAX, &ret);
-		power_supply_set_current_limit(&mdwc->usb_psy, ret.intval);
 	}
 
+	power_supply_set_current_limit(&mdwc->usb_psy, ret.intval);
 	power_supply_set_online(&mdwc->usb_psy, ret.intval);
 	power_supply_changed(&mdwc->usb_psy);
 }

@@ -111,9 +111,30 @@ static void msm_cci_flush_queue(struct cci_device *cci_dev,
 	msm_camera_io_w(1 << master, cci_dev->base + CCI_HALT_REQ_ADDR);
 	rc = wait_for_completion_interruptible_timeout(
 		&cci_dev->cci_master_info[master].reset_complete, CCI_TIMEOUT);
-	if (rc <= 0)
-		pr_err("%s: wait_for_completion_interruptible_timeout %d\n",
-			__func__, __LINE__);
+	if (rc < 0) {
+		pr_err("%s:%d wait failed\n", __func__, __LINE__);
+	} else if (rc == 0) {
+		pr_err("%s:%d wait timeout\n", __func__, __LINE__);
+
+		/* Set reset pending flag to TRUE */
+		cci_dev->cci_master_info[master].reset_pending = TRUE;
+
+		/* Set proper mask to RESET CMD address based on MASTER */
+		if (master == MASTER_0)
+			msm_camera_io_w(CCI_M0_RESET_RMSK,
+				cci_dev->base + CCI_RESET_CMD_ADDR);
+		else
+			msm_camera_io_w(CCI_M1_RESET_RMSK,
+				cci_dev->base + CCI_RESET_CMD_ADDR);
+
+		/* wait for reset done irq */
+		rc = wait_for_completion_interruptible_timeout(
+			&cci_dev->cci_master_info[master].reset_complete,
+			CCI_TIMEOUT);
+		if (rc <= 0)
+			pr_err("%s:%d wait failed %d\n", __func__, __LINE__,
+				rc);
+	}
 	return;
 }
 
@@ -714,40 +735,40 @@ static irqreturn_t msm_cci_irq(int irq_num, void *data)
 			complete(&cci_dev->cci_master_info[MASTER_1].
 				reset_complete);
 		}
-	} else if ((irq & CCI_IRQ_STATUS_0_I2C_M0_RD_DONE_BMSK) ||
+	}
+	if ((irq & CCI_IRQ_STATUS_0_I2C_M0_RD_DONE_BMSK) ||
 		(irq & CCI_IRQ_STATUS_0_I2C_M0_Q0_REPORT_BMSK) ||
 		(irq & CCI_IRQ_STATUS_0_I2C_M0_Q1_REPORT_BMSK)) {
 		cci_dev->cci_master_info[MASTER_0].status = 0;
 		complete(&cci_dev->cci_master_info[MASTER_0].reset_complete);
-	} else if ((irq & CCI_IRQ_STATUS_0_I2C_M1_RD_DONE_BMSK) ||
+	}
+	if ((irq & CCI_IRQ_STATUS_0_I2C_M1_RD_DONE_BMSK) ||
 		(irq & CCI_IRQ_STATUS_0_I2C_M1_Q0_REPORT_BMSK) ||
 		(irq & CCI_IRQ_STATUS_0_I2C_M1_Q1_REPORT_BMSK)) {
 		cci_dev->cci_master_info[MASTER_1].status = 0;
 		complete(&cci_dev->cci_master_info[MASTER_1].reset_complete);
-	} else if (irq & CCI_IRQ_STATUS_0_I2C_M0_Q0Q1_HALT_ACK_BMSK) {
+	}
+	if (irq & CCI_IRQ_STATUS_0_I2C_M0_Q0Q1_HALT_ACK_BMSK) {
 		cci_dev->cci_master_info[MASTER_0].reset_pending = TRUE;
 		msm_camera_io_w(CCI_M0_RESET_RMSK,
 			cci_dev->base + CCI_RESET_CMD_ADDR);
-	} else if (irq & CCI_IRQ_STATUS_0_I2C_M1_Q0Q1_HALT_ACK_BMSK) {
+	}
+	if (irq & CCI_IRQ_STATUS_0_I2C_M1_Q0Q1_HALT_ACK_BMSK) {
 		cci_dev->cci_master_info[MASTER_1].reset_pending = TRUE;
 		msm_camera_io_w(CCI_M1_RESET_RMSK,
 			cci_dev->base + CCI_RESET_CMD_ADDR);
-	} else if (irq & CCI_IRQ_STATUS_0_I2C_M0_ERROR_BMSK) {
+	}
+	if (irq & CCI_IRQ_STATUS_0_I2C_M0_ERROR_BMSK) {
 		pr_err("%s:%d MASTER_0 error %x\n", __func__, __LINE__, irq);
 		cci_dev->cci_master_info[MASTER_0].status = -EINVAL;
 		msm_camera_io_w(CCI_M0_HALT_REQ_RMSK,
 			cci_dev->base + CCI_HALT_REQ_ADDR);
-	} else if (irq & CCI_IRQ_STATUS_0_I2C_M1_ERROR_BMSK) {
+	}
+	if (irq & CCI_IRQ_STATUS_0_I2C_M1_ERROR_BMSK) {
 		pr_err("%s:%d MASTER_1 error %x\n", __func__, __LINE__, irq);
 		cci_dev->cci_master_info[MASTER_1].status = -EINVAL;
 		msm_camera_io_w(CCI_M1_HALT_REQ_RMSK,
 			cci_dev->base + CCI_HALT_REQ_ADDR);
-	} else {
-		pr_err("%s unhandled irq 0x%x\n", __func__, irq);
-		cci_dev->cci_master_info[MASTER_0].status = 0;
-		complete(&cci_dev->cci_master_info[MASTER_0].reset_complete);
-		cci_dev->cci_master_info[MASTER_1].status = 0;
-		complete(&cci_dev->cci_master_info[MASTER_1].reset_complete);
 	}
 	return IRQ_HANDLED;
 }
@@ -774,10 +795,7 @@ static long msm_cci_subdev_ioctl(struct v4l2_subdev *sd,
 		rc = msm_cci_config(sd, arg);
 		break;
 	case MSM_SD_SHUTDOWN: {
-		struct msm_camera_cci_ctrl ctrl_cmd;
-		ctrl_cmd.cmd = MSM_CCI_RELEASE;
-		rc = msm_cci_config(sd, &ctrl_cmd);
-		break;
+		return rc;
 	}
 	default:
 		rc = -ENOIOCTLCMD;

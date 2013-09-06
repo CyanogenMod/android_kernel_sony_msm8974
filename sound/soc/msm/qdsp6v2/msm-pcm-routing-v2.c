@@ -44,7 +44,10 @@ struct msm_pcm_routing_bdai_data {
 	u16 port_id; /* AFE port ID */
 	u8 active; /* track if this backend is enabled */
 	unsigned long fe_sessions; /* Front-end sessions */
-	unsigned long port_sessions; /* track Tx BE ports -> Rx BE */
+	u64 port_sessions; /* track Tx BE ports -> Rx BE
+			    * number of BE should not exceed
+			    * the size of this field
+			    */
 	unsigned int  sample_rate;
 	unsigned int  channel;
 	unsigned int  format;
@@ -86,22 +89,13 @@ static const char * const mad_audio_mux_text[] = {
 
 #define INT_RX_VOL_MAX_STEPS 0x2000
 #define INT_RX_VOL_GAIN 0x2000
-#define INT_RX_LR_VOL_MAX_STEPS 0x20002000
 static int msm_route_fm_vol_control;
 static const DECLARE_TLV_DB_LINEAR(fm_rx_vol_gain, 0,
 			INT_RX_VOL_MAX_STEPS);
 
-static int msm_route_lpa_vol_control;
-static const DECLARE_TLV_DB_LINEAR(lpa_rx_vol_gain, 0,
-			INT_RX_LR_VOL_MAX_STEPS);
-
 static int msm_route_multimedia2_vol_control;
 static const DECLARE_TLV_DB_LINEAR(multimedia2_rx_vol_gain, 0,
 			INT_RX_VOL_MAX_STEPS);
-
-static int msm_route_compressed_vol_control;
-static const DECLARE_TLV_DB_LINEAR(compressed_rx_vol_gain, 0,
-			INT_RX_LR_VOL_MAX_STEPS);
 
 static int msm_route_multimedia5_vol_control;
 static const DECLARE_TLV_DB_LINEAR(multimedia5_rx_vol_gain, 0,
@@ -622,7 +616,7 @@ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
 
 static void msm_pcm_routing_process_voice(u16 reg, u16 val, int set)
 {
-	u16 session_id = 0;
+	u32 session_id = 0;
 
 	pr_debug("%s: reg %x val %x set %x\n", __func__, reg, val, set);
 
@@ -974,7 +968,8 @@ static int msm_routing_get_port_mixer(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc =
 	(struct soc_mixer_control *)kcontrol->private_value;
 
-	if (test_bit(mc->shift, &msm_bedais[mc->reg].port_sessions))
+	if (test_bit(mc->shift,
+		(unsigned long *)&msm_bedais[mc->reg].port_sessions))
 		ucontrol->value.integer.value[0] = 1;
 	else
 		ucontrol->value.integer.value[0] = 0;
@@ -991,19 +986,19 @@ static int msm_routing_put_port_mixer(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 
-	pr_debug("%s: reg %x shift %x val %ld\n", __func__, mc->reg,
+	pr_debug("%s: reg 0x%x shift 0x%x val %ld\n", __func__, mc->reg,
 		mc->shift, ucontrol->value.integer.value[0]);
 
 	if (ucontrol->value.integer.value[0]) {
 		afe_loopback(1, msm_bedais[mc->reg].port_id,
 			    msm_bedais[mc->shift].port_id);
 		set_bit(mc->shift,
-		&msm_bedais[mc->reg].port_sessions);
+		(unsigned long *)&msm_bedais[mc->reg].port_sessions);
 	} else {
 		afe_loopback(0, msm_bedais[mc->reg].port_id,
 			    msm_bedais[mc->shift].port_id);
 		clear_bit(mc->shift,
-		&msm_bedais[mc->reg].port_sessions);
+		(unsigned long *)&msm_bedais[mc->reg].port_sessions);
 	}
 
 	return 1;
@@ -1022,23 +1017,6 @@ static int msm_routing_set_fm_vol_mixer(struct snd_kcontrol *kcontrol,
 	afe_loopback_gain(INT_FM_TX , ucontrol->value.integer.value[0]);
 
 	msm_route_fm_vol_control = ucontrol->value.integer.value[0];
-
-	return 0;
-}
-
-static int msm_routing_get_lpa_vol_mixer(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-	ucontrol->value.integer.value[0] = msm_route_lpa_vol_control;
-	return 0;
-}
-
-static int msm_routing_set_lpa_vol_mixer(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-	if (!lpa_set_volume(ucontrol->value.integer.value[0]))
-		msm_route_lpa_vol_control =
-			ucontrol->value.integer.value[0];
 
 	return 0;
 }
@@ -1076,24 +1054,6 @@ static int msm_routing_set_multimedia2_vol_mixer(struct snd_kcontrol *kcontrol,
 
 	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0]))
 		msm_route_multimedia2_vol_control =
-			ucontrol->value.integer.value[0];
-
-	return 0;
-}
-
-static int msm_routing_get_compressed_vol_mixer(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-
-	ucontrol->value.integer.value[0] = msm_route_compressed_vol_control;
-	return 0;
-}
-
-static int msm_routing_set_compressed_vol_mixer(struct snd_kcontrol *kcontrol,
-				struct snd_ctl_elem_value *ucontrol)
-{
-	if (!compressed_set_volume(ucontrol->value.integer.value[0]))
-		msm_route_compressed_vol_control =
 			ucontrol->value.integer.value[0];
 
 	return 0;
@@ -2748,6 +2708,9 @@ static const struct snd_kcontrol_new auxpcm_rx_port_mixer_controls[] = {
 	SOC_SINGLE_EXT("SLIM_0_TX", MSM_BACKEND_DAI_AUXPCM_RX,
 	MSM_BACKEND_DAI_SLIMBUS_0_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
+	SOC_SINGLE_EXT("SEC_AUX_PCM_UL_TX", MSM_BACKEND_DAI_SEC_AUXPCM_RX,
+	MSM_BACKEND_DAI_SEC_AUXPCM_TX, 1, 0, msm_routing_get_port_mixer,
+	msm_routing_put_port_mixer),
 };
 
 static const struct snd_kcontrol_new sec_auxpcm_rx_port_mixer_controls[] = {
@@ -2756,6 +2719,9 @@ static const struct snd_kcontrol_new sec_auxpcm_rx_port_mixer_controls[] = {
 	msm_routing_put_port_mixer),
 	SOC_SINGLE_EXT("SLIM_0_TX", MSM_BACKEND_DAI_SEC_AUXPCM_RX,
 	MSM_BACKEND_DAI_SLIMBUS_0_TX, 1, 0, msm_routing_get_port_mixer,
+	msm_routing_put_port_mixer),
+	SOC_SINGLE_EXT("AUX_PCM_UL_TX", MSM_BACKEND_DAI_SEC_AUXPCM_RX,
+	MSM_BACKEND_DAI_SEC_AUXPCM_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
 };
 
@@ -2874,12 +2840,6 @@ static const struct snd_kcontrol_new int_fm_vol_mixer_controls[] = {
 	msm_routing_set_fm_vol_mixer, fm_rx_vol_gain),
 };
 
-static const struct snd_kcontrol_new lpa_vol_mixer_controls[] = {
-	SOC_SINGLE_EXT_TLV("LPA RX Volume", SND_SOC_NOPM, 0,
-	INT_RX_VOL_GAIN, 0, msm_routing_get_lpa_vol_mixer,
-	msm_routing_set_lpa_vol_mixer, lpa_rx_vol_gain),
-};
-
 static const struct snd_kcontrol_new multimedia2_vol_mixer_controls[] = {
 	SOC_SINGLE_EXT_TLV("HIFI2 RX Volume", SND_SOC_NOPM, 0,
 	INT_RX_VOL_GAIN, 0, msm_routing_get_multimedia2_vol_mixer,
@@ -2890,12 +2850,6 @@ static const struct snd_kcontrol_new multimedia5_vol_mixer_controls[] = {
 	SOC_SINGLE_EXT_TLV("HIFI3 RX Volume", SND_SOC_NOPM, 0,
 	INT_RX_VOL_GAIN, 0, msm_routing_get_multimedia5_vol_mixer,
 	msm_routing_set_multimedia5_vol_mixer, multimedia5_rx_vol_gain),
-};
-
-static const struct snd_kcontrol_new compressed_vol_mixer_controls[] = {
-	SOC_SINGLE_EXT_TLV("COMPRESSED RX Volume", SND_SOC_NOPM, 0,
-	INT_RX_VOL_GAIN, 0, msm_routing_get_compressed_vol_mixer,
-	msm_routing_set_compressed_vol_mixer, compressed_rx_vol_gain),
 };
 
 static const struct snd_kcontrol_new multi_ch_channel_map_mixer_controls[] = {
@@ -3890,8 +3844,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 
 	{"AUXPCM_RX Port Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
 	{"AUXPCM_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
+	{"AUXPCM_RX Port Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
 	{"AUX_PCM_RX", NULL, "AUXPCM_RX Port Mixer"},
 
+	{"SEC_AUXPCM_RX Port Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
 	{"SEC_AUXPCM_RX Port Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
 	{"SEC_AUXPCM_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
 	{"SEC_AUX_PCM_RX", NULL, "SEC_AUXPCM_RX Port Mixer"},
@@ -4272,10 +4228,6 @@ static int msm_routing_probe(struct snd_soc_platform *platform)
 			ARRAY_SIZE(int_fm_vol_mixer_controls));
 
 	snd_soc_add_platform_controls(platform,
-				lpa_vol_mixer_controls,
-			ARRAY_SIZE(lpa_vol_mixer_controls));
-
-	snd_soc_add_platform_controls(platform,
 				eq_enable_mixer_controls,
 			ARRAY_SIZE(eq_enable_mixer_controls));
 
@@ -4294,10 +4246,6 @@ static int msm_routing_probe(struct snd_soc_platform *platform)
 	snd_soc_add_platform_controls(platform,
 				multimedia5_vol_mixer_controls,
 			ARRAY_SIZE(multimedia5_vol_mixer_controls));
-
-	snd_soc_add_platform_controls(platform,
-				compressed_vol_mixer_controls,
-			ARRAY_SIZE(compressed_vol_mixer_controls));
 
 	snd_soc_add_platform_controls(platform,
 				lpa_SRS_trumedia_controls,

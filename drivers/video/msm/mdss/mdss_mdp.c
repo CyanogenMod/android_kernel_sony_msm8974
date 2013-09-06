@@ -129,6 +129,7 @@ static DEFINE_SPINLOCK(mdss_lock);
 struct mdss_hw *mdss_irq_handlers[MDSS_MAX_HW_BLK];
 
 static void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on);
+static inline int mdss_mdp_suspend_sub(struct mdss_data_type *mdata);
 static int mdss_mdp_parse_dt(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_pipe(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_mixer(struct platform_device *pdev);
@@ -345,7 +346,6 @@ static void mdss_mdp_bus_scale_unregister(struct mdss_data_type *mdata)
 
 int mdss_mdp_bus_scale_set_quota(u64 ab_quota, u64 ib_quota)
 {
-	static int current_bus_idx;
 	int bus_idx;
 
 	if (mdss_res->bus_hdl < 1) {
@@ -359,9 +359,10 @@ int mdss_mdp_bus_scale_set_quota(u64 ab_quota, u64 ib_quota)
 		int num_cases = mdp_bus_scale_table.num_usecases;
 		struct msm_bus_vectors *vect = NULL;
 
-		bus_idx = (current_bus_idx % (num_cases - 1)) + 1;
+		bus_idx = (mdss_res->current_bus_idx % (num_cases - 1)) + 1;
 
-		vect = mdp_bus_scale_table.usecase[current_bus_idx].vectors;
+		vect = mdp_bus_scale_table.usecase[mdss_res->current_bus_idx].
+			vectors;
 
 		/* avoid performing updates for small changes */
 		if ((ALIGN(ab_quota, SZ_64M) == ALIGN(vect->ab, SZ_64M)) &&
@@ -377,7 +378,7 @@ int mdss_mdp_bus_scale_set_quota(u64 ab_quota, u64 ib_quota)
 		pr_debug("bus scale idx=%d ab=%llu ib=%llu\n", bus_idx,
 				vect->ab, vect->ib);
 	}
-	current_bus_idx = bus_idx;
+	mdss_res->current_bus_idx = bus_idx;
 	return msm_bus_scale_client_update_request(mdss_res->bus_hdl, bus_idx);
 }
 
@@ -626,8 +627,14 @@ void mdss_mdp_clk_ctrl(int enable, int isr)
 		if (mdata->vsync_ena)
 			mdss_mdp_clk_update(MDSS_CLK_MDP_VSYNC, enable);
 
-		if (!enable)
+		if (!enable) {
+			msm_bus_scale_client_update_request(
+				mdss_res->bus_hdl, 0);
 			pm_runtime_put(&mdata->pdev->dev);
+		} else {
+			msm_bus_scale_client_update_request(
+				mdss_res->bus_hdl, mdss_res->current_bus_idx);
+		}
 	}
 
 	mutex_unlock(&mdp_clk_lock);
@@ -906,6 +913,18 @@ void mdss_mdp_footswitch_ctrl_splash(int on)
 	} else {
 		pr_warn("mdss mdata not initialized\n");
 	}
+}
+
+static void mdss_mdp_shutdown(struct platform_device *pdev)
+{
+	struct mdss_data_type *mdata = platform_get_drvdata(pdev);
+
+	if (!mdata)
+		return;
+
+	pr_debug("display shutdown\n");
+
+	mdss_mdp_suspend_sub(mdata);
 }
 
 static int mdss_mdp_probe(struct platform_device *pdev)
@@ -1703,7 +1722,7 @@ static struct platform_driver mdss_mdp_driver = {
 	.remove = mdss_mdp_remove,
 	.suspend = mdss_mdp_suspend,
 	.resume = mdss_mdp_resume,
-	.shutdown = NULL,
+	.shutdown = mdss_mdp_shutdown,
 	.driver = {
 		/*
 		 * Driver name must match the device name added in

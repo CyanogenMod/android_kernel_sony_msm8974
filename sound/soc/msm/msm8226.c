@@ -147,7 +147,6 @@ static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec, int enable,
 		if (clk_users != 1)
 			goto exit;
 		if (codec_clk) {
-			clk_set_rate(codec_clk, TAPAN_EXT_CLK_RATE);
 			clk_prepare_enable(codec_clk);
 			tapan_mclk_enable(codec, 1, dapm);
 		} else {
@@ -1089,7 +1088,7 @@ static struct snd_soc_dai_link msm8226_dai[] = {
 	{
 		.name = LPASS_BE_AUXPCM_RX,
 		.stream_name = "AUX PCM Playback",
-		.cpu_dai_name = "msm-dai-q6.4106",
+		.cpu_dai_name = "msm-dai-q6-auxpcm.1",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-rx",
@@ -1104,7 +1103,7 @@ static struct snd_soc_dai_link msm8226_dai[] = {
 	{
 		.name = LPASS_BE_AUXPCM_TX,
 		.stream_name = "AUX PCM Capture",
-		.cpu_dai_name = "msm-dai-q6.4107",
+		.cpu_dai_name = "msm-dai-q6-auxpcm.1",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-tx",

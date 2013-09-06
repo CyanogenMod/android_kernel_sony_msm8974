@@ -132,6 +132,16 @@
 			debounce-interval = <15>;
 		};
 	};
+
+    sound {
+        qcom,audio-routing =
+            "RX_BIAS", "MCLK",
+            "INT_LDO_H", "MCLK",
+            "MIC BIAS External", "Handset Mic",
+            "MIC BIAS Internal2", "Headset Mic",
+            "AMIC1", "MIC BIAS External",
+            "AMIC2", "MIC BIAS Internal2";
+    };
 };
 
 &i2c_cdc  {
@@ -327,6 +337,12 @@
 	};
 
 	mpp@a300 { /* MPP 4 */
+		/* PA_THERM config */
+		qcom,mode = <4>; /* AIN input */
+		qcom,invert = <1>; /* Enable MPP */
+		qcom,ain-route = <3>; /* AMUX 8 */
+		qcom,master-en = <1>;
+		qcom,src-sel = <0>; /* Function constant */
 	};
 };
 

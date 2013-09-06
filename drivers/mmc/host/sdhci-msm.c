@@ -513,19 +513,25 @@ static int msm_init_cm_dll(struct sdhci_host *host)
 	int rc = 0;
 	unsigned long flags;
 	u32 wait_cnt;
+	bool prev_pwrsave, curr_pwrsave;
 
 	pr_debug("%s: Enter %s\n", mmc_hostname(mmc), __func__);
 	spin_lock_irqsave(&host->lock, flags);
-
+	prev_pwrsave = !!(readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC) &
+			  CORE_CLK_PWRSAVE);
+	curr_pwrsave = prev_pwrsave;
 	/*
 	 * Make sure that clock is always enabled when DLL
 	 * tuning is in progress. Keeping PWRSAVE ON may
 	 * turn off the clock. So let's disable the PWRSAVE
 	 * here and re-enable it once tuning is completed.
 	 */
-	writel_relaxed((readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC)
-			& ~CORE_CLK_PWRSAVE),
-			host->ioaddr + CORE_VENDOR_SPEC);
+	if (prev_pwrsave) {
+		writel_relaxed((readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC)
+				& ~CORE_CLK_PWRSAVE),
+				host->ioaddr + CORE_VENDOR_SPEC);
+		curr_pwrsave = false;
+	}
 
 	/* Write 1 to DLL_RST bit of DLL_CONFIG register */
 	writel_relaxed((readl_relaxed(host->ioaddr + CORE_DLL_CONFIG)
@@ -568,10 +574,18 @@ static int msm_init_cm_dll(struct sdhci_host *host)
 	}
 
 out:
-	/* re-enable PWRSAVE */
-	writel_relaxed((readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC) |
-			CORE_CLK_PWRSAVE),
-			host->ioaddr + CORE_VENDOR_SPEC);
+	/* Restore the correct PWRSAVE state */
+	if (prev_pwrsave ^ curr_pwrsave) {
+		u32 reg = readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC);
+
+		if (prev_pwrsave)
+			reg |= CORE_CLK_PWRSAVE;
+		else
+			reg &= ~CORE_CLK_PWRSAVE;
+
+		writel_relaxed(reg, host->ioaddr + CORE_VENDOR_SPEC);
+	}
+
 	spin_unlock_irqrestore(&host->lock, flags);
 	pr_debug("%s: Exit %s\n", mmc_hostname(mmc), __func__);
 	return rc;
@@ -1120,6 +1134,7 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 	int len, i;
 	int clk_table_len;
 	u32 *clk_table = NULL;
+	enum of_gpio_flags flags = OF_GPIO_ACTIVE_LOW;
 
 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata) {
@@ -1127,7 +1142,9 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		goto out;
 	}
 
-	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, 0);
+	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
+	if (gpio_is_valid(pdata->status_gpio) & !(flags & OF_GPIO_ACTIVE_LOW))
+		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
 
 	of_property_read_u32(np, "qcom,bus-width", &bus_width);
 	if (bus_width == 8)
@@ -2236,16 +2253,16 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 		goto pclk_disable;
 	}
 
-	ret = clk_prepare_enable(msm_host->clk);
-	if (ret)
-		goto pclk_disable;
-
 	/* Set to the minimum supported clock frequency */
 	ret = clk_set_rate(msm_host->clk, sdhci_msm_get_min_clock(host));
 	if (ret) {
 		dev_err(&pdev->dev, "MClk rate set failed (%d)\n", ret);
-		goto clk_disable;
+		goto pclk_disable;
 	}
+	ret = clk_prepare_enable(msm_host->clk);
+	if (ret)
+		goto pclk_disable;
+
 	msm_host->clk_rate = sdhci_msm_get_min_clock(host);
 	atomic_set(&msm_host->clks_on, 1);
 

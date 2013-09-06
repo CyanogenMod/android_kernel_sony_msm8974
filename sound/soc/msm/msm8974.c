@@ -20,18 +20,20 @@
 #include <linux/mfd/pm8xxx/pm8921.h>
 #include <linux/qpnp/clkdiv.h>
 #include <linux/regulator/consumer.h>
+#include <linux/io.h>
 #include <sound/core.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/pcm.h>
 #include <sound/jack.h>
 #include <sound/q6afe-v2.h>
-#include <asm/mach-types.h>
-#include <mach/socinfo.h>
 #include <sound/pcm_params.h>
+#include <asm/mach-types.h>
+#include <mach/subsystem_notif.h>
 #include "qdsp6v2/msm-pcm-routing-v2.h"
+#include "qdsp6v2/q6core.h"
+#include "../codecs/wcd9xxx-common.h"
 #include "../codecs/wcd9320.h"
-#include <linux/io.h>
 
 #define DRV_NAME "msm8974-asoc-taiko"
 
@@ -82,6 +84,10 @@ static int msm8974_auxpcm_rate = 8000;
 #define EXT_CLASS_AB_DELAY_DELTA 1000
 
 #define NUM_OF_AUXPCM_GPIOS 4
+
+static void *adsp_state_notifier;
+
+#define ADSP_STATE_READY_TIMEOUT_MS 3000
 
 static inline int param_is_mask(int p)
 {
@@ -476,13 +482,12 @@ static void msm8974_liquid_ext_spk_power_amp_off(u32 spk)
 
 		pr_debug("%s Left and right speakers case spk = 0x%08x",
 				  __func__, spk);
-
+		msm8974_ext_spk_pamp &= ~spk;
 		if (!msm8974_ext_spk_pamp) {
 			if (ext_spk_amp_gpio >= 0 &&
 				msm8974_liquid_dock_dev != NULL &&
 				msm8974_liquid_dock_dev->dock_plug_det == 0)
 				msm8974_liquid_ext_spk_power_amp_enable(0);
-			msm8974_ext_spk_pamp = 0;
 		}
 
 	} else  {
@@ -634,7 +639,6 @@ static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec, int enable,
 			goto exit;
 
 		if (codec_clk) {
-			clk_set_rate(codec_clk, TAIKO_EXT_CLK_RATE);
 			clk_prepare_enable(codec_clk);
 			taiko_mclk_enable(codec, 1, dapm);
 		} else {
@@ -1378,6 +1382,101 @@ static bool msm8974_swap_gnd_mic(struct snd_soc_codec *codec)
 	return true;
 }
 
+static int msm_afe_set_config(struct snd_soc_codec *codec)
+{
+	int rc;
+	void *config_data;
+
+	pr_debug("%s: enter\n", __func__);
+	config_data = taiko_get_afe_config(codec, AFE_CDC_REGISTERS_CONFIG);
+	rc = afe_set_config(AFE_CDC_REGISTERS_CONFIG, config_data, 0);
+	if (rc) {
+		pr_err("%s: Failed to set codec registers config %d\n",
+		       __func__, rc);
+		return rc;
+	}
+
+	config_data = taiko_get_afe_config(codec, AFE_SLIMBUS_SLAVE_CONFIG);
+	rc = afe_set_config(AFE_SLIMBUS_SLAVE_CONFIG, config_data, 0);
+	if (rc) {
+		pr_err("%s: Failed to set slimbus slave config %d\n", __func__,
+		       rc);
+		return rc;
+	}
+
+	return 0;
+}
+
+static void msm_afe_clear_config(void)
+{
+	afe_clear_config(AFE_CDC_REGISTERS_CONFIG);
+	afe_clear_config(AFE_SLIMBUS_SLAVE_CONFIG);
+}
+
+static int  msm8974_adsp_state_callback(struct notifier_block *nb,
+		unsigned long value, void *priv)
+{
+	if (value == SUBSYS_BEFORE_SHUTDOWN) {
+		pr_debug("%s: ADSP is about to shutdown. Clearing AFE config\n",
+			 __func__);
+		msm_afe_clear_config();
+	} else if (value == SUBSYS_AFTER_POWERUP) {
+		pr_debug("%s: ADSP is up\n", __func__);
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block adsp_state_notifier_block = {
+	.notifier_call = msm8974_adsp_state_callback,
+	.priority = -INT_MAX,
+};
+
+static int msm8974_taiko_codec_up(struct snd_soc_codec *codec)
+{
+	int err;
+	unsigned long timeout;
+	int adsp_ready = 0;
+
+	timeout = jiffies +
+		msecs_to_jiffies(ADSP_STATE_READY_TIMEOUT_MS);
+
+	do {
+		if (!q6core_is_adsp_ready()) {
+			pr_err("%s: ADSP Audio isn't ready\n", __func__);
+		} else {
+			pr_debug("%s: ADSP Audio is ready\n", __func__);
+			adsp_ready = 1;
+			break;
+		}
+	} while (time_after(timeout, jiffies));
+
+	if (!adsp_ready) {
+		pr_err("%s: timed out waiting for ADSP Audio\n", __func__);
+		return -ETIMEDOUT;
+	}
+
+	err = msm_afe_set_config(codec);
+	if (err)
+		pr_err("%s: Failed to set AFE config. err %d\n",
+				__func__, err);
+	return err;
+}
+
+static int msm8974_taiko_event_cb(struct snd_soc_codec *codec,
+		enum wcd9xxx_codec_event codec_event)
+{
+	switch (codec_event) {
+	case WCD9XXX_CODEC_EVENT_CODEC_UP:
+		return msm8974_taiko_codec_up(codec);
+		break;
+	default:
+		pr_err("%s: UnSupported codec event %d\n",
+				__func__, codec_event);
+		return -EINVAL;
+	}
+}
+
 static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 {
 	int err;
@@ -1439,19 +1538,9 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 				    tx_ch, ARRAY_SIZE(rx_ch), rx_ch);
 
 
-	config_data = taiko_get_afe_config(codec, AFE_CDC_REGISTERS_CONFIG);
-	err = afe_set_config(AFE_CDC_REGISTERS_CONFIG, config_data, 0);
+	err = msm_afe_set_config(codec);
 	if (err) {
-		pr_err("%s: Failed to set codec registers config %d\n",
-		       __func__, err);
-		goto out;
-	}
-
-	config_data = taiko_get_afe_config(codec, AFE_SLIMBUS_SLAVE_CONFIG);
-	err = afe_set_config(AFE_SLIMBUS_SLAVE_CONFIG, config_data, 0);
-	if (err) {
-		pr_err("%s: Failed to set slimbus slave config %d\n", __func__,
-		       err);
+		pr_err("%s: Failed to set AFE config %d\n", __func__, err);
 		goto out;
 	}
 
@@ -1488,12 +1577,22 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		err = taiko_hs_detect(codec, &mbhc_cfg);
 		if (err)
 			goto out;
-		else
-			return err;
 	} else {
 		err = -ENOMEM;
 		goto out;
 	}
+	adsp_state_notifier =
+	    subsys_notif_register_notifier("adsp",
+					   &adsp_state_notifier_block);
+	if (!adsp_state_notifier) {
+		pr_err("%s: Failed to register adsp state notifier\n",
+		       __func__);
+		err = -EFAULT;
+		goto out;
+	}
+
+	taiko_event_register(msm8974_taiko_event_cb, rtd->codec);
+	return 0;
 out:
 	clk_put(codec_clk);
 	return err;
@@ -2009,6 +2108,58 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		 /* this dainlink has playback support */
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA8,
 	},
+	/* HDMI Hostless */
+	{
+		.name = "HDMI_RX_HOSTLESS",
+		.stream_name = "HDMI_RX_HOSTLESS",
+		.cpu_dai_name = "HDMI_HOSTLESS",
+		.platform_name = "msm-pcm-hostless",
+		.dynamic = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_4_TX,
+		.stream_name = "Slimbus4 Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16393",
+		.platform_name = "msm-pcm-hostless",
+		.codec_name = "taiko_codec",
+		.codec_dai_name	= "taiko_vifeedback",
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_TX,
+		.be_hw_params_fixup = msm_slim_4_tx_be_hw_params_fixup,
+		.ops = &msm8974_be_ops,
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+	},
+	/* Ultrasound RX Back End DAI Link */
+	{
+		.name = "SLIMBUS_2 Hostless Playback",
+		.stream_name = "SLIMBUS_2 Hostless Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.16388",
+		.platform_name = "msm-pcm-hostless",
+		.codec_name = "taiko_codec",
+		.codec_dai_name = "taiko_rx2",
+		.ignore_suspend = 1,
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ops = &msm8974_slimbus_2_be_ops,
+	},
+	/* Ultrasound TX Back End DAI Link */
+	{
+		.name = "SLIMBUS_2 Hostless Capture",
+		.stream_name = "SLIMBUS_2 Hostless Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16389",
+		.platform_name = "msm-pcm-hostless",
+		.codec_name = "taiko_codec",
+		.codec_dai_name = "taiko_tx2",
+		.ignore_suspend = 1,
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ops = &msm8974_slimbus_2_be_ops,
+	},
 	/* Backend BT/FM DAI Links */
 	{
 		.name = LPASS_BE_INT_BT_SCO_RX,
@@ -2089,26 +2240,11 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.be_hw_params_fixup = msm_proxy_tx_be_hw_params_fixup,
 		.ignore_suspend = 1,
 	},
-	/* HDMI Hostless */
-	{
-		.name = "HDMI_RX_HOSTLESS",
-		.stream_name = "HDMI_RX_HOSTLESS",
-		.cpu_dai_name = "HDMI_HOSTLESS",
-		.platform_name = "msm-pcm-hostless",
-		.dynamic = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			SND_SOC_DPCM_TRIGGER_POST},
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-		.ignore_pmdown_time = 1,
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-	},
 	/* Primary AUX PCM Backend DAI Links */
 	{
 		.name = LPASS_BE_AUXPCM_RX,
 		.stream_name = "AUX PCM Playback",
-		.cpu_dai_name = "msm-dai-q6.4106",
+		.cpu_dai_name = "msm-dai-q6-auxpcm.1",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-rx",
@@ -2123,7 +2259,7 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 	{
 		.name = LPASS_BE_AUXPCM_TX,
 		.stream_name = "AUX PCM Capture",
-		.cpu_dai_name = "msm-dai-q6.4107",
+		.cpu_dai_name = "msm-dai-q6-auxpcm.1",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-tx",
@@ -2137,7 +2273,7 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 	{
 		.name = LPASS_BE_SEC_AUXPCM_RX,
 		.stream_name = "Sec AUX PCM Playback",
-		.cpu_dai_name = "msm-dai-q6.4108",
+		.cpu_dai_name = "msm-dai-q6-auxpcm.2",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-rx",
@@ -2152,7 +2288,7 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 	{
 		.name = LPASS_BE_SEC_AUXPCM_TX,
 		.stream_name = "Sec AUX PCM Capture",
-		.cpu_dai_name = "msm-dai-q6.4109",
+		.cpu_dai_name = "msm-dai-q6-auxpcm.2",
 		.platform_name = "msm-pcm-routing",
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-tx",
@@ -2263,19 +2399,6 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
-	{
-		.name = LPASS_BE_SLIMBUS_4_TX,
-		.stream_name = "Slimbus4 Capture",
-		.cpu_dai_name = "msm-dai-q6-dev.16393",
-		.platform_name = "msm-pcm-hostless",
-		.codec_name = "taiko_codec",
-		.codec_dai_name	= "taiko_vifeedback",
-		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_TX,
-		.be_hw_params_fixup = msm_slim_4_tx_be_hw_params_fixup,
-		.ops = &msm8974_be_ops,
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ignore_suspend = 1,
-	},
 	/* Incall Record Uplink BACK END DAI Link */
 	{
 		.name = LPASS_BE_INCALL_RECORD_TX,
@@ -2327,30 +2450,6 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.be_id = MSM_BACKEND_DAI_VOICE_PLAYBACK_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
-	},
-	/* Ultrasound RX Back End DAI Link */
-	{
-		.name = "SLIMBUS_2 Hostless Playback",
-		.stream_name = "SLIMBUS_2 Hostless Playback",
-		.cpu_dai_name = "msm-dai-q6-dev.16388",
-		.platform_name = "msm-pcm-hostless",
-		.codec_name = "taiko_codec",
-		.codec_dai_name = "taiko_rx2",
-		.ignore_suspend = 1,
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ops = &msm8974_slimbus_2_be_ops,
-	},
-	/* Ultrasound TX Back End DAI Link */
-	{
-		.name = "SLIMBUS_2 Hostless Capture",
-		.stream_name = "SLIMBUS_2 Hostless Capture",
-		.cpu_dai_name = "msm-dai-q6-dev.16389",
-		.platform_name = "msm-pcm-hostless",
-		.codec_name = "taiko_codec",
-		.codec_dai_name = "taiko_tx2",
-		.ignore_suspend = 1,
-		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
-		.ops = &msm8974_slimbus_2_be_ops,
 	},
 };
 

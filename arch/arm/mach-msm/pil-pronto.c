@@ -350,7 +350,7 @@ static void wcnss_post_bootup(struct work_struct *work)
 	struct platform_device *pdev = wcnss_get_platform_device();
 	struct wcnss_wlan_config *pwlanconfig = wcnss_get_wlan_config();
 
-	wcnss_wlan_power(&pdev->dev, pwlanconfig, WCNSS_WLAN_SWITCH_OFF);
+	wcnss_wlan_power(&pdev->dev, pwlanconfig, WCNSS_WLAN_SWITCH_OFF, NULL);
 }
 
 static int wcnss_shutdown(const struct subsys_desc *subsys)
@@ -373,7 +373,7 @@ static int wcnss_powerup(const struct subsys_desc *subsys)
 
 	if (pdev && pwlanconfig)
 		ret = wcnss_wlan_power(&pdev->dev, pwlanconfig,
-					WCNSS_WLAN_SWITCH_ON);
+					WCNSS_WLAN_SWITCH_ON, NULL);
 	if (!ret) {
 		msleep(1000);
 		ret = pil_boot(&drv->desc);

@@ -72,13 +72,16 @@
 #define SPI_INPUT_FIFO                QSD_REG(0x0200) QUP_REG(0x0218)
 #define SPI_STATE                     QSD_REG(SPI_OPERATIONAL) QUP_REG(0x0004)
 
-/* SPI_CONFIG fields */
-#define SPI_CFG_INPUT_FIRST           0x00000200
+/* QUP_CONFIG fields */
+#define SPI_CFG_N                     0x0000001F
 #define SPI_NO_INPUT                  0x00000080
 #define SPI_NO_OUTPUT                 0x00000040
-#define SPI_CFG_LOOPBACK              0x00000100
-#define SPI_CFG_N                     0x0000001F
 #define SPI_EN_EXT_OUT_FLAG           0x00010000
+
+/* SPI_CONFIG fields */
+#define SPI_CFG_LOOPBACK              0x00000100
+#define SPI_CFG_INPUT_FIRST           0x00000200
+#define SPI_CFG_HS_MODE               0x00000400
 
 /* SPI_IO_CONTROL fields */
 #define SPI_IO_C_FORCE_CS             0x00000800
@@ -143,6 +146,9 @@ enum msm_spi_state {
 #define SPI_NUM_CHIPSELECTS           4
 #define SPI_SUPPORTED_MODES  (SPI_CPOL | SPI_CPHA | SPI_CS_HIGH | SPI_LOOP)
 
+/* high speed mode is when bus rate is greater then 26MHz */
+#define SPI_HS_MIN_RATE               (26000000)
+
 #define SPI_DELAY_THRESHOLD           1
 /* Default timeout is 10 milliseconds */
 #define SPI_DEFAULT_TIMEOUT           10
@@ -166,6 +172,13 @@ enum msm_spi_pipe_direction {
 
 #define SPI_BAM_MAX_DESC_NUM      32
 #define SPI_MAX_TRFR_BTWN_RESETS  ((64 * 1024) - 16)  /* 64KB - 16byte */
+
+enum msm_spi_clk_path_vec_idx {
+	MSM_SPI_CLK_PATH_SUSPEND_VEC = 0,
+	MSM_SPI_CLK_PATH_RESUME_VEC  = 1,
+};
+#define MSM_SPI_CLK_PATH_AVRG_BW(dd) (dd->pdata->max_clock_speed * 8)
+#define MSM_SPI_CLK_PATH_BRST_BW(dd) (dd->pdata->max_clock_speed * 8)
 
 static char const * const spi_rsrcs[] = {
 	"spi_clk",
@@ -247,6 +260,22 @@ static const struct {
 };
 #endif
 
+/**
+ * qup_i2c_clk_path_vote: data to use bus scaling driver for clock path vote
+ *
+ * @client_hdl when zero, client is not registered with the bus scaling driver,
+ *      and bus scaling functionality should not be used. When non zero, it
+ *      is a bus scaling client id and may be used to vote for clock path.
+ * @reg_err when true, registration error was detected and an error message was
+ *      logged. i2c will attempt to re-register but will log error only once.
+ *      once registration succeed, the flag is set to false.
+ */
+struct qup_i2c_clk_path_vote {
+	u32                         client_hdl;
+	struct msm_bus_scale_pdata *pdata;
+	bool                        reg_err;
+};
+
 struct msm_spi_bam_pipe {
 	struct sps_pipe         *handle;
 	struct sps_connect       config;
@@ -278,6 +307,7 @@ struct msm_spi {
 	struct completion        transfer_complete;
 	struct clk              *clk;    /* core clock */
 	struct clk              *pclk;   /* interface clock */
+	struct qup_i2c_clk_path_vote clk_path_vote;
 	unsigned long            mem_phys_addr;
 	size_t                   mem_size;
 	int                      input_fifo_size;

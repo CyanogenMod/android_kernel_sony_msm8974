@@ -11,4 +11,5 @@ obj-$(CONFIG_OV8825) += ov8825.o
 obj-$(CONFIG_OV2720) += ov2720.o
 obj-$(CONFIG_OV9724) += ov9724.o
 obj-$(CONFIG_MT9M114) += mt9m114.o
+obj-$(CONFIG_SP1628) += sp1628.o
 obj-$(CONFIG_SONY_CAM_V4L2) += sony_camera_v4l2.o

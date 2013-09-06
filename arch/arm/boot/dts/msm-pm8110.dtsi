@@ -53,7 +53,7 @@
 			status = "disabled";
 
 			qcom,vddmax-mv = <4200>;
-			qcom,vddsafe-mv = <4200>;
+			qcom,vddsafe-mv = <4230>;
 			qcom,vinmin-mv = <4200>;
 			qcom,vbatdet-mv = <4100>;
 			qcom,ibatmax-ma = <1500>;
@@ -263,6 +263,30 @@
 				qcom,hw-settle-time = <0>;
 				qcom,fast-avg-setup = <0>;
 			};
+		};
+
+		pm8110_adc_tm: vadc@3400 {
+			compatible = "qcom,qpnp-adc-tm";
+			reg = <0x3400 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			interrupts =	<0x0 0x34 0x0>,
+					<0x0 0x34 0x3>,
+				     <0x0 0x34 0x4>;
+			interrupt-names =	"eoc-int-en-set",
+						"high-thr-en-set",
+						"low-thr-en-set";
+			qcom,adc-bit-resolution = <15>;
+			qcom,adc-vdd-reference = <1800>;
+		};
+
+		qcom,temp-alarm@2400 {
+			compatible = "qcom,qpnp-temp-alarm";
+			reg = <0x2400 0x100>;
+			interrupts = <0x0 0x24 0x0>;
+			label = "pm8110_tz";
+			qcom,channel-num = <8>;
+			qcom,threshold-set = <0>;
 		};
 
 		pm8110_bms: qcom,bms {

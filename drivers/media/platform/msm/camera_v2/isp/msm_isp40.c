@@ -1,5 +1,4 @@
 /* Copyright (c) 2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,6 +12,7 @@
 
 #include <linux/module.h>
 #include <mach/iommu.h>
+#include <linux/ratelimit.h>
 
 #include "msm_isp40.h"
 #include "msm_isp_util.h"
@@ -32,12 +32,14 @@
 
 #define VFE40_8974V1_VERSION 0x10000018
 #define VFE40_8974V2_VERSION 0x1001001A
+#define VFE40_8974V3_VERSION 0x1001001B
 #define VFE40_8x26_VERSION 0x20000013
+#define VFE40_8x26V2_VERSION 0x20010014
 
 #define VFE40_BURST_LEN 3
 #define VFE40_STATS_BURST_LEN 2
 #define VFE40_UB_SIZE 1536
-#define VFE40_EQUAL_SLICE_UB 286
+#define VFE40_EQUAL_SLICE_UB 228
 #define VFE40_WM_BASE(idx) (0x6C + 0x24 * idx)
 #define VFE40_RDI_BASE(idx) (0x2E8 + 0x4 * idx)
 #define VFE40_XBAR_BASE(idx) (0x58 + 0x4 * (idx / 2))
@@ -92,8 +94,10 @@ static struct msm_cam_clk_info msm_vfe40_clk_info[] = {
 static void msm_vfe40_init_qos_parms(struct vfe_device *vfe_dev)
 {
 	void __iomem *vfebase = vfe_dev->vfe_base;
+
 	if (vfe_dev->vfe_hw_version == VFE40_8974V1_VERSION ||
-		vfe_dev->vfe_hw_version == VFE40_8x26_VERSION) {
+		vfe_dev->vfe_hw_version == VFE40_8x26_VERSION ||
+		vfe_dev->vfe_hw_version == VFE40_8x26V2_VERSION) {
 		msm_camera_io_w(0xAAAAAAAA, vfebase + VFE40_BUS_BDG_QOS_CFG_0);
 		msm_camera_io_w(0xAAAAAAAA, vfebase + VFE40_BUS_BDG_QOS_CFG_1);
 		msm_camera_io_w(0xAAAAAAAA, vfebase + VFE40_BUS_BDG_QOS_CFG_2);
@@ -102,7 +106,8 @@ static void msm_vfe40_init_qos_parms(struct vfe_device *vfe_dev)
 		msm_camera_io_w(0xAAAAAAAA, vfebase + VFE40_BUS_BDG_QOS_CFG_5);
 		msm_camera_io_w(0xAAAAAAAA, vfebase + VFE40_BUS_BDG_QOS_CFG_6);
 		msm_camera_io_w(0x0002AAAA, vfebase + VFE40_BUS_BDG_QOS_CFG_7);
-	} else if (vfe_dev->vfe_hw_version == VFE40_8974V2_VERSION) {
+	} else if (vfe_dev->vfe_hw_version == VFE40_8974V2_VERSION ||
+		vfe_dev->vfe_hw_version == VFE40_8974V3_VERSION) {
 		msm_camera_io_w(0xAAA9AAA9, vfebase + VFE40_BUS_BDG_QOS_CFG_0);
 		msm_camera_io_w(0xAAA9AAA9, vfebase + VFE40_BUS_BDG_QOS_CFG_1);
 		msm_camera_io_w(0xAAA9AAA9, vfebase + VFE40_BUS_BDG_QOS_CFG_2);
@@ -231,9 +236,11 @@ static void msm_vfe40_init_vbif_parms(struct vfe_device *vfe_dev)
 		msm_vfe40_init_vbif_parms_8974_v1(vfe_dev);
 		break;
 	case VFE40_8974V2_VERSION:
+	case VFE40_8974V3_VERSION:
 		msm_vfe40_init_vbif_parms_8974_v2(vfe_dev);
 		break;
 	case VFE40_8x26_VERSION:
+	case VFE40_8x26V2_VERSION:
 		msm_vfe40_init_vbif_parms_8x26(vfe_dev);
 		break;
 	default:
@@ -497,10 +504,15 @@ static void msm_vfe40_read_irq_status(struct vfe_device *vfe_dev,
 	*irq_status0 = msm_camera_io_r(vfe_dev->vfe_base + 0x38);
 	*irq_status1 = msm_camera_io_r(vfe_dev->vfe_base + 0x3C);
 	/*Ignore composite 3 irq which is used for dual VFE only*/
-	*irq_status0 &= ~BIT(28);
+	if (*irq_status0 & 0x6000000)
+		*irq_status0 &= ~(0x10000000);
 	msm_camera_io_w(*irq_status0, vfe_dev->vfe_base + 0x30);
 	msm_camera_io_w(*irq_status1, vfe_dev->vfe_base + 0x34);
 	msm_camera_io_w_mb(1, vfe_dev->vfe_base + 0x24);
+	if (*irq_status0 & 0x10000000) {
+		pr_err_ratelimited("%s: Protection triggered\n", __func__);
+		*irq_status0 &= ~(0x10000000);
+	}
 
 	if (*irq_status1 & (1 << 0))
 		vfe_dev->error_info.camif_status =
@@ -532,6 +544,8 @@ static void msm_vfe40_process_reg_update(struct vfe_device *vfe_dev,
 		msm_isp_axi_stream_update(vfe_dev);
 	if (atomic_read(&vfe_dev->stats_data.stats_update))
 		msm_isp_stats_stream_update(vfe_dev);
+	if (atomic_read(&vfe_dev->axi_data.axi_cfg_update))
+		msm_isp_axi_cfg_update(vfe_dev);
 	msm_isp_update_framedrop_reg(vfe_dev);
 	msm_isp_update_error_frame_count(vfe_dev);
 
@@ -820,9 +834,7 @@ static void msm_vfe40_axi_cfg_wm_reg(
 	uint32_t wm_base = VFE40_WM_BASE(stream_info->wm[plane_idx]);
 
 	if (!stream_info->frame_based) {
-#if defined(CONFIG_SONY_CAM_V4L2)
 		msm_camera_io_w(0x0, vfe_dev->vfe_base + wm_base);
-#endif
 		/*WR_IMAGE_SIZE*/
 		val =
 			((msm_isp_cal_word_per_line(
@@ -899,6 +911,7 @@ static void msm_vfe40_axi_cfg_wm_xbar_reg(
 		} else {
 			switch (stream_info->output_format) {
 			case V4L2_PIX_FMT_NV12:
+			case V4L2_PIX_FMT_NV14:
 			case V4L2_PIX_FMT_NV16:
 				xbar_cfg |= 0x3 << 4; /*PAIR_STREAM_SWAP_CTRL*/
 				break;
@@ -1286,7 +1299,7 @@ static void msm_vfe40_get_error_mask(
 }
 
 static struct msm_vfe_axi_hardware_info msm_vfe40_axi_hw_info = {
-	.num_wm = 4,
+	.num_wm = 5,
 	.num_comp_mask = 3,
 	.num_rdi = 3,
 	.num_rdi_master = 3,

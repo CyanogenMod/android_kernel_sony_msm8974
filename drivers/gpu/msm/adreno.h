@@ -25,6 +25,9 @@
 #define ADRENO_DEVICE(device) \
 		KGSL_CONTAINER_OF(device, struct adreno_device, dev)
 
+#define ADRENO_CONTEXT(device) \
+		KGSL_CONTAINER_OF(device, struct adreno_context, base)
+
 #define ADRENO_CHIPID_CORE(_id) (((_id) >> 24) & 0xFF)
 #define ADRENO_CHIPID_MAJOR(_id) (((_id) >> 16) & 0xFF)
 #define ADRENO_CHIPID_MINOR(_id) (((_id) >> 8) & 0xFF)
@@ -110,6 +113,10 @@ struct adreno_device {
 	unsigned int mharb;
 	struct adreno_gpudev *gpudev;
 	unsigned int wait_timeout;
+	unsigned int pm4_jt_idx;
+	unsigned int pm4_jt_addr;
+	unsigned int pfp_jt_idx;
+	unsigned int pfp_jt_addr;
 	unsigned int istore_size;
 	unsigned int pix_shader_start;
 	unsigned int instruction_size;
@@ -200,6 +207,7 @@ struct adreno_gpudev {
 	void (*coresight_disable) (struct kgsl_device *device);
 	void (*coresight_config_debug_reg) (struct kgsl_device *device,
 			int debug_reg, unsigned int val);
+	void (*soft_reset)(struct adreno_device *device);
 };
 
 /*
@@ -242,6 +250,8 @@ struct adreno_ft_data {
 	unsigned int replay_for_snapshot;
 };
 
+#define FT_DETECT_REGS_COUNT 12
+
 /* Fault Tolerance policy flags */
 #define  KGSL_FT_DISABLE                  BIT(0)
 #define  KGSL_FT_REPLAY                   BIT(1)
@@ -280,7 +290,6 @@ extern const unsigned int a330_registers[];
 extern const unsigned int a330_registers_count;
 
 extern unsigned int ft_detect_regs[];
-extern const unsigned int ft_detect_regs_count;
 
 int adreno_coresight_enable(struct coresight_device *csdev);
 void adreno_coresight_disable(struct coresight_device *csdev);
@@ -302,15 +311,15 @@ unsigned int adreno_a3xx_rbbm_clock_ctl_default(struct adreno_device
 							*adreno_dev);
 
 struct kgsl_memdesc *adreno_find_region(struct kgsl_device *device,
-						unsigned int pt_base,
+						phys_addr_t pt_base,
 						unsigned int gpuaddr,
 						unsigned int size);
 
 uint8_t *adreno_convertaddr(struct kgsl_device *device,
-	unsigned int pt_base, unsigned int gpuaddr, unsigned int size);
+	phys_addr_t pt_base, unsigned int gpuaddr, unsigned int size);
 
 struct kgsl_memdesc *adreno_find_ctxtmem(struct kgsl_device *device,
-	unsigned int pt_base, unsigned int gpuaddr, unsigned int size);
+	phys_addr_t pt_base, unsigned int gpuaddr, unsigned int size);
 
 void *adreno_snapshot(struct kgsl_device *device, void *snapshot, int *remain,
 		int hang);
@@ -329,6 +338,9 @@ int adreno_perfcounter_get(struct adreno_device *adreno_dev,
 
 int adreno_perfcounter_put(struct adreno_device *adreno_dev,
 	unsigned int groupid, unsigned int countable);
+
+int adreno_soft_reset(struct kgsl_device *device);
+
 
 static inline int adreno_is_a200(struct adreno_device *adreno_dev)
 {

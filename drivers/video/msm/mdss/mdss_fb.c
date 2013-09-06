@@ -99,13 +99,14 @@ void mdss_fb_no_update_notify_timer_cb(unsigned long data)
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)data;
 	if (!mfd)
 		pr_err("%s mfd NULL\n", __func__);
+	mfd->no_update.value = NOTIFY_TYPE_NO_UPDATE;
 	complete(&mfd->no_update.comp);
 }
 
 static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 							unsigned long *argp)
 {
-	int ret, notify;
+	int ret, notify, to_user;
 
 	ret = copy_from_user(&notify, argp, sizeof(int));
 	if (ret) {
@@ -120,14 +121,18 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 		INIT_COMPLETION(mfd->update.comp);
 		ret = wait_for_completion_interruptible_timeout(
 						&mfd->update.comp, 4 * HZ);
+		to_user = mfd->update.value;
 	} else {
 		INIT_COMPLETION(mfd->no_update.comp);
 		ret = wait_for_completion_interruptible_timeout(
 						&mfd->no_update.comp, 4 * HZ);
+		to_user = mfd->no_update.value;
 	}
 	if (ret == 0)
 		ret = -ETIMEDOUT;
-	return (ret > 0) ? 0 : ret;
+	else if (ret > 0)
+		ret = copy_to_user(argp, &to_user, sizeof(int));
+	return ret;
 }
 
 static int lcd_backlight_registered;
@@ -143,15 +148,18 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 
 	/* This maps light HAL backlight level 0 to 4095 into
 	   driver backlight level 0 to bl_max with rounding */
-	bl_lvl = (2 * value * mfd->panel_info->bl_max +
-		  MDSS_MAX_BL_BRIGHTNESS) / (2 * MDSS_MAX_BL_BRIGHTNESS);
+	MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
+						MDSS_MAX_BL_BRIGHTNESS);
 
 	if (!bl_lvl && value)
 		bl_lvl = 1;
 
-	mutex_lock(&mfd->bl_lock);
-	mdss_fb_set_backlight(mfd, bl_lvl);
-	mutex_unlock(&mfd->bl_lock);
+	if (!IS_CALIB_MODE_BL(mfd) && (!mfd->ext_bl_ctrl || !value ||
+							!mfd->bl_level)) {
+		mutex_lock(&mfd->bl_lock);
+		mdss_fb_set_backlight(mfd, bl_lvl);
+		mutex_unlock(&mfd->bl_lock);
+	}
 }
 
 static struct led_classdev backlight_led = {
@@ -224,6 +232,16 @@ static int mdss_fb_create_sysfs(struct msm_fb_data_type *mfd)
 static void mdss_fb_remove_sysfs(struct msm_fb_data_type *mfd)
 {
 	sysfs_remove_group(&mfd->fbi->dev->kobj, &mdss_fb_attr_group);
+}
+
+static void mdss_fb_shutdown(struct platform_device *pdev)
+{
+	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
+
+	if (mfd->ref_cnt > 1)
+		mfd->ref_cnt = 1;
+
+	mdss_fb_release(mfd->fbi, 0);
 }
 
 static int mdss_fb_probe(struct platform_device *pdev)
@@ -588,7 +606,7 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	struct mdss_panel_data *pdata;
 	u32 temp = bkl_lvl;
 
-	if (!mfd->panel_power_on || !bl_updated) {
+	if ((!mfd->panel_power_on || !bl_updated) && !IS_CALIB_MODE_BL(mfd)) {
 		unset_bl_level = bkl_lvl;
 		return;
 	} else {
@@ -598,7 +616,8 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	pdata = dev_get_platdata(&mfd->pdev->dev);
 
 	if ((pdata) && (pdata->set_backlight)) {
-		mdss_fb_scale_bl(mfd, &temp);
+		if (!IS_CALIB_MODE_BL(mfd))
+			mdss_fb_scale_bl(mfd, &temp);
 		/*
 		 * Even though backlight has been scaled, want to show that
 		 * backlight has been set to bkl_lvl to those that read from
@@ -656,6 +675,9 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			ret = mfd->mdp.on_fnc(mfd);
 			if (ret == 0)
 				mfd->panel_power_on = true;
+			mutex_lock(&mfd->update.lock);
+			mfd->update.type = NOTIFY_TYPE_UPDATE;
+			mutex_unlock(&mfd->update.lock);
 		}
 		break;
 
@@ -667,7 +689,11 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
 			int curr_pwr_state;
 
+			mutex_lock(&mfd->update.lock);
+			mfd->update.type = NOTIFY_TYPE_SUSPEND;
+			mutex_unlock(&mfd->update.lock);
 			del_timer(&mfd->no_update.timer);
+			mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
 			complete(&mfd->no_update.comp);
 
 			mfd->op_enable = false;
@@ -722,22 +748,16 @@ static int mdss_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	}
 
 	mdss_fb_pan_idle(mfd);
-	if (off >= len) {
-		/* memory mapped io */
-		off -= len;
-		if (info->var.accel_flags) {
-			mutex_unlock(&info->lock);
-			return -EINVAL;
-		}
-		start = info->fix.mmio_start;
-		len = PAGE_ALIGN((start & ~PAGE_MASK) + info->fix.mmio_len);
-	}
 
 	/* Set VM flags. */
 	start &= PAGE_MASK;
-	if ((vma->vm_end - vma->vm_start + off) > len)
+	if ((vma->vm_end <= vma->vm_start) ||
+	    (off >= len) ||
+	    ((vma->vm_end - vma->vm_start) > (len - off)))
 		return -EINVAL;
 	off += start;
+	if (off < start)
+		return -EINVAL;
 	vma->vm_pgoff = off >> PAGE_SHIFT;
 	/* This is an IO map - tell maydump to skip this VMA */
 	vma->vm_flags |= VM_IO | VM_RESERVED;
@@ -1040,6 +1060,7 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 
 	mfd->op_enable = true;
 
+	mutex_init(&mfd->update.lock);
 	mutex_init(&mfd->no_update.lock);
 	mutex_init(&mfd->sync_mutex);
 	init_timer(&mfd->no_update.timer);
@@ -1119,7 +1140,8 @@ static int mdss_fb_release(struct fb_info *info, int user)
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 				       mfd->op_enable);
 		if (ret) {
-			pr_err("can't turn off display!\n");
+			pr_err("can't turn off display attached to fb%d!\n",
+				mfd->index);
 			return ret;
 		}
 	}

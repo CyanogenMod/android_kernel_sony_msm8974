@@ -214,29 +214,31 @@ struct msm_hdmi_mode_timing_info {
 	LUT[MODE] = mode;\
 	} while (0)
 
-static inline void MSM_HDMI_MODES_INIT_TIMINGS(
-	struct msm_hdmi_mode_timing_info *lut)
-{
-	int i;
+#define MSM_HDMI_MODES_INIT_TIMINGS(__lut)	\
+do {	\
+	unsigned int i;	\
+	for (i = 0; i < HDMI_VFRMT_MAX; i++) {	\
+		struct msm_hdmi_mode_timing_info mode =	\
+			VFRMT_NOT_SUPPORTED(i);	\
+		(__lut)[i] = mode;	\
+	}	\
+} while (0)
 
-	for (i = 0; i < HDMI_VFRMT_MAX; i++) {
-		struct msm_hdmi_mode_timing_info mode = VFRMT_NOT_SUPPORTED(i);
-		lut[i] = mode;
-	}
-}
-
-static inline void MSM_HDMI_MODES_SET_SUPP_TIMINGS(
-	struct msm_hdmi_mode_timing_info *lut, int type)
-{
-	if (type & MSM_HDMI_MODES_CEA) {
-		MSM_HDMI_MODES_SET_TIMING(lut, HDMI_VFRMT_640x480p60_4_3);
-		MSM_HDMI_MODES_SET_TIMING(lut, HDMI_VFRMT_720x480p60_16_9);
-		MSM_HDMI_MODES_SET_TIMING(lut, HDMI_VFRMT_1280x720p60_16_9);
-		MSM_HDMI_MODES_SET_TIMING(lut, HDMI_VFRMT_1920x1080p24_16_9);
-		MSM_HDMI_MODES_SET_TIMING(lut, HDMI_VFRMT_1920x1080p30_16_9);
-	}
-		MSM_HDMI_MODES_SET_TIMING(lut, HDMI_VFRMT_1024x768p60_4_3);
-}
+#define MSM_HDMI_MODES_SET_SUPP_TIMINGS(__lut, __type)	\
+do {	\
+	if (__type & MSM_HDMI_MODES_CEA) {	\
+		MSM_HDMI_MODES_SET_TIMING(__lut,	\
+			HDMI_VFRMT_640x480p60_4_3);	\
+		MSM_HDMI_MODES_SET_TIMING(__lut,	\
+			HDMI_VFRMT_720x480p60_16_9);	\
+		MSM_HDMI_MODES_SET_TIMING(__lut,	\
+			HDMI_VFRMT_1280x720p60_16_9);	\
+		MSM_HDMI_MODES_SET_TIMING(__lut,	\
+			HDMI_VFRMT_1920x1080p24_16_9);	\
+		MSM_HDMI_MODES_SET_TIMING(__lut,	\
+			HDMI_VFRMT_1920x1080p30_16_9);	\
+	}	\
+} while (0)
 
 static inline const char *msm_hdmi_mode_2string(uint32_t mode)
 {

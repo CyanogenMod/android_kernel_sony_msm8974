@@ -508,9 +508,8 @@
 		compatible = "qcom,msm-pcm-hostless";
 	};
 
-	qcom,msm-auxpcm {
-		compatible = "qcom,msm-auxpcm-resource";
-		qcom,msm-cpudai-auxpcm-clk = "pcm_clk";
+	qcom,msm-pri-auxpcm {
+		compatible = "qcom,msm-auxpcm-dev";
 		qcom,msm-cpudai-auxpcm-mode = <0>, <0>;
 		qcom,msm-cpudai-auxpcm-sync = <1>, <1>;
 		qcom,msm-cpudai-auxpcm-frame = <5>, <4>;
@@ -518,16 +517,7 @@
 		qcom,msm-cpudai-auxpcm-slot = <1>, <1>;
 		qcom,msm-cpudai-auxpcm-data = <0>, <0>;
 		qcom,msm-cpudai-auxpcm-pcm-clk-rate = <2048000>, <2048000>;
-
-		qcom,msm-prim-auxpcm-rx {
-			qcom,msm-auxpcm-dev-id = <4106>;
-			compatible = "qcom,msm-auxpcm-dev";
-		};
-
-		qcom,msm-prim-auxpcm-tx {
-			qcom,msm-auxpcm-dev-id = <4107>;
-			compatible = "qcom,msm-auxpcm-dev";
-		};
+		qcom,msm-auxpcm-interface = "primary";
 	};
 
 	qcom,wcnss-wlan@fb000000 {
@@ -847,6 +837,7 @@
 		qcom,gpio-err-fatal = <&smp2pgpio_ssr_smp2p_1_in 0 0>;
 		qcom,gpio-err-ready = <&smp2pgpio_ssr_smp2p_1_in 1 0>;
 		qcom,gpio-proxy-unvote = <&smp2pgpio_ssr_smp2p_1_in 2 0>;
+		qcom,gpio-stop-ack = <&smp2pgpio_ssr_smp2p_1_in 3 0>;
 
 		/* GPIO output to mss */
 		qcom,gpio-force-stop = <&smp2pgpio_ssr_smp2p_1_out 0 0>;
@@ -917,6 +908,12 @@
                 compatible = "qcom,msm-rng";
                 reg = <0xf9bff000 0x200>;
                 qcom,msm-rng-iface-clk;
+                qcom,msm-bus,name = "msm-rng-noc";
+                qcom,msm-bus,num-cases = <2>;
+                qcom,msm-bus,num-paths = <1>;
+                qcom,msm-bus,vectors-KBps =
+                                <1 618 0 0>,
+                                <1 618 0 800>;
 	};
 
 	qcom,tz-log@fe805720 {

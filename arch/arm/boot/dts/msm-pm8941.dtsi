@@ -139,14 +139,15 @@
 						<0x0 0x40 0x6>,
 						<0x0 0x40 0x7>;
 
-				interrupt-names = "vsense_for_r",
-						  "vsense_avg",
-						  "sw_cc_thr",
-						  "ocv_thr",
-						  "charge_begin",
-						  "good_ocv",
+				interrupt-names = "cc_thr",
 						  "ocv_for_r",
-						  "cc_thr";
+						  "good_ocv",
+						  "charge_begin",
+						  "ocv_thr",
+						  "sw_cc_thr",
+						  "vsense_avg",
+						  "vsense_for_r";
+
 			};
 		};
 
@@ -176,7 +177,7 @@
 			status = "disabled";
 
 			qcom,vddmax-mv = <4200>;
-			qcom,vddsafe-mv = <4200>;
+			qcom,vddsafe-mv = <4230>;
 			qcom,vinmin-mv = <4300>;
 			qcom,ibatmax-ma = <1500>;
 			qcom,ibatterm-ma = <100>;
@@ -189,6 +190,7 @@
 			qcom,warm-bat-mv = <4100>;
 			qcom,ibatmax-cool-ma = <350>;
 			qcom,vbatdet-delta-mv = <100>;
+			qcom,resume-soc = <99>;
 			qcom,tchg-mins = <150>;
 
 			qcom,chgr@1000 {

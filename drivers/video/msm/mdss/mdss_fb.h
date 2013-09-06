@@ -26,7 +26,7 @@
 #define MSM_FB_MAX_DEV_LIST 32
 
 #define MSM_FB_ENABLE_DBGFS
-#define WAIT_FENCE_FIRST_TIMEOUT MSEC_PER_SEC
+#define WAIT_FENCE_FIRST_TIMEOUT (3 * MSEC_PER_SEC)
 #define WAIT_FENCE_FINAL_TIMEOUT (10 * MSEC_PER_SEC)
 /* Display op timeout should be greater than total timeout */
 #define WAIT_DISP_OP_TIMEOUT ((WAIT_FENCE_FIRST_TIMEOUT + \
@@ -50,6 +50,7 @@ struct disp_info_notify {
 	struct timer_list timer;
 	struct completion comp;
 	struct mutex lock;
+	int value;
 };
 
 struct msm_fb_data_type;
@@ -73,6 +74,12 @@ struct msm_mdp_interface {
 	u32 (*fb_stride)(u32 fb_index, u32 xres, int bpp);
 	void *private1;
 };
+
+#define IS_CALIB_MODE_BL(mfd) (((mfd)->calib_mode) & MDSS_CALIB_MODE_BL)
+#define MDSS_BRIGHT_TO_BL(out, v, bl_max, max_bright) do {\
+					out = (2 * (v) * (bl_max) + max_bright)\
+					/ (2 * max_bright);\
+					} while (0)
 
 struct msm_fb_data_type {
 	u32 key;
@@ -101,6 +108,8 @@ struct msm_fb_data_type {
 	unsigned long cursor_buf_phys;
 	unsigned long cursor_buf_iova;
 
+	u32 ext_bl_ctrl;
+	u32 calib_mode;
 	u32 bl_level;
 	u32 bl_scale;
 	u32 bl_min_lvl;
@@ -140,6 +149,25 @@ struct msm_fb_backup_type {
 	struct fb_info info;
 	struct mdp_display_commit disp_commit;
 };
+
+static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
+{
+	int needs_complete = 0;
+	mutex_lock(&mfd->update.lock);
+	mfd->update.value = mfd->update.type;
+	needs_complete = mfd->update.value == NOTIFY_TYPE_UPDATE;
+	mutex_unlock(&mfd->update.lock);
+	if (needs_complete) {
+		complete(&mfd->update.comp);
+		mutex_lock(&mfd->no_update.lock);
+		if (mfd->no_update.timer.function)
+			del_timer(&(mfd->no_update.timer));
+
+		mfd->no_update.timer.expires = jiffies + (2 * HZ);
+		add_timer(&mfd->no_update.timer);
+		mutex_unlock(&mfd->no_update.lock);
+	}
+}
 
 int mdss_fb_get_phys_info(unsigned long *start, unsigned long *len, int fb_num);
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl);

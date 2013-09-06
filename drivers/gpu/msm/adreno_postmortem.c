@@ -190,8 +190,9 @@ static void adreno_dump_regs(struct kgsl_device *device,
 	}
 }
 
-static void dump_ib(struct kgsl_device *device, char* buffId, uint32_t pt_base,
-	uint32_t base_offset, uint32_t ib_base, uint32_t ib_size, bool dump)
+static void dump_ib(struct kgsl_device *device, char *buffId,
+	phys_addr_t pt_base, uint32_t base_offset, uint32_t ib_base,
+	uint32_t ib_size, bool dump)
 {
 	uint8_t *base_addr = adreno_convertaddr(device, pt_base,
 		ib_base, ib_size*sizeof(uint32_t));
@@ -214,7 +215,7 @@ struct ib_list {
 	uint32_t offsets[IB_LIST_SIZE];
 };
 
-static void dump_ib1(struct kgsl_device *device, uint32_t pt_base,
+static void dump_ib1(struct kgsl_device *device, phys_addr_t pt_base,
 			uint32_t base_offset,
 			uint32_t ib1_base, uint32_t ib1_size,
 			struct ib_list *ib_list, bool dump)
@@ -719,7 +720,7 @@ int adreno_dump(struct kgsl_device *device, int manual)
 {
 	unsigned int cp_ib1_base, cp_ib1_bufsz;
 	unsigned int cp_ib2_base, cp_ib2_bufsz;
-	unsigned int pt_base, cur_pt_base;
+	phys_addr_t pt_base, cur_pt_base;
 	unsigned int cp_rb_base, cp_rb_ctrl, rb_count;
 	unsigned int cp_rb_wptr, cp_rb_rptr;
 	unsigned int i;
@@ -781,7 +782,9 @@ int adreno_dump(struct kgsl_device *device, int manual)
 			(unsigned int *) &context_id,
 			KGSL_MEMSTORE_OFFSET(KGSL_MEMSTORE_GLOBAL,
 				current_context));
-	context = idr_find(&device->context_idr, context_id);
+
+	context = kgsl_context_get(device, context_id);
+
 	if (context) {
 		ts_processed = kgsl_readtimestamp(device, context,
 						  KGSL_TIMESTAMP_RETIRED);
@@ -789,6 +792,8 @@ int adreno_dump(struct kgsl_device *device, int manual)
 				context->id, ts_processed);
 	} else
 		KGSL_LOG_DUMP(device, "BAD CTXT: %d\n", context_id);
+
+	kgsl_context_put(context);
 
 	num_item = adreno_ringbuffer_count(&adreno_dev->ringbuffer,
 						cp_rb_rptr);
@@ -862,20 +867,20 @@ int adreno_dump(struct kgsl_device *device, int manual)
 						&device->mmu, 0,
 						KGSL_IOMMU_CONTEXT_USER,
 						KGSL_IOMMU_CTX_TTBR0), 1))) {
-			KGSL_LOG_DUMP(device, "Current pagetable: %x\t"
-				"pagetable base: %x\n",
+			KGSL_LOG_DUMP(device,
+				"Current pagetable: %x\t pagetable base: %pa\n",
 				kgsl_mmu_get_ptname_from_ptbase(&device->mmu,
 								cur_pt_base),
-				cur_pt_base);
+				&cur_pt_base);
 
 			/* Set cur_pt_base to the new pagetable base */
 			cur_pt_base = rb_copy[read_idx++];
 
-			KGSL_LOG_DUMP(device, "New pagetable: %x\t"
-				"pagetable base: %x\n",
+			KGSL_LOG_DUMP(device,
+				"New pagetable: %x\t pagetable base: %pa\n",
 				kgsl_mmu_get_ptname_from_ptbase(&device->mmu,
 								cur_pt_base),
-				cur_pt_base);
+				&cur_pt_base);
 		}
 	}
 

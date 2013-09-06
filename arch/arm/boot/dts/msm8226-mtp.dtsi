@@ -34,7 +34,6 @@
 			synaptics,irq-gpio = <&msmgpio 17 0x2008>;
 			synaptics,button-map = <139 102 158>;
 			synaptics,i2c-pull-up;
-			synaptics,reg-en;
 		};
 	};
 
@@ -292,7 +291,7 @@
 				qcom,cs-out-en;
 				qcom,op-fdbck = <1>;
 				qcom,default-state = "on";
-				qcom,max-current = <25>;
+				qcom,max-current = <20>;
 				qcom,ctrl-delay-us = <0>;
 				qcom,boost-curr-lim = <3>;
 				qcom,cp-sel = <0>;
@@ -414,6 +413,10 @@
 
 &pm8226_chg {
 	qcom,charging-disabled;
+};
+
+&usb_otg_sw {
+	status = "okay";
 };
 
 &slim_msm {

@@ -24,7 +24,8 @@
 /* truncate at 1k */
 #define MDSS_MDP_BUS_FACTOR_SHIFT 10
 /* 1.5 bus fudge factor */
-#define MDSS_MDP_BUS_FUDGE_FACTOR(val) (((val) * 11) / 4)
+#define MDSS_MDP_BUS_FUDGE_FACTOR_IB(val) (((val) * 11) / 4)
+#define MDSS_MDP_BUS_FUDGE_FACTOR_AB(val) (val << 1)
 /* 1.25 clock fudge factor */
 #define MDSS_MDP_CLK_FUDGE_FACTOR(val) (((val) * 5) / 4)
 
@@ -82,7 +83,8 @@ static int mdss_mdp_ctl_perf_commit(struct mdss_data_type *mdata, u32 flags)
 	}
 	if (flags & MDSS_MDP_PERF_UPDATE_BUS) {
 		bus_ab_quota = bus_ib_quota << MDSS_MDP_BUS_FACTOR_SHIFT;
-		bus_ib_quota = MDSS_MDP_BUS_FUDGE_FACTOR(bus_ib_quota);
+		bus_ab_quota = MDSS_MDP_BUS_FUDGE_FACTOR_AB(bus_ab_quota);
+		bus_ib_quota = MDSS_MDP_BUS_FUDGE_FACTOR_IB(bus_ib_quota);
 		bus_ib_quota <<= MDSS_MDP_BUS_FACTOR_SHIFT;
 
 		mdss_mdp_bus_scale_set_quota(bus_ab_quota, bus_ib_quota);
@@ -97,13 +99,80 @@ static int mdss_mdp_ctl_perf_commit(struct mdss_data_type *mdata, u32 flags)
 	return 0;
 }
 
+/**
+ * mdss_mdp_perf_calc_pipe() - calculate performance numbers required by pipe
+ * @pipe:	Source pipe struct containing updated pipe params
+ * @perf:	Structure containing values that should be updated for
+ *		performance tuning
+ *
+ * Function calculates the minimum required performance calculations in order
+ * to avoid MDP underflow. The calculations are based on the way MDP
+ * fetches (bandwidth requirement) and processes data through MDP pipeline
+ * (MDP clock requirement) based on frame size and scaling requirements.
+ */
+int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
+		struct mdss_mdp_perf_params *perf)
+{
+	struct mdss_mdp_mixer *mixer;
+	int fps = DEFAULT_FRAME_RATE;
+	u32 quota, rate, v_total, src_h;
+
+	if (!pipe || !perf || !pipe->mixer)
+		return -EINVAL;
+
+	mixer = pipe->mixer;
+	if (mixer->rotator_mode) {
+		v_total = pipe->flags & MDP_ROT_90 ? pipe->dst.w : pipe->dst.h;
+	} else if (mixer->type == MDSS_MDP_MIXER_TYPE_INTF) {
+		struct mdss_panel_info *pinfo;
+
+		pinfo = &mixer->ctl->panel_data->panel_info;
+		fps = mdss_panel_get_framerate(pinfo);
+		v_total = mdss_panel_get_vtotal(pinfo);
+	} else {
+		v_total = mixer->height;
+	}
+
+	/*
+	 * when doing vertical decimation lines will be skipped, hence there is
+	 * no need to account for these lines in MDP clock or request bus
+	 * bandwidth to fetch them.
+	 */
+	src_h = pipe->src.h >> pipe->vert_deci;
+
+	quota = fps * pipe->src.w * src_h;
+	if (pipe->src_fmt->chroma_sample == MDSS_MDP_CHROMA_420)
+		quota = (quota * 3) / 2;
+	else
+		quota *= pipe->src_fmt->bpp;
+
+	rate = pipe->dst.w;
+	if (src_h > pipe->dst.h)
+		rate = (rate * src_h) / pipe->dst.h;
+
+	rate *= v_total * fps;
+	if (mixer->rotator_mode) {
+		rate /= 4; /* block mode fetch at 4 pix/clk */
+		quota *= 2; /* bus read + write */
+		perf->ib_quota = quota;
+	} else {
+		perf->ib_quota = (quota / pipe->dst.h) * v_total;
+	}
+	perf->ab_quota = quota;
+	perf->mdp_clk_rate = rate;
+
+	pr_debug("mixer=%d pnum=%d clk_rate=%u bus ab=%u ib=%u\n",
+		 mixer->num, pipe->num, rate, perf->ab_quota, perf->ib_quota);
+
+	return 0;
+}
+
 static void mdss_mdp_perf_mixer_update(struct mdss_mdp_mixer *mixer,
 				       u32 *bus_ab_quota, u32 *bus_ib_quota,
 				       u32 *clk_rate)
 {
 	struct mdss_mdp_pipe *pipe;
-	const int fps = 60;
-	u32 quota, rate;
+	int fps = DEFAULT_FRAME_RATE;
 	u32 v_total;
 	int i;
 	u32 max_clk_rate = 0, ab_total = 0, ib_total = 0;
@@ -112,17 +181,13 @@ static void mdss_mdp_perf_mixer_update(struct mdss_mdp_mixer *mixer,
 	*bus_ib_quota = 0;
 	*clk_rate = 0;
 
-	if (mixer->rotator_mode) {
-		pipe = mixer->stage_pipe[0]; /* rotator pipe */
-		v_total = pipe->flags & MDP_ROT_90 ? pipe->dst.w : pipe->dst.h;
-	} else {
+	if (!mixer->rotator_mode) {
 		int is_writeback = false;
 		if (mixer->type == MDSS_MDP_MIXER_TYPE_INTF) {
 			struct mdss_panel_info *pinfo;
 			pinfo = &mixer->ctl->panel_data->panel_info;
-			v_total = (pinfo->yres + pinfo->lcdc.v_back_porch +
-				   pinfo->lcdc.v_front_porch +
-				   pinfo->lcdc.v_pulse_width);
+			fps = mdss_panel_get_framerate(pinfo);
+			v_total = mdss_panel_get_vtotal(pinfo);
 
 			if (pinfo->type == WRITEBACK_PANEL)
 				is_writeback = true;
@@ -141,7 +206,7 @@ static void mdss_mdp_perf_mixer_update(struct mdss_mdp_mixer *mixer,
 	}
 
 	for (i = 0; i < MDSS_MDP_MAX_STAGE; i++) {
-		u32 ib_quota;
+		struct mdss_mdp_perf_params perf;
 		pipe = mixer->stage_pipe[i];
 		if (pipe == NULL)
 			continue;
@@ -151,33 +216,13 @@ static void mdss_mdp_perf_mixer_update(struct mdss_mdp_mixer *mixer,
 			max_clk_rate = 0;
 		}
 
-		quota = fps * pipe->src.w * pipe->src.h;
-		if (pipe->src_fmt->chroma_sample == MDSS_MDP_CHROMA_420)
-			quota = (quota * 3) / 2;
-		else
-			quota *= pipe->src_fmt->bpp;
+		if (mdss_mdp_perf_calc_pipe(pipe, &perf))
+			continue;
 
-		rate = pipe->dst.w;
-		if (pipe->src.h > pipe->dst.h)
-			rate = (rate * pipe->src.h) / pipe->dst.h;
-
-		rate *= v_total * fps;
-		if (mixer->rotator_mode) {
-			rate /= 4; /* block mode fetch at 4 pix/clk */
-			quota *= 2; /* bus read + write */
-			ib_quota = quota;
-		} else {
-			ib_quota = (quota / pipe->dst.h) * v_total;
-		}
-
-
-		pr_debug("mixer=%d pnum=%d clk_rate=%u bus ab=%u ib=%u\n",
-			 mixer->num, pipe->num, rate, quota, ib_quota);
-
-		ab_total += quota >> MDSS_MDP_BUS_FACTOR_SHIFT;
-		ib_total += ib_quota >> MDSS_MDP_BUS_FACTOR_SHIFT;
-		if (rate > max_clk_rate)
-			max_clk_rate = rate;
+		ab_total += perf.ab_quota >> MDSS_MDP_BUS_FACTOR_SHIFT;
+		ib_total += perf.ib_quota >> MDSS_MDP_BUS_FACTOR_SHIFT;
+		if (perf.mdp_clk_rate > max_clk_rate)
+			max_clk_rate = perf.mdp_clk_rate;
 	}
 
 	*bus_ab_quota += ab_total;
@@ -295,6 +340,7 @@ static int mdss_mdp_ctl_free(struct mdss_mdp_ctl *ctl)
 	mutex_lock(&mdss_mdp_ctl_lock);
 	ctl->ref_cnt--;
 	ctl->intf_num = MDSS_MDP_NO_INTF;
+	ctl->intf_type = MDSS_MDP_NO_INTF;
 	ctl->is_secure = false;
 	ctl->power_on = false;
 	ctl->start_fnc = NULL;
@@ -471,6 +517,7 @@ int mdss_mdp_ctl_splash_finish(struct mdss_mdp_ctl *ctl)
 	case MIPI_VIDEO_PANEL:
 		return mdss_mdp_video_reconfigure_splash_done(ctl);
 	case MIPI_CMD_PANEL:
+		return mdss_mdp_cmd_reconfigure_splash_done(ctl);
 	default:
 		return 0;
 	}

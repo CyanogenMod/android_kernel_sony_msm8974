@@ -179,7 +179,7 @@ static void wcd9xxx_disable_clock_block(struct wcd9xxx_resmgr *resmgr)
 	struct snd_soc_codec *codec = resmgr->codec;
 
 	pr_debug("%s: enter\n", __func__);
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
+	WCD9XXX_BG_CLK_ASSERT_LOCKED(resmgr);
 
 	/* Notify */
 	if (resmgr->clk_type == WCD9XXX_CLK_RCO)
@@ -209,8 +209,8 @@ void wcd9xxx_resmgr_post_ssr(struct wcd9xxx_resmgr *resmgr)
 	int old_clk_rco_users, old_clk_mclk_users;
 
 	pr_debug("%s: enter\n", __func__);
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
 
+	WCD9XXX_BG_CLK_LOCK(resmgr);
 	old_bg_audio_users = resmgr->bg_audio_users;
 	old_bg_mbhc_users = resmgr->bg_mbhc_users;
 	old_clk_rco_users = resmgr->clk_rco_users;
@@ -243,6 +243,7 @@ void wcd9xxx_resmgr_post_ssr(struct wcd9xxx_resmgr *resmgr)
 		while (old_clk_rco_users--)
 			wcd9xxx_resmgr_get_clk_block(resmgr, WCD9XXX_CLK_RCO);
 	}
+	WCD9XXX_BG_CLK_UNLOCK(resmgr);
 	pr_debug("%s: leave\n", __func__);
 }
 
@@ -257,7 +258,7 @@ void wcd9xxx_resmgr_get_bandgap(struct wcd9xxx_resmgr *resmgr,
 
 	pr_debug("%s: enter, wants %d\n", __func__, choice);
 
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
+	WCD9XXX_BG_CLK_ASSERT_LOCKED(resmgr);
 	switch (choice) {
 	case WCD9XXX_BANDGAP_AUDIO_MODE:
 		resmgr->bg_audio_users++;
@@ -319,7 +320,7 @@ void wcd9xxx_resmgr_put_bandgap(struct wcd9xxx_resmgr *resmgr,
 
 	pr_debug("%s: enter choice %d\n", __func__, choice);
 
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
+	WCD9XXX_BG_CLK_ASSERT_LOCKED(resmgr);
 	switch (choice) {
 	case WCD9XXX_BANDGAP_AUDIO_MODE:
 		if (--resmgr->bg_audio_users == 0) {
@@ -450,7 +451,7 @@ static void wcd9xxx_enable_clock_block(struct wcd9xxx_resmgr *resmgr,
  */
 static enum wcd9xxx_clock_type wcd9xxx_save_clock(struct wcd9xxx_resmgr *resmgr)
 {
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
+	WCD9XXX_BG_CLK_ASSERT_LOCKED(resmgr);
 	if (resmgr->clk_type != WCD9XXX_CLK_OFF)
 		wcd9xxx_disable_clock_block(resmgr);
 	return resmgr->clk_type != WCD9XXX_CLK_OFF;
@@ -469,7 +470,7 @@ void wcd9xxx_resmgr_get_clk_block(struct wcd9xxx_resmgr *resmgr,
 	pr_debug("%s: current %d, requested %d, rco_users %d, mclk_users %d\n",
 		 __func__, resmgr->clk_type, type,
 		 resmgr->clk_rco_users, resmgr->clk_mclk_users);
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
+	WCD9XXX_BG_CLK_ASSERT_LOCKED(resmgr);
 	switch (type) {
 	case WCD9XXX_CLK_RCO:
 		if (++resmgr->clk_rco_users == 1 &&
@@ -510,7 +511,7 @@ void wcd9xxx_resmgr_put_clk_block(struct wcd9xxx_resmgr *resmgr,
 {
 	pr_debug("%s: current %d, put %d\n", __func__, resmgr->clk_type, type);
 
-	WCD9XXX_BCL_ASSERT_LOCKED(resmgr);
+	WCD9XXX_BG_CLK_ASSERT_LOCKED(resmgr);
 	switch (type) {
 	case WCD9XXX_CLK_RCO:
 		if (--resmgr->clk_rco_users == 0 &&
@@ -776,6 +777,7 @@ int wcd9xxx_resmgr_init(struct wcd9xxx_resmgr *resmgr,
 	BLOCKING_INIT_NOTIFIER_HEAD(&resmgr->notifier);
 
 	mutex_init(&resmgr->codec_resource_lock);
+	mutex_init(&resmgr->codec_bg_clk_lock);
 	mutex_init(&resmgr->update_bit_cond_lock);
 
 	return 0;
@@ -784,6 +786,7 @@ int wcd9xxx_resmgr_init(struct wcd9xxx_resmgr *resmgr,
 void wcd9xxx_resmgr_deinit(struct wcd9xxx_resmgr *resmgr)
 {
 	mutex_destroy(&resmgr->update_bit_cond_lock);
+	mutex_destroy(&resmgr->codec_bg_clk_lock);
 	mutex_destroy(&resmgr->codec_resource_lock);
 }
 

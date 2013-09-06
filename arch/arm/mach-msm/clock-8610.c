@@ -1833,6 +1833,7 @@ static struct rcg_clk dsi_esc_clk_src = {
 };
 
 static struct clk_freq_tbl ftbl_mclk0_1_clk[] = {
+	F_MM(24000000, gpll0, 5, 1, 5),
 	F_MM(66670000, gpll0, 9, 0, 0),
 	F_END,
 };
@@ -2878,6 +2879,7 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9923000.i2c"),
 	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
 	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9927000.i2c"),
+	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9926000.spi"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup1_i2c_apps_clk.c, "f9923000.i2c"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup1_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup2_i2c_apps_clk.c, ""),
@@ -2885,6 +2887,7 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup3_i2c_apps_clk.c, "f9925000.i2c"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup3_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup4_i2c_apps_clk.c, ""),
+	CLK_LOOKUP("core_clk",  gcc_blsp1_qup4_spi_apps_clk.c, "f9926000.spi"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup4_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup5_i2c_apps_clk.c, "f9927000.i2c"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup5_spi_apps_clk.c, ""),
@@ -2999,6 +3002,75 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("iface_clk", gcc_copss_smmu_ahb_clk.c,
 							 "fd010000.qcom,iommu"),
 	CLK_LOOKUP("core_clk",         pnoc_iommu_clk.c, "fd010000.qcom,iommu"),
+
+	/* MM sensor clocks */
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6-006f"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6-006d"),
+	CLK_LOOKUP("cam_src_clk", mclk1_clk_src.c, "6-0078"),
+	CLK_LOOKUP("cam_clk", mclk0_clk.c, "6-006f"),
+	CLK_LOOKUP("cam_clk", mclk0_clk.c, "6-006d"),
+	CLK_LOOKUP("cam_clk", mclk1_clk.c, "6-0078"),
+
+
+	/* CSIPHY clocks */
+	CLK_LOOKUP("csiphy_timer_src_clk", csi0phytimer_clk_src.c,
+		"fda00c00.qcom,csiphy"),
+	CLK_LOOKUP("csiphy_timer_clk", csi0phytimer_clk.c,
+		"fda00c00.qcom,csiphy"),
+	CLK_LOOKUP("csiphy_timer_src_clk", csi1phytimer_clk_src.c,
+		"fda01000.qcom,csiphy"),
+	CLK_LOOKUP("csiphy_timer_clk", csi1phytimer_clk.c,
+		"fda01000.qcom,csiphy"),
+
+	/* CSID clocks */
+	CLK_LOOKUP("csi_clk", csi0_clk.c, "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi_src_clk", csi0_clk_src.c, "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi_ahb_clk", csi_ahb_clk.c, "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi0phy_mux_clk", csi0phy_cam_mux_clk.c,
+		 "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi1phy_mux_clk", csi1phy_cam_mux_clk.c,
+		 "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi0pix_mux_clk", csi0pix_cam_mux_clk.c,
+		 "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi0rdi_mux_clk", rdi0_cam_mux_clk.c,
+		 "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi1rdi_mux_clk", rdi1_cam_mux_clk.c,
+		 "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi2rdi_mux_clk", rdi2_cam_mux_clk.c,
+		 "fda00000.qcom,csid"),
+
+	CLK_LOOKUP("csi_clk", csi1_clk.c, "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi_src_clk", csi1_clk_src.c, "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi_ahb_clk", csi_ahb_clk.c, "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi0phy_mux_clk", csi0phy_cam_mux_clk.c,
+		 "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi1phy_mux_clk", csi1phy_cam_mux_clk.c,
+		 "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi0pix_mux_clk", csi0pix_cam_mux_clk.c,
+		 "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi0rdi_mux_clk", rdi0_cam_mux_clk.c,
+		 "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi1rdi_mux_clk", rdi1_cam_mux_clk.c,
+		 "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi2rdi_mux_clk", rdi2_cam_mux_clk.c,
+		 "fda00400.qcom,csid"),
+
+	CLK_LOOKUP("csi_phy_src_clk", csi0phy_clk.c, "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi_phy_src_clk", csi1phy_clk.c, "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi_pix_src_clk", csi0pix_clk.c, "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi_pix_src_clk", csi1pix_clk.c, "fda00400.qcom,csid"),
+	CLK_LOOKUP("csi_rdi_src_clk", csi0rdi_clk.c, "fda00000.qcom,csid"),
+	CLK_LOOKUP("csi_rdi_src_clk", csi1rdi_clk.c, "fda00400.qcom,csid"),
+	/* ISPIF need no clock */
+
+	CLK_LOOKUP("vfe_clk_src", vfe_clk_src.c, "fde00000.qcom,vfe"),
+	CLK_LOOKUP("vfe_clk", vfe_clk.c, "fde00000.qcom,vfe"),
+
+	CLK_LOOKUP("csi_vfe_clk", csi_vfe_clk.c, "fde00000.qcom,vfe"),
+	CLK_LOOKUP("vfe_ahb_clk", vfe_ahb_clk.c, "fde00000.qcom,vfe"),
+
+	CLK_LOOKUP("bus_clk", vfe_axi_clk.c, "fde00000.qcom,vfe"),
+
 
 	CLK_LOOKUP("core_clk",         q6ss_xo_clk.c,  "fe200000.qcom,lpass"),
 	CLK_LOOKUP("bus_clk", gcc_lpass_q6_axi_clk.c,  "fe200000.qcom,lpass"),

@@ -667,6 +667,9 @@ int hci_conn_del(struct hci_conn *conn)
 
 	hci_conn_put_device(conn);
 
+	if (conn->hidp_session_valid)
+		hci_conn_put_device(conn);
+
 	hci_dev_put(hdev);
 
 	return 0;
@@ -1275,8 +1278,10 @@ EXPORT_SYMBOL(hci_conn_hold_device);
 
 void hci_conn_put_device(struct hci_conn *conn)
 {
-	if (atomic_dec_and_test(&conn->devref))
+	if (atomic_dec_and_test(&conn->devref)) {
+		conn->hidp_session_valid = false;
 		hci_conn_del_sysfs(conn);
+	}
 }
 EXPORT_SYMBOL(hci_conn_put_device);
 

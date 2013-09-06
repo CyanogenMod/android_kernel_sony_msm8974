@@ -28,10 +28,10 @@
 #include "io.h"
 #include "xhci.h"
 
-#define MAX_CHGDET_RETRY 3
-static int max_chgdet_retry_count = MAX_CHGDET_RETRY;
-module_param(max_chgdet_retry_count, int, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(max_chgdet_retry_count, "Max invalid charger retry count");
+#define MAX_INVALID_CHRGR_RETRY 3
+static int max_chgr_retry_count = MAX_INVALID_CHRGR_RETRY;
+module_param(max_chgr_retry_count, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(max_chgr_retry_count, "Max invalid charger retry count");
 static void dwc3_otg_reset(struct dwc3_otg *dotg);
 
 static void dwc3_otg_notify_host_mode(struct usb_otg *otg, int host_mode);
@@ -763,7 +763,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			dev_dbg(phy->dev, "!id\n");
 			phy->state = OTG_STATE_A_IDLE;
 			work = 1;
-			dotg->chgdet_retry_count = 0;
+			dotg->charger_retry_count = 0;
 			if (charger) {
 				if (charger->chg_type == DWC3_INVALID_CHARGER)
 					charger->start_detection(dotg->charger,
@@ -798,10 +798,21 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 					phy->state = OTG_STATE_B_PERIPHERAL;
 					work = 1;
 					break;
-				case DWC3_UNSUPPORTED_CHARGER:
-					dotg->chgdet_retry_count++;
-					if (dotg->chgdet_retry_count ==
-						max_chgdet_retry_count) {
+				case DWC3_FLOATED_CHARGER:
+					if (dotg->charger_retry_count <
+							max_chgr_retry_count)
+						dotg->charger_retry_count++;
+					/*
+					 * In case of floating charger, if
+					 * retry count equal to max retry count
+					 * notify PMIC about floating charger
+					 * and put Hw in low power mode. Else
+					 * perform charger detection again by
+					 * calling start_detection() with false
+					 * and then with true argument.
+					 */
+					if (dotg->charger_retry_count ==
+						max_chgr_retry_count) {
 						dwc3_otg_set_power(phy, 0);
 						pm_runtime_put_sync(phy->dev);
 						break;
@@ -833,7 +844,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			if (charger)
 				charger->start_detection(dotg->charger, false);
 
-			dotg->chgdet_retry_count = 0;
+			dotg->charger_retry_count = 0;
 			dwc3_otg_set_power(phy, 0);
 			dev_dbg(phy->dev, "No device, trying to suspend\n");
 			pm_runtime_put_sync(phy->dev);
@@ -871,7 +882,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 				 */
 				dev_dbg(phy->dev, "enter lpm as\n"
 					"unable to start A-device\n");
-				phy->state = OTG_STATE_UNDEFINED;
+				phy->state = OTG_STATE_A_IDLE;
 				pm_runtime_put_sync(phy->dev);
 				return;
 			}

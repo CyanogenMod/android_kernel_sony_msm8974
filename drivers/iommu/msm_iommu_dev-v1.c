@@ -115,6 +115,7 @@ static int __get_bus_vote_client(struct platform_device *pdev,
 static void __put_bus_vote_client(struct msm_iommu_drvdata *drvdata)
 {
 	msm_bus_scale_unregister_client(drvdata->bus_client);
+	drvdata->bus_client = 0;
 }
 
 static int msm_iommu_parse_dt(struct platform_device *pdev,
@@ -263,13 +264,19 @@ static int __devinit msm_iommu_probe(struct platform_device *pdev)
 
 	drvdata->glb_base = drvdata->base;
 
-	drvdata->gdsc = devm_regulator_get(&pdev->dev, "vdd");
-	if (IS_ERR(drvdata->gdsc))
-		return PTR_ERR(drvdata->gdsc);
+	if (of_get_property(pdev->dev.of_node, "vdd-supply", NULL)) {
 
-	drvdata->alt_gdsc = devm_regulator_get(&pdev->dev, "qcom,alt-vdd");
-	if (IS_ERR(drvdata->alt_gdsc))
-		drvdata->alt_gdsc = NULL;
+		drvdata->gdsc = devm_regulator_get(&pdev->dev, "vdd");
+		if (IS_ERR(drvdata->gdsc))
+			return PTR_ERR(drvdata->gdsc);
+
+		drvdata->alt_gdsc = devm_regulator_get(&pdev->dev,
+							"qcom,alt-vdd");
+		if (IS_ERR(drvdata->alt_gdsc))
+			drvdata->alt_gdsc = NULL;
+	} else {
+		pr_debug("Warning: No regulator specified for IOMMU\n");
+	}
 
 	drvdata->pclk = devm_clk_get(&pdev->dev, "iface_clk");
 	if (IS_ERR(drvdata->pclk))
@@ -306,8 +313,6 @@ static int __devinit msm_iommu_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, drvdata);
 
-	msm_iommu_sec_set_access_ops(&iommu_access_ops_v1);
-
 	pmon_info = msm_iommu_pm_alloc(&pdev->dev);
 	if (pmon_info != NULL) {
 		ret = msm_iommu_pmon_parse_dt(pdev, pmon_info);
@@ -316,7 +321,7 @@ static int __devinit msm_iommu_probe(struct platform_device *pdev)
 			pr_info("%s: pmon not available.\n", drvdata->name);
 		} else {
 			pmon_info->iommu.base = drvdata->base;
-			pmon_info->iommu.ops = &iommu_access_ops_v1;
+			pmon_info->iommu.ops = msm_get_iommu_access_ops();
 			pmon_info->iommu.hw_ops = iommu_pm_get_hw_ops_v1();
 			pmon_info->iommu.iommu_name = drvdata->name;
 			ret = msm_iommu_pm_iommu_register(pmon_info);
@@ -495,6 +500,10 @@ static int __init msm_iommu_driver_init(void)
 {
 	int ret;
 
+	if (!msm_soc_version_supports_iommu_v0()) {
+		msm_set_iommu_access_ops(&iommu_access_ops_v1);
+		msm_iommu_sec_set_access_ops(&iommu_access_ops_v1);
+	}
 	ret = platform_driver_register(&msm_iommu_driver);
 	if (ret != 0) {
 		pr_err("Failed to register IOMMU driver\n");

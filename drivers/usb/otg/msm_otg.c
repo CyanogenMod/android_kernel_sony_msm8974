@@ -1261,7 +1261,14 @@ static int msm_otg_notify_power_supply(struct msm_otg *motg, unsigned mA)
 		/* Set max current limit */
 		if (power_supply_set_current_limit(psy, 0))
 			goto psy_error;
+	} else {
+		if (power_supply_set_online(psy, true))
+			goto psy_error;
+		/* Current has changed (100/2 --> 500) */
+		if (power_supply_set_current_limit(psy, 1000*mA))
+			goto psy_error;
 	}
+
 	power_supply_changed(psy);
 	return 0;
 
@@ -1500,7 +1507,7 @@ static int msm_otg_set_host(struct usb_otg *otg, struct usb_bus *host)
 		vbus_otg = devm_regulator_get(motg->phy.dev, "vbus_otg");
 		if (IS_ERR(vbus_otg)) {
 			pr_err("Unable to get vbus_otg\n");
-			return -ENODEV;
+			return PTR_ERR(vbus_otg);
 		}
 	}
 

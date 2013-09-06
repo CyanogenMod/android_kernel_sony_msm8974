@@ -17,6 +17,12 @@
 #include <mach/gpio.h>
 #include <mach/gpiomux.h>
 
+static struct gpiomux_setting gpio_spi_config = {
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
 static struct gpiomux_setting gpio_i2c_config = {
 	.func = GPIOMUX_FUNC_3,
 	.drv  = GPIOMUX_DRV_2MA,
@@ -161,6 +167,30 @@ static struct msm_gpiomux_config msm_atmel_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &atmel_int_sus_cfg,
 		},
 	},
+	{
+		.gpio      = 86,		/* BLSP1 QUP4 SPI_DATA_MOSI */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
+		},
+	},
+	{
+		.gpio      = 87,		/* BLSP1 QUP4 SPI_DATA_MISO */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
+		},
+	},
+	{
+		.gpio      = 89,		/* BLSP1 QUP4 SPI_CLK */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
+		},
+	},
+	{
+		.gpio      = 88,		/* BLSP1 QUP4 SPI_CS */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
+		},
+	},
 };
 
 static struct msm_gpiomux_config wcnss_5wire_interface[] = {
@@ -197,6 +227,125 @@ static struct msm_gpiomux_config wcnss_5wire_interface[] = {
 		.settings = {
 			[GPIOMUX_ACTIVE]    = &wcnss_5wire_active_cfg,
 			[GPIOMUX_SUSPENDED] = &wcnss_5wire_suspend_cfg,
+		},
+	},
+};
+
+static struct gpiomux_setting gpio_suspend_config[] = {
+	{
+		.func = GPIOMUX_FUNC_GPIO,  /* IN-NP */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_NONE,
+	},
+	{
+		.func = GPIOMUX_FUNC_GPIO,  /* O-LOW */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_NONE,
+		.dir = GPIOMUX_OUT_LOW,
+	},
+};
+
+static struct gpiomux_setting cam_settings[] = {
+	{
+		.func = GPIOMUX_FUNC_1, /*active 1*/ /* 0 */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_NONE,
+	},
+
+	{
+		.func = GPIOMUX_FUNC_1, /*suspend*/ /* 1 */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_DOWN,
+	},
+
+	{
+		.func = GPIOMUX_FUNC_1, /*i2c suspend*/ /* 2 */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_KEEPER,
+	},
+
+	{
+		.func = GPIOMUX_FUNC_GPIO, /*active 0*/ /* 3 */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_NONE,
+	},
+
+	{
+		.func = GPIOMUX_FUNC_GPIO, /*suspend 0*/ /* 4 */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_DOWN,
+	},
+};
+
+static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
+	{
+		.gpio = 13, /* CAM_MCLK0 */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[0],
+			[GPIOMUX_SUSPENDED] = &cam_settings[1],
+		},
+	},
+	{
+		.gpio = 14, /* CAM_MCLK1 */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[0],
+			[GPIOMUX_SUSPENDED] = &cam_settings[1],
+		},
+	},
+	{
+		.gpio = 16, /* CCI_I2C_SDA */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[0],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[0],
+		},
+	},
+	{
+		.gpio = 17, /* CCI_I2C_SCL */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[0],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[0],
+		},
+	},
+	{
+		.gpio = 18, /* FLASH_LED_EN */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[0],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[1],
+		},
+	},
+	{
+		.gpio = 19, /* FLASH_LED_NOW */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[0],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[1],
+		},
+	},
+	{
+		.gpio = 8, /* CAM1_STANDBY_N */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[1],
+		},
+	},
+	{
+		.gpio = 15, /* CAM1_RST_N */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[1],
+		},
+	},
+	{
+		.gpio = 20, /* WEBCAM1_STANDBY */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[1],
+		},
+	},
+	{
+		.gpio = 21, /* WEBCAM2_RESET_N */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &gpio_suspend_config[1],
 		},
 	},
 };
@@ -268,4 +417,5 @@ void __init msm8610_init_gpiomux(void)
 	msm_gpiomux_install(msm_keypad_configs,
 				ARRAY_SIZE(msm_keypad_configs));
 	msm_gpiomux_install(sd_card_det, ARRAY_SIZE(sd_card_det));
+	msm_gpiomux_install(msm_sensor_configs, ARRAY_SIZE(msm_sensor_configs));
 }

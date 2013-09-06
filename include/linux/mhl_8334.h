@@ -141,6 +141,10 @@ struct mhl_tx_ctrl {
 	uint8_t chip_rev_id;
 	int mhl_mode;
 	struct completion rgnd_done;
+	struct timer_list discovery_timer;
+	struct work_struct timer_work;
+	bool notify_usb_online_plugged;
+	bool discovering;
 	void (*notify_usb_online)(int online);
 	struct usb_ext_notification *mhl_info;
 	bool disc_enabled;
@@ -207,6 +211,7 @@ enum mhl_st_type {
 	POWER_STATE_D0_NO_MHL = 0,
 	POWER_STATE_D0_MHL    = 2,
 	POWER_STATE_D3        = 3,
+	POWER_STATE_DELAY_D3  = 4,
 };
 
 enum {

@@ -608,7 +608,8 @@ static int update_cpu_max_freq(int cpu, uint32_t max_freq)
 	return ret;
 }
 
-static void __cpuinit do_core_control(long temp)
+#ifdef CONFIG_SMP
+static void __ref do_core_control(long temp)
 {
 	int i = 0;
 	int ret = 0;
@@ -657,6 +658,12 @@ static void __cpuinit do_core_control(long temp)
 	}
 	mutex_unlock(&core_control_mutex);
 }
+#else
+static void do_core_control(long temp)
+{
+	return;
+}
+#endif
 
 static int do_vdd_restriction(void)
 {
@@ -755,7 +762,7 @@ exit:
 	return ret;
 }
 
-static void __cpuinit do_freq_control(long temp)
+static void __ref do_freq_control(long temp)
 {
 	int ret = 0;
 	int cpu = 0;
@@ -798,7 +805,7 @@ static void __cpuinit do_freq_control(long temp)
 
 }
 
-static void __cpuinit check_temp(struct work_struct *work)
+static void __ref check_temp(struct work_struct *work)
 {
 	static int limit_init;
 	struct tsens_device tsens_dev;
@@ -832,7 +839,7 @@ reschedule:
 				msecs_to_jiffies(msm_thermal_info.poll_ms));
 }
 
-static int __cpuinit msm_thermal_cpu_callback(struct notifier_block *nfb,
+static int __ref msm_thermal_cpu_callback(struct notifier_block *nfb,
 		unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (unsigned long)hcpu;
@@ -894,7 +901,7 @@ static void thermal_rtc_callback(struct alarm *al)
  * status will be carried over to the process stopping the msm_thermal, as
  * we dont want to online a core and bring in the thermal issues.
  */
-static void __cpuinit disable_msm_thermal(void)
+static void __ref disable_msm_thermal(void)
 {
 	int cpu = 0;
 
@@ -910,7 +917,7 @@ static void __cpuinit disable_msm_thermal(void)
 	}
 }
 
-static int __cpuinit set_enabled(const char *val, const struct kernel_param *kp)
+static int __ref set_enabled(const char *val, const struct kernel_param *kp)
 {
 	int ret = 0;
 
@@ -935,8 +942,9 @@ module_param_cb(enabled, &module_ops, &enabled, 0644);
 MODULE_PARM_DESC(enabled, "enforce thermal limit on cpu");
 
 
+#ifdef CONFIG_SMP
 /* Call with core_control_mutex locked */
-static int __cpuinit update_offline_cores(int val)
+static int __ref update_offline_cores(int val)
 {
 	int cpu = 0;
 	int ret = 0;
@@ -957,6 +965,12 @@ static int __cpuinit update_offline_cores(int val)
 	}
 	return ret;
 }
+#else
+static int update_offline_cores(int val)
+{
+	return 0;
+}
+#endif
 
 static ssize_t show_cc_enabled(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
@@ -964,7 +978,7 @@ static ssize_t show_cc_enabled(struct kobject *kobj,
 	return snprintf(buf, PAGE_SIZE, "%d\n", core_control_enabled);
 }
 
-static ssize_t __cpuinit store_cc_enabled(struct kobject *kobj,
+static ssize_t __ref store_cc_enabled(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int ret = 0;
@@ -1001,7 +1015,7 @@ static ssize_t show_cpus_offlined(struct kobject *kobj,
 	return snprintf(buf, PAGE_SIZE, "%d\n", cpus_offlined);
 }
 
-static ssize_t __cpuinit store_cpus_offlined(struct kobject *kobj,
+static ssize_t __ref store_cpus_offlined(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int ret = 0;
@@ -1029,19 +1043,19 @@ done_cc:
 	return count;
 }
 
-static __cpuinitdata struct kobj_attribute cc_enabled_attr =
+static __refdata struct kobj_attribute cc_enabled_attr =
 __ATTR(enabled, 0644, show_cc_enabled, store_cc_enabled);
 
-static __cpuinitdata struct kobj_attribute cpus_offlined_attr =
+static __refdata struct kobj_attribute cpus_offlined_attr =
 __ATTR(cpus_offlined, 0644, show_cpus_offlined, store_cpus_offlined);
 
-static __cpuinitdata struct attribute *cc_attrs[] = {
+static __refdata struct attribute *cc_attrs[] = {
 	&cc_enabled_attr.attr,
 	&cpus_offlined_attr.attr,
 	NULL,
 };
 
-static __cpuinitdata struct attribute_group cc_attr_group = {
+static __refdata struct attribute_group cc_attr_group = {
 	.attrs = cc_attrs,
 };
 
@@ -1079,15 +1093,15 @@ static ssize_t store_wakeup_ms(struct kobject *kobj,
 	return count;
 }
 
-static __cpuinitdata struct kobj_attribute timer_attr =
+static __refdata struct kobj_attribute timer_attr =
 __ATTR(wakeup_ms, 0644, show_wakeup_ms, store_wakeup_ms);
 
-static __cpuinitdata struct attribute *tt_attrs[] = {
+static __refdata struct attribute *tt_attrs[] = {
 	&timer_attr.attr,
 	NULL,
 };
 
-static __cpuinitdata struct attribute_group tt_attr_group = {
+static __refdata struct attribute_group tt_attr_group = {
 	.attrs = tt_attrs,
 };
 
@@ -1176,11 +1190,13 @@ int __devinit msm_thermal_init(struct msm_thermal_data *pdata)
 		return -EINVAL;
 
 	enabled = 1;
-	core_control_enabled = 1;
+	if (num_possible_cpus() > 1)
+		core_control_enabled = 1;
 	INIT_DELAYED_WORK(&check_temp_work, check_temp);
 	schedule_delayed_work(&check_temp_work, 0);
 
-	register_cpu_notifier(&msm_thermal_cpu_notifier);
+	if (num_possible_cpus() > 1)
+		register_cpu_notifier(&msm_thermal_cpu_notifier);
 
 	return ret;
 }
@@ -1690,7 +1706,8 @@ int __init msm_thermal_device_init(void)
 
 int __init msm_thermal_late_init(void)
 {
-	msm_thermal_add_cc_nodes();
+	if (num_possible_cpus() > 1)
+		msm_thermal_add_cc_nodes();
 	msm_thermal_add_psm_nodes();
 	msm_thermal_add_vdd_rstr_nodes();
 	alarm_init(&thermal_rtc, ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,

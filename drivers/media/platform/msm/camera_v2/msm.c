@@ -455,6 +455,9 @@ static inline int __msm_remove_session_cmd_ack_q(void *d1, void *d2)
 {
 	struct msm_command_ack *cmd_ack = d1;
 
+	if (!(&cmd_ack->command_q))
+		return 0;
+
 	msm_queue_drain(&cmd_ack->command_q, struct msm_command, list);
 
 	return 0;
@@ -462,7 +465,7 @@ static inline int __msm_remove_session_cmd_ack_q(void *d1, void *d2)
 
 static void msm_remove_session_cmd_ack_q(struct msm_session *session)
 {
-	if (!session)
+	if ((!session) || !(&session->command_ack_q))
 		return;
 
 	/* to ensure error handling purpose, it needs to detach all subdevs
@@ -488,6 +491,22 @@ int msm_destroy_session(unsigned int session_id)
 	mutex_destroy(&session->lock);
 	msm_delete_entry(msm_session_q, struct msm_session,
 		list, session);
+
+	return 0;
+}
+
+static int __msm_close_destry_session_notify_apps(void *d1, void *d2)
+{
+	struct v4l2_event event;
+	struct msm_v4l2_event_data *event_data =
+		(struct msm_v4l2_event_data *)&event.u.data[0];
+	struct msm_session *session = d1;
+
+	event.type = MSM_CAMERA_V4L2_EVENT_TYPE;
+	event.id   = MSM_CAMERA_MSM_NOTIFY;
+	event_data->command = MSM_CAMERA_PRIV_SHUTDOWN;
+
+	v4l2_event_queue(session->event_q.vdev, &event);
 
 	return 0;
 }
@@ -549,6 +568,13 @@ static long msm_private_ioctl(struct file *file, void *fh,
 		msm_enqueue(&cmd_ack->command_q, &ret_cmd->list);
 		wake_up(&cmd_ack->wait);
 	}
+		break;
+
+	case MSM_CAM_V4L2_IOCTL_NOTIFY_ERROR:
+		/* send v4l2_event to HAL next*/
+		msm_queue_traverse_action(msm_session_q,
+			struct msm_session, list,
+			__msm_close_destry_session_notify_apps, NULL);
 		break;
 
 	default:
@@ -676,22 +702,6 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 	kzfree(cmd);
 	mutex_unlock(&session->lock);
 	return rc;
-}
-
-static int __msm_close_destry_session_notify_apps(void *d1, void *d2)
-{
-	struct v4l2_event event;
-	struct msm_v4l2_event_data *event_data =
-		(struct msm_v4l2_event_data *)&event.u.data[0];
-	struct msm_session *session = d1;
-
-	event.type = MSM_CAMERA_V4L2_EVENT_TYPE;
-	event.id   = MSM_CAMERA_MSM_NOTIFY;
-	event_data->command = MSM_CAMERA_PRIV_SHUTDOWN;
-
-	v4l2_event_queue(session->event_q.vdev, &event);
-
-	return 0;
 }
 
 static int msm_close(struct file *filep)
@@ -842,16 +852,19 @@ static struct v4l2_subdev *msm_sd_find(const char *name)
 {
 	unsigned long flags;
 	struct v4l2_subdev *subdev = NULL;
+	struct v4l2_subdev *subdev_out = NULL;
 
 	spin_lock_irqsave(&msm_v4l2_dev->lock, flags);
 	if (!list_empty(&msm_v4l2_dev->subdevs)) {
 		list_for_each_entry(subdev, &msm_v4l2_dev->subdevs, list)
-			if (!strcmp(name, subdev->name))
+			if (!strcmp(name, subdev->name)) {
+				subdev_out = subdev;
 				break;
+			}
 	}
 	spin_unlock_irqrestore(&msm_v4l2_dev->lock, flags);
 
-	return subdev;
+	return subdev_out;
 }
 
 static void msm_sd_notify(struct v4l2_subdev *sd,
