@@ -47,6 +47,9 @@ endif
 
 # MSM8974
    zreladdr-$(CONFIG_ARCH_MSM8974)	:= 0x00008000
+   dtb-$(CONFIG_MACH_SONY_HONAMI_ROW)	+= msm8974-v1-rhine_honami_row.dtb
+   dtb-$(CONFIG_MACH_SONY_HONAMI_ROW)	+= msm8974-v2-rhine_honami_row.dtb
+   dtb-$(CONFIG_MACH_SONY_HONAMI_ROW)	+= msm8974-v2-2-rhine_honami_row.dtb
    dtb-$(CONFIG_MACH_SONY_TOGARI_ROW)	+= msm8974-v1-rhine_togari_row.dtb
    dtb-$(CONFIG_MACH_SONY_TOGARI_ROW)	+= msm8974-v2-rhine_togari_row.dtb
    dtb-$(CONFIG_MACH_SONY_TOGARI_ROW)	+= msm8974-v2-2-rhine_togari_row.dtb

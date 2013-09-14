@@ -318,6 +318,8 @@ obj-$(CONFIG_MACH_SAPPHIRE) += board-sapphire-rfkill.o msm_vibrator.o
 
 ifdef CONFIG_MACH_SONY_TOGARI_ROW
 	obj-$(CONFIG_MACH_SONY_TOGARI_ROW) += board-sony_togari_row-gpiomux.o board-sony_togari-usb.o bms-batterydata-burton.o
+else ifdef CONFIG_MACH_SONY_HONAMI_ROW
+	obj-$(CONFIG_MACH_SONY_HONAMI_ROW) += board-sony_honami_row-gpiomux.o board-sony_rhine-usb.o bms-batterydata-salomon.o
 else
 	obj-$(CONFIG_ARCH_MSM8974) += board-8974-gpiomux.o board-sony_rhine-usb.o bms-batterydata-oem.o
 endif
