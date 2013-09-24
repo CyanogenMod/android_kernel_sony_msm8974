@@ -71,6 +71,7 @@
 			qcom,s2-timer = <2000>;
 			qcom,s2-type = <1>;
 			linux,code = <114>;
+			qcom,use-bark;
 		};
 */
 		qcom,pon_3 {
@@ -80,6 +81,7 @@
 			qcom,s2-timer = <2000>;
 			qcom,s2-type = <7>;
 			qcom,pull-up = <1>;
+			qcom,use-bark;
 		};
 	};
 

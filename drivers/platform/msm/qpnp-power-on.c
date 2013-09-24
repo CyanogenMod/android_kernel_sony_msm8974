@@ -126,6 +126,7 @@ struct qpnp_pon_config {
 	u32 bark_irq;
 	u16 s2_cntl_addr;
 	u16 s2_cntl2_addr;
+	bool use_bark;
 };
 
 struct qpnp_pon {
@@ -711,7 +712,7 @@ qpnp_pon_request_irqs(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 							cfg->state_irq);
 			return rc;
 		}
-		if (cfg->support_reset) {
+		if (cfg->use_bark) {
 			rc = devm_request_irq(&pon->spmi->dev, cfg->bark_irq,
 						qpnp_kpdpwr_bark_irq,
 						IRQF_TRIGGER_RISING,
@@ -734,7 +735,7 @@ qpnp_pon_request_irqs(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 							cfg->state_irq);
 			return rc;
 		}
-		if (cfg->support_reset) {
+		if (cfg->use_bark) {
 			rc = devm_request_irq(&pon->spmi->dev, cfg->bark_irq,
 						qpnp_resin_bark_irq,
 						IRQF_TRIGGER_RISING,
@@ -759,7 +760,7 @@ qpnp_pon_request_irqs(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 		}
 		break;
 	case PON_KPDPWR_RESIN:
-		if (cfg->support_reset) {
+		if (cfg->use_bark) {
 			rc = devm_request_irq(&pon->spmi->dev, cfg->bark_irq,
 					qpnp_kpdpwr_resin_bark_irq,
 					IRQF_TRIGGER_RISING,
@@ -852,7 +853,9 @@ static int __devinit qpnp_pon_config_init(struct qpnp_pon *pon)
 				return rc;
 			}
 
-			if (cfg->support_reset) {
+			cfg->use_bark = of_property_read_bool(pp,
+							"qcom,use-bark");
+			if (cfg->use_bark) {
 				cfg->bark_irq = spmi_get_irq_byname(pon->spmi,
 							NULL, "kpdpwr-bark");
 				if (cfg->bark_irq < 0) {
@@ -890,7 +893,9 @@ static int __devinit qpnp_pon_config_init(struct qpnp_pon *pon)
 				return rc;
 			}
 
-			if (cfg->support_reset) {
+			cfg->use_bark = of_property_read_bool(pp,
+							"qcom,use-bark");
+			if (cfg->use_bark) {
 				cfg->bark_irq = spmi_get_irq_byname(pon->spmi,
 							NULL, "resin-bark");
 				if (cfg->bark_irq < 0) {
@@ -929,7 +934,9 @@ static int __devinit qpnp_pon_config_init(struct qpnp_pon *pon)
 				return rc;
 			}
 
-			if (cfg->support_reset) {
+			cfg->use_bark = of_property_read_bool(pp,
+							"qcom,use-bark");
+			if (cfg->use_bark) {
 				cfg->bark_irq = spmi_get_irq_byname(pon->spmi,
 						NULL, "kpdpwr-resin-bark");
 				if (cfg->bark_irq < 0) {
