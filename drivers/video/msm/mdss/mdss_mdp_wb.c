@@ -618,7 +618,6 @@ int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd)
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_DONE);
 		/* drop buffer but don't return error */
 		ret = 0;
-		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_DONE);
 		goto kickoff_fail;
 	}
 
