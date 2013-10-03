@@ -130,17 +130,6 @@ typedef enum eSmeState
     SME_STATE_READY,
 } eSmeState;
 
-#if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
-/* enumeration for Korea country revision index,
-   index to the list of valid channels */
-typedef enum eSmeKRRevision
-{
-    SME_KR_3         = 3,
-    SME_KR_24        = 24,
-    SME_KR_25        = 25,
-} eSmeKRRevision;
-#endif
-
 #define SME_IS_START(pMac)  (SME_STATE_STOP != (pMac)->sme.state)
 #define SME_IS_READY(pMac)  (SME_STATE_READY == (pMac)->sme.state)
 
@@ -157,6 +146,13 @@ typedef struct tagSmeStruct
     void (*pTxPerHitCallback) (void *pCallbackContext); /* callback for Tx PER hit to HDD */ 
     void *pTxPerHitCbContext;
     tVOS_CON_MODE currDeviceMode;
+#ifdef FEATURE_WLAN_LPHB
+    void (*pLphbWaitTimeoutCb) (void *pAdapter, void *indParam);
+#endif /* FEATURE_WLAN_LPHB */
+    //pending scan command list
+    tDblLinkList smeScanCmdPendingList;
+    //active scan command list
+    tDblLinkList smeScanCmdActiveList;
 } tSmeStruct, *tpSmeStruct;
 
 

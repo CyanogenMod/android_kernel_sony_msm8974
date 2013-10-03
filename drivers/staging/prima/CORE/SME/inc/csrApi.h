@@ -232,14 +232,6 @@ typedef struct tagCsrChannelInfo
     tANI_U8 *ChannelList;   //it will be an array of channels
 }tCsrChannelInfo, *tpCsrChannelInfo;
 
-#if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
-typedef struct tagCsrCountryChannelInfo
-{
-    tCsrChannelInfo countryValidChannelList;
-    tANI_U8         revision; /* KR 25, 25 is the country revision index
-                                 to the list of valid channels */
-}tCsrCountryChannelInfo, *tpCsrCountryChannelInfo;
-#endif
 typedef struct tagCsrSSIDInfo
 {
    tSirMacSSid     SSID;
@@ -290,6 +282,7 @@ typedef struct tagCsrScanRequest
     eCsrRequestType requestType;    //11d scan or full scan
     tANI_BOOLEAN p2pSearch;
     tANI_BOOLEAN skipDfsChnlInP2pSearch;
+    tANI_BOOLEAN bcnRptReqScan;     //is Scan issued by Beacon Report Request
 }tCsrScanRequest;
 
 typedef struct tagCsrBGScanRequest
@@ -1054,7 +1047,6 @@ typedef struct tagCsrConfigParam
     tANI_U8        isFastTransitionEnabled;
     tANI_U8        RoamRssiDiff;
     tANI_U8        nImmediateRoamRssiDiff;
-    tANI_BOOLEAN   isWESModeEnabled;
 #endif
 
 #ifdef WLAN_FEATURE_NEIGHBOR_ROAMING
@@ -1112,6 +1104,11 @@ typedef struct tagCsrConfigParam
     tANI_U8 scanCfgAgingTime;
 
     tANI_U8   enableTxLdpc;
+
+    tANI_BOOLEAN  enableOxygenNwk;
+
+    tANI_U8 isAmsduSupportInAMPDU;
+
 }tCsrConfigParam;
 
 //Tush
@@ -1530,6 +1527,17 @@ typedef void ( *tCsrStatsCallback) (void * stats, void *pContext);
 ---------------------------------------------------------------------------*/
 
 typedef void ( *tCsrRssiCallback) (v_S7_t rssi, tANI_U32 staId, void *pContext);
+
+/*---------------------------------------------------------------------------
+  This is the type for a snr callback to be registered with SME
+  for getting snr
+
+  \param snr
+  \param pContext - any user data given at callback registration.
+  \return None
+
+---------------------------------------------------------------------------*/
+typedef void (*tCsrSnrCallback) (v_S7_t snr, tANI_U32 staId, void *pContext);
 
 #ifdef WLAN_FEATURE_VOWIFI_11R
 eHalStatus csrRoamIssueFTPreauthReq(tHalHandle hHal, tANI_U32 sessionId, tpSirBssDescription pBssDescription);

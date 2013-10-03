@@ -110,7 +110,10 @@ cfgProcessMbMsg(tpAniSirGlobal pMac, tSirMbMsg *pMsg)
     index = CFG_GET_FUNC_INDX(pMsg->type);
 
     if (index >= (sizeof(gCfgFunc) / sizeof(gCfgFunc[0])))
+    {
+        palFreeMemory( pMac->hHdd, (void*)pMsg);
         return;
+    }
     len    = pMsg->msgLen - WNI_CFG_MB_HDR_LEN;
     pParam = ((tANI_U32*)pMsg) + 1;
 
@@ -118,7 +121,7 @@ cfgProcessMbMsg(tpAniSirGlobal pMac, tSirMbMsg *pMsg)
     gCfgFunc[index](pMac, len, pParam);
 
     // Free up buffer
-    palFreeMemory( pMac->hHdd, (void*)pMsg);
+    vos_mem_free(pMsg);
 
 } /*** end cfgProcessMbMsg() ***/
 

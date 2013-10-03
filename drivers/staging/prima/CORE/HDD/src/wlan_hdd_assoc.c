@@ -842,7 +842,7 @@ static eHalStatus hdd_DisConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo *
         }
     }
 
-
+     hdd_wmm_adapter_clear(pAdapter);
     //We should clear all sta register with TL, for now, only one.
     vstatus = hdd_roamDeregisterSTA( pAdapter, pHddStaCtx->conn_info.staId [0] );
     if ( !VOS_IS_STATUS_SUCCESS(vstatus ) )
@@ -888,6 +888,7 @@ static VOS_STATUS hdd_roamRegisterSTA( hdd_adapter_t *pAdapter,
    v_BOOL_t  fConnected;
    hdd_station_ctx_t *pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+   hdd_config_t *cfg_param = pHddCtx->cfg_ini;
 
    if ( NULL == pBssDesc)
    {
@@ -1006,6 +1007,14 @@ static VOS_STATUS hdd_roamRegisterSTA( hdd_adapter_t *pAdapter,
                  "WLANTL_RegisterSTAClient() failed to register.  Status= %d [0x%08lX]",
                  vosStatus, vosStatus );
       return vosStatus;
+   }
+
+   if ( cfg_param->dynSplitscan &&
+      ( VOS_TIMER_STATE_RUNNING !=
+                      vos_timer_getCurrentState(&pHddCtx->tx_rx_trafficTmr)))
+   {
+       vos_timer_start(&pHddCtx->tx_rx_trafficTmr,
+                       cfg_param->trafficMntrTmrForSplitScan);
    }
 
    // if (WPA), tell TL to go to 'connected' and after keys come to the driver,
@@ -1334,7 +1343,11 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
 
                 }
             }
-            cfg80211_put_bss(bss);
+            cfg80211_put_bss(
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
+                             pHddCtx->wiphy,
+#endif
+                             bss);
             // Register the Station with TL after associated...
             vosStatus = hdd_roamRegisterSTA( pAdapter,
                     pRoamInfo,
@@ -1556,7 +1569,11 @@ static void hdd_RoamIbssIndicationHandler( hdd_adapter_t *pAdapter,
             }
 
             cfg80211_ibss_joined(pAdapter->dev, bss->bssid, GFP_KERNEL);
-            cfg80211_put_bss(bss);
+            cfg80211_put_bss(
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
+                             pHddCtx->wiphy,
+#endif
+                             bss);
          }
 
          netif_carrier_on(pAdapter->dev);
@@ -1692,7 +1709,11 @@ static eHalStatus roamIbssConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo 
    }
    /* send ibss join indication to nl80211 */
    cfg80211_ibss_joined(pAdapter->dev, &pRoamInfo->bssid[0], GFP_KERNEL);
-   cfg80211_put_bss(bss);
+   cfg80211_put_bss(
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
+                    WLAN_HDD_GET_CTX(pAdapter)->wiphy,
+#endif
+                    bss);
 
    return( eHAL_STATUS_SUCCESS );
 }
@@ -2005,6 +2026,8 @@ VOS_STATUS hdd_roamRegisterTDLSSTA( hdd_adapter_t *pAdapter,
     WLAN_STADescType staDesc = {0};
     eCsrEncryptionType connectedCipherAlgo = eCSR_ENCRYPT_TYPE_UNKNOWN;
     v_BOOL_t fConnected   = FALSE;
+    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+    hdd_config_t *cfg_param = pHddCtx->cfg_ini;
 
     fConnected = hdd_connGetConnectedCipherAlgo( pHddStaCtx, &connectedCipherAlgo );
     if (!fConnected) {
@@ -2075,6 +2098,13 @@ VOS_STATUS hdd_roamRegisterTDLSSTA( hdd_adapter_t *pAdapter,
          return vosStatus;
     }
 
+    if ( cfg_param->dynSplitscan &&
+       ( VOS_TIMER_STATE_RUNNING !=
+                        vos_timer_getCurrentState(&pHddCtx->tx_rx_trafficTmr)) )
+    {
+        vos_timer_start(&pHddCtx->tx_rx_trafficTmr,
+                        cfg_param->trafficMntrTmrForSplitScan);
+    }
     return( vosStatus );
 }
 
@@ -2332,6 +2362,7 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
     hdd_wext_state_t *pWextState = NULL;
     hdd_station_ctx_t *pHddStaCtx = NULL;
     VOS_STATUS status = VOS_STATUS_SUCCESS;
+    hdd_context_t *pHddCtx = NULL;
 
     VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
             "CSR Callback: status= %d result= %d roamID=%ld",
@@ -2414,6 +2445,7 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
                 }
             }
             pHddStaCtx->ft_carrier_on = TRUE;
+            pHddStaCtx->hdd_ReassocScenario = VOS_TRUE;
             break;
 #endif
 
@@ -2451,28 +2483,25 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
         case eCSR_ROAM_LOSTLINK:
         case eCSR_ROAM_DISASSOCIATED:
             {
-                hdd_context_t* pHddCtx = (hdd_context_t*)pAdapter->pHddCtx;
                 VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                         "****eCSR_ROAM_DISASSOCIATED****");
                 halStatus = hdd_DisConnectHandler( pAdapter, pRoamInfo, roamId, roamStatus, roamResult );
                 /* Check if Mcast/Bcast Filters are set, if yes clear the filters here */
-                if ((WLAN_HDD_GET_CTX(pAdapter))->hdd_mcastbcast_filter_set == TRUE) {
-                    hdd_conf_mcastbcast_filter((WLAN_HDD_GET_CTX(pAdapter)), FALSE);
+                pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+                if (pHddCtx->hdd_mcastbcast_filter_set == TRUE)
+                {
+                    hdd_conf_mcastbcast_filter(pHddCtx, FALSE);
+                    pHddCtx->configuredMcastBcastFilter =
+                        pHddCtx->sus_res_mcastbcast_filter;
+
                     (WLAN_HDD_GET_CTX(pAdapter))->hdd_mcastbcast_filter_set = FALSE;
                 }
 #ifdef WLAN_FEATURE_PACKET_FILTERING
-                if (pHddCtx->cfg_ini->isMcAddrListFilter)
-                {
-                    /*Multicast addr filtering is enabled*/
-                    if (pAdapter->mc_addr_list.isFilterApplied)
-                    {
-                        /*Filter applied during suspend mode*/
-                        /*Clear it here*/
-                        wlan_hdd_set_mc_addr_list(pAdapter, FALSE);
-                    }
-                }
+                /* Call to clear any MC Addr List filter applied after
+                 * successful connection.
+                 */
+                wlan_hdd_set_mc_addr_list(pAdapter, FALSE);
 #endif
-
             }
             break;
         case eCSR_ROAM_IBSS_LEAVE:
@@ -2524,7 +2553,40 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
             break;
 
         case eCSR_ROAM_SET_KEY_COMPLETE:
-            halStatus = hdd_RoamSetKeyCompleteHandler( pAdapter, pRoamInfo, roamId, roamStatus, roamResult );
+            {
+                hdd_context_t* pHddCtx = (hdd_context_t*)pAdapter->pHddCtx;
+
+                if((pHddCtx) &&
+                   (VOS_TRUE == pHddStaCtx->hdd_ReassocScenario) &&
+                   (TRUE == pHddCtx->hdd_wlan_suspended) &&
+                   (eCSR_ROAM_RESULT_NONE == roamResult))
+                {
+                    /* Send DTIM period to the FW; only if the wlan is already
+                       in suspend. This is the case with roaming (reassoc),
+                       DELETE_BSS_REQ zeroes out Modulated/Dynamic DTIM sent in
+                       previous suspend_wlan. Sending SET_POWER_PARAMS_REQ
+                       before the ENTER_BMPS_REQ ensures Listen Interval is
+                       regained back to LI * Modulated DTIM */
+                    hdd_set_pwrparams(pHddCtx);
+                    pHddStaCtx->hdd_ReassocScenario = VOS_FALSE;
+
+                    /* At this point, device should not be in BMPS;
+                       if due to unexpected scenario, if we are in BMPS,
+                       then trigger Exit and Enter BMPS to take DTIM period
+                       effective */
+                    if (BMPS == pmcGetPmcState(pHddCtx->hHal))
+                    {
+                        hddLog( LOGE, FL("Not expected: device is already in BMPS mode, Exit & Enter BMPS again!"));
+
+                        /* put the device into full power */
+                        wlan_hdd_enter_bmps(pAdapter, DRIVER_POWER_MODE_ACTIVE);
+
+                        /* put the device back into BMPS */
+                        wlan_hdd_enter_bmps(pAdapter, DRIVER_POWER_MODE_AUTO);
+                    }
+                }
+                halStatus = hdd_RoamSetKeyCompleteHandler( pAdapter, pRoamInfo, roamId, roamStatus, roamResult );
+            }
             break;
 #ifdef WLAN_FEATURE_VOWIFI_11R
         case eCSR_ROAM_FT_RESPONSE:

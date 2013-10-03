@@ -789,10 +789,10 @@ SCH
 WNI_CFG_FIXED_RATE  I   4   0
 V    RW    NP
 HAL
-0    31     0
+0    44     0
 V    RW    NP
 HAL
-0    31     0
+0    44     0
 
 #ENUM AUTO 	                                0
 
@@ -832,6 +832,19 @@ HAL
 #ENUM 0_5MBPS_SLR_20MHZ_SIMO                30
 
 #ENUM 68_25MBPS_QC_PROP_20MHZ_SIMO          31
+#ENUM 54MBPS_MCS3_40MHZ_SIMO                32
+#ENUM 81MBPS_MCS4_40MHZ_SIMO                33
+#ENUM 108MBPS_MCS5_40MHZ_SIMO               34
+#ENUM 121_5MBPS_MCS6_40MHZ_SIMO             35
+#ENUM 135MBPS_MCS7_40MHZ_SIMO               36
+#ENUM 15MBPS_MCS0_40MHZ_SIMO_SGI            37
+#ENUM 30MBPS_MCS1_40MHZ_SIMO_SGI            38
+#ENUM 45MBPS_MCS2_40MHZ_SIMO_SGI            39
+#ENUM 60MBPS_MCS3_40MHZ_SIMO_SGI            40
+#ENUM 90MBPS_MCS4_40MHZ_SIMO_SGI            41
+#ENUM 120MBPS_MCS5_40MHZ_SIMO_SGI           42
+#ENUM 135MBPS_MCS6_40MHZ_SIMO_SGI           43
+#ENUM 150MBPS_MCS7_40MHZ_SIMO_SGI           44
 
 * *********************************************************
 *
@@ -4545,3 +4558,54 @@ LIM
 V    RW    NP
 LIM
 10   20    10
+*
+*MCC ENABLE/DISABLE ADAPTIVE RX Drain feature
+*
+*
+*
+WNI_CFG_ENABLE_ADAPT_RX_DRAIN I   4   7
+V    RW    NP
+HAL
+0    1    1
+NV    RW    NP
+HAL
+0    1    1
+*
+* Oxygen network data (prop IE for IBSS)
+*
+WNI_CFG_OXYGEN_NETWORK_DATA   I    2    0
+V    RW    NP
+SCH
+0    0x2000   0x2000
+V    RW    NP
+SCH
+0    0x2000   0x2000
+
+*
+* FlexConnect Power Factor
+* Default is set to 0 (disable)
+*
+*
+WNI_CFG_FLEX_CONNECT_POWER_FACTOR  I   4   0
+V    RW    NP
+NONE
+0    9     0
+V    RW    NP
+NONE
+0    9     0
+
+*
+* Antenna Diversity
+*
+* 0 = disabled
+* 1 = Ant 1
+* 2 = Ant 2
+* 3 = Adaptive
+*
+WNI_CFG_ANTENNA_DIVESITY    I    4    7
+V    RW    NP
+HAL
+0    3    0
+V    RW    NP
+HAL
+0    3    0

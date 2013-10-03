@@ -73,8 +73,19 @@ limProcessDeauthFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tpPESession p
 
     if ((eLIM_STA_ROLE == psessionEntry->limSystemRole) && (eLIM_SME_WT_DEAUTH_STATE == psessionEntry->limSmeState))
     {
-       MTRACE(macTrace(pMac, TRACE_CODE_INFO_LOG, 0, eLOG_PROC_DEAUTH_FRAME_SCENARIO));
-       return;
+        /*Every 15th deauth frame will be logged in kmsg*/
+        if(!(pMac->lim.deauthMsgCnt & 0xF))
+        {
+            PELOGE(limLog(pMac, LOGE,
+             FL("received Deauth frame in DEAUTH_WT_STATE"
+                "(already processing previously received DEAUTH frame).."
+                "Dropping this.. Deauth Failed %d \n "),++pMac->lim.deauthMsgCnt);)
+        }
+        else
+        {
+            pMac->lim.deauthMsgCnt++;
+        }
+        return;
     }
 
     if (limIsGroupAddr(pHdr->sa))
@@ -276,10 +287,9 @@ limProcessDeauthFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tpPESession p
 
                     case eLIM_MLM_AUTHENTICATED_STATE:
                         /// Issue Deauth Indication to SME.
-                        palCopyMemory( pMac->hHdd,
-                               (tANI_U8 *) &mlmDeauthInd.peerMacAddr,
-                               pHdr->sa,
-                               sizeof(tSirMacAddr));
+                        vos_mem_copy((tANI_U8 *) &mlmDeauthInd.peerMacAddr,
+                                     pHdr->sa,
+                                     sizeof(tSirMacAddr));
                         mlmDeauthInd.reasonCode = reasonCode;
 
                         psessionEntry->limMlmState = eLIM_MLM_IDLE_STATE;
@@ -302,7 +312,7 @@ limProcessDeauthFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tpPESession p
 
                        if (psessionEntry->pLimMlmJoinReq)
                         {
-                            palFreeMemory( pMac->hHdd, psessionEntry->pLimMlmJoinReq);
+                            vos_mem_free(psessionEntry->pLimMlmJoinReq);
                             psessionEntry->pLimMlmJoinReq = NULL;
                         }
 
@@ -423,7 +433,7 @@ limProcessDeauthFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tpPESession p
     pStaDs->mlmStaContext.cleanupTrigger = eLIM_PEER_ENTITY_DEAUTH;
 
     /// Issue Deauth Indication to SME.
-    palCopyMemory( pMac->hHdd, (tANI_U8 *) &mlmDeauthInd.peerMacAddr,
+    vos_mem_copy((tANI_U8 *) &mlmDeauthInd.peerMacAddr,
                   pStaDs->staAddr,
                   sizeof(tSirMacAddr));
     mlmDeauthInd.reasonCode    = (tANI_U8) pStaDs->mlmStaContext.disassocReason;
@@ -446,7 +456,7 @@ limProcessDeauthFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tpPESession p
             limDeletePreAuthNode(pMac, pHdr->sa);
 
         if (psessionEntry->limAssocResponseData) {
-            palFreeMemory(pMac->hHdd, psessionEntry->limAssocResponseData);
+            vos_mem_free(psessionEntry->limAssocResponseData);
             psessionEntry->limAssocResponseData = NULL;                            
         }
 
@@ -461,7 +471,12 @@ limProcessDeauthFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tpPESession p
                eSIR_MAC_UNSPEC_FAILURE_STATUS, psessionEntry);
         return;
     }
-
+    /* reset the deauthMsgCnt here since we are able to Process
+     * the deauth frame and sending up the indication as well */
+    if(pMac->lim.deauthMsgCnt != 0)
+    {
+        pMac->lim.deauthMsgCnt = 0;
+    }
     /// Deauthentication from peer MAC entity
     limPostSmeMessage(pMac, LIM_MLM_DEAUTH_IND, (tANI_U32 *) &mlmDeauthInd);
 
