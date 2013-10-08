@@ -471,7 +471,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		 mfd->mdp_sync_pt_data.timeline =
 				sw_sync_timeline_create(timeline_name);
 		if (mfd->mdp_sync_pt_data.timeline == NULL) {
-			pr_err("%s: cannot create time line", __func__);
+			pr_err("cannot create release fence time line");
 			return -ENOMEM;
 		}
 		mfd->mdp_sync_pt_data.notifier.notifier_call =
@@ -2098,42 +2098,25 @@ static int mdss_fb_set_lut(struct fb_info *info, void __user *p)
 	return 0;
 }
 
-/**
- * mdss_fb_sync_get_rel_fence() - get release fence from sync pt timeline
- * @sync_pt_data:	Sync pt structure holding timeline and fence info.
- *
- * Function returns a release fence on the timeline associated with the
- * sync pt struct given and it's associated information. The release fence
- * created can be used to signal when buffers provided will be released.
- */
-static struct sync_fence *__mdss_fb_sync_get_fence(
-		struct msm_sync_pt_data *sync_pt_data,
-		int retire)
+struct sync_fence *mdss_fb_sync_get_fence(struct sw_sync_timeline *timeline,
+		const char *fence_name, int val)
 {
 	struct sync_pt *sync_pt;
 	struct sync_fence *fence;
-	int val;
 
-	val = sync_pt_data->timeline_value + sync_pt_data->threshold +
-		atomic_read(&sync_pt_data->commit_cnt);
-	if (retire)
-		val += sync_pt_data->retire_threshold;
+	pr_debug("%s: buf sync fence timeline=%d\n", fence_name, val);
 
-	pr_debug("%s: buf sync fence timeline=%d\n",
-		sync_pt_data->fence_name, val);
-
-	sync_pt = sw_sync_pt_create(sync_pt_data->timeline, val);
+	sync_pt = sw_sync_pt_create(timeline, val);
 	if (sync_pt == NULL) {
-		pr_err("%s: cannot create sync point\n",
-				sync_pt_data->fence_name);
+		pr_err("%s: cannot create sync point\n", fence_name);
 		return NULL;
 	}
 
 	/* create fence */
-	fence = sync_fence_create(sync_pt_data->fence_name, sync_pt);
+	fence = sync_fence_create(fence_name, sync_pt);
 	if (fence == NULL) {
 		sync_pt_free(sync_pt);
-		pr_err("%s: cannot create fence\n", sync_pt_data->fence_name);
+		pr_err("%s: cannot create fence\n", fence_name);
 		return NULL;
 	}
 
@@ -2148,6 +2131,7 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 	struct sync_fence *fence, *rel_fence, *retire_fence;
 	int rel_fen_fd;
 	int retire_fen_fd;
+	int val;
 
 	if ((buf_sync->acq_fen_fd_cnt > MDP_MAX_FENCE_FD) ||
 				(sync_pt_data->timeline == NULL))
@@ -2184,8 +2168,11 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 	if (ret)
 		goto buf_sync_err_1;
 
+	val = sync_pt_data->timeline_value + sync_pt_data->threshold +
+			atomic_read(&sync_pt_data->commit_cnt);
 	/* Set release fence */
-	rel_fence = __mdss_fb_sync_get_fence(sync_pt_data, 0);
+	rel_fence = mdss_fb_sync_get_fence(sync_pt_data->timeline,
+			sync_pt_data->fence_name, val);
 	if (IS_ERR_OR_NULL(rel_fence)) {
 		pr_err("%s: unable to retrieve release fence\n",
 				sync_pt_data->fence_name);
@@ -2210,8 +2197,17 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 		goto buf_sync_err_3;
 	}
 
-	/*Set retire fence*/
-	retire_fence = __mdss_fb_sync_get_fence(sync_pt_data, 1);
+	if (sync_pt_data->get_retire_fence)
+		retire_fence = sync_pt_data->get_retire_fence(sync_pt_data);
+	else
+		retire_fence = NULL;
+
+	if (IS_ERR_OR_NULL(retire_fence)) {
+		val += sync_pt_data->retire_threshold;
+		retire_fence = mdss_fb_sync_get_fence(
+			sync_pt_data->timeline, "mdp-retire", val);
+	}
+
 	if (IS_ERR_OR_NULL(retire_fence)) {
 		pr_err("%s: unable to retrieve retire fence\n",
 				sync_pt_data->fence_name);
@@ -2221,7 +2217,7 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 	retire_fen_fd = get_unused_fd_flags(0);
 
 	if (retire_fen_fd < 0) {
-		pr_err("%s: get_unused_fd_flags failed\n",
+		pr_err("%s: get_unused_fd_flags failed for retire fence\n",
 				sync_pt_data->fence_name);
 		ret = -EIO;
 		sync_fence_put(retire_fence);
@@ -2233,7 +2229,8 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 	ret = copy_to_user(buf_sync->retire_fen_fd, &retire_fen_fd,
 			sizeof(int));
 	if (ret) {
-		pr_err("%s: copy_to_user failed\n", sync_pt_data->fence_name);
+		pr_err("%s: copy_to_user failed for retire fence\n",
+				sync_pt_data->fence_name);
 		put_unused_fd(retire_fen_fd);
 		sync_fence_put(retire_fence);
 		goto buf_sync_err_3;

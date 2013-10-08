@@ -410,6 +410,11 @@ struct mdss_overlay_private {
 
 	int ad_state;
 
+	struct sw_sync_timeline *vsync_timeline;
+	struct mdss_mdp_vsync_handler vsync_retire_handler;
+	struct work_struct retire_work;
+	int retire_cnt;
+
 	bool handoff;
 	u32 splash_mem_addr;
 	u32 splash_mem_size;
