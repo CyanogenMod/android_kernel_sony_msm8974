@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -24,7 +24,7 @@
 #if defined(CONFIG_SONY_CAM_V4L2)
 #define JPEG_DBG_HIGH(fmt, args...) pr_debug(fmt, ##args)
 #else
-#define JPEG_DBG_HIGH   pr_err
+#define JPEG_DBG_HIGH   pr_debug
 #endif
 
 enum JPEG_MODE {
