@@ -328,7 +328,7 @@ ipt_do_table(struct sk_buff *skb,
 	private = table->private;
 	cpu        = smp_processor_id();
 	/*
-	 * Ensure we load private members after we've fetched the base
+	 * Ensure we load private-> members after we've fetched the base
 	 * pointer.
 	 */
 	smp_read_barrier_depends();
