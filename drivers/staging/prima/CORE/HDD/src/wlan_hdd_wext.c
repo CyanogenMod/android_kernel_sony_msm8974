@@ -5059,6 +5059,10 @@ static int iw_add_tspec(struct net_device *dev, struct iw_request_info *info,
              "%s:TS_INFO PSB %d UP %d !!!", __func__,
              tSpec.ts_info.psb, tSpec.ts_info.up);
 
+   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
+             "%s:TS_INFO PSB %d UP %d !!!", __func__,
+             tSpec.ts_info.psb, tSpec.ts_info.up);
+
    tSpec.nominal_msdu_size = params[HDD_WLAN_WMM_PARAM_NOMINAL_MSDU_SIZE];
    tSpec.maximum_msdu_size = params[HDD_WLAN_WMM_PARAM_MAXIMUM_MSDU_SIZE];
    tSpec.min_data_rate = params[HDD_WLAN_WMM_PARAM_MINIMUM_DATA_RATE];
