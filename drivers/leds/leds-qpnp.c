@@ -4061,7 +4061,6 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 			else
 				led->cdev.brightness = led->cdev.max_brightness;
 			__qpnp_led_work(led, led->cdev.brightness);
-			schedule_work(&led->work);
 			if (led->turn_off_delay_ms > 0)
 				qpnp_led_turn_off(led);
 		} else
