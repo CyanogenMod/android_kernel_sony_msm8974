@@ -667,8 +667,9 @@ int wlan_hdd_cfg80211_register(struct device *dev,
 #endif
 #ifdef FEATURE_WLAN_SCAN_PNO
     wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
-    wiphy->max_sched_scan_ssids = MAX_SCAN_SSID;
+    wiphy->max_sched_scan_ssids = SIR_PNO_MAX_SUPP_NETWORKS;
     wiphy->max_match_sets       = SIR_PNO_MAX_SUPP_NETWORKS;
+    wiphy->max_sched_scan_ie_len = SIR_MAC_MAX_IE_LENGTH;
 #endif/*FEATURE_WLAN_SCAN_PNO*/
 
     /* even with WIPHY_FLAG_CUSTOM_REGULATORY,
@@ -1181,7 +1182,7 @@ static void wlan_hdd_set_sapHwmode(hdd_adapter_t *pHostapdAdapter)
 static int wlan_hdd_add_ie(hdd_adapter_t* pHostapdAdapter, v_U8_t *genie,
                               v_U8_t *total_ielen, v_U8_t *oui, v_U8_t oui_size)
 {
-    v_U8_t ielen = 0;
+    v_U16_t ielen = 0;
     v_U8_t *pIe = NULL;
     beacon_data_t *pBeacon = pHostapdAdapter->sessionCtx.ap.beacon;
 
@@ -1203,6 +1204,67 @@ static int wlan_hdd_add_ie(hdd_adapter_t* pHostapdAdapter, v_U8_t *genie,
         *total_ielen += ielen;
     }
     return 0;
+}
+
+static void wlan_hdd_add_hostapd_conf_vsie(hdd_adapter_t* pHostapdAdapter,
+                                           v_U8_t *genie, v_U8_t *total_ielen)
+{
+    beacon_data_t *pBeacon = pHostapdAdapter->sessionCtx.ap.beacon;
+    int left = pBeacon->tail_len;
+    v_U8_t *ptr = pBeacon->tail;
+    v_U8_t elem_id, elem_len;
+    v_U16_t ielen = 0;
+
+    if ( NULL == ptr || 0 == left )
+        return;
+
+    while (left >= 2)
+    {
+        elem_id  = ptr[0];
+        elem_len = ptr[1];
+        left -= 2;
+        if (elem_len > left)
+        {
+            hddLog( VOS_TRACE_LEVEL_ERROR,
+                    "****Invalid IEs eid = %d elem_len=%d left=%d*****",
+                    elem_id, elem_len, left);
+            return;
+        }
+        if (IE_EID_VENDOR == elem_id)
+        {
+            /* skipping the VSIE's which we don't want to include or
+             * it will be included by existing code
+             */
+            if ((memcmp( &ptr[2], WPS_OUI_TYPE, WPS_OUI_TYPE_SIZE) != 0 ) &&
+#ifdef WLAN_FEATURE_WFD
+               (memcmp( &ptr[2], WFD_OUI_TYPE, WFD_OUI_TYPE_SIZE) != 0) &&
+#endif
+               (memcmp( &ptr[2], WHITELIST_OUI_TYPE, WPA_OUI_TYPE_SIZE) != 0) &&
+               (memcmp( &ptr[2], BLACKLIST_OUI_TYPE, WPA_OUI_TYPE_SIZE) != 0) &&
+               (memcmp( &ptr[2], "\x00\x50\xf2\x02", WPA_OUI_TYPE_SIZE) != 0) &&
+               (memcmp( &ptr[2], WPA_OUI_TYPE, WPA_OUI_TYPE_SIZE) != 0) &&
+               (memcmp( &ptr[2], P2P_OUI_TYPE, P2P_OUI_TYPE_SIZE) != 0))
+            {
+               ielen = ptr[1] + 2;
+               if ((*total_ielen + ielen) <= MAX_GENIE_LEN)
+               {
+                   vos_mem_copy(&genie[*total_ielen], ptr, ielen);
+                   *total_ielen += ielen;
+               }
+               else
+               {
+                   hddLog( VOS_TRACE_LEVEL_ERROR,
+                           "IE Length is too big "
+                           "IEs eid=%d elem_len=%d total_ie_lent=%d",
+                           elem_id, elem_len, *total_ielen);
+               }
+            }
+        }
+
+        left -= elem_len;
+        ptr += (elem_len + 2);
+    }
+    return;
 }
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0))
@@ -1250,12 +1312,7 @@ static int wlan_hdd_cfg80211_update_apies(hdd_adapter_t* pHostapdAdapter,
 
     if (WLAN_HDD_SOFTAP == pHostapdAdapter->device_mode)
     {
-        if (0 != wlan_hdd_add_ie(pHostapdAdapter, genie,
-                                  &total_ielen, SS_OUI_TYPE, SS_OUI_TYPE_SIZE))
-        {
-             ret = -EINVAL;
-             goto done;
-        }
+        wlan_hdd_add_hostapd_conf_vsie(pHostapdAdapter, genie, &total_ielen);
     }
 
     if (ccmCfgSetStr((WLAN_HDD_GET_CTX(pHostapdAdapter))->hHal,
@@ -2043,6 +2100,7 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
     {
         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                  ("ERROR: HDD vos wait for single_event failed!!\n"));
+        smeGetCommandQStatus(hHal);
         VOS_ASSERT(0);
     }
 
@@ -2397,10 +2455,6 @@ static int wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
 #endif
         status = wlan_hdd_cfg80211_start_bss(pAdapter, &params->beacon, params->ssid,
                                              params->ssid_len, params->hidden_ssid);
-        if (0 == status)
-        {
-            hdd_start_p2p_go_connection_in_progress_timer(pAdapter);
-        }
     }
 
     EXIT();
@@ -4374,14 +4428,6 @@ v_BOOL_t hdd_isScanAllowed( hdd_context_t *pHddCtx )
     VOS_STATUS status = 0;
     v_U8_t staId = 0;
     v_U8_t *staMac = NULL;
-
-    if (VOS_TIMER_STATE_RUNNING ==
-                vos_timer_getCurrentState(&pHddCtx->hdd_p2p_go_conn_is_in_progress))
-    {
-        hddLog(VOS_TRACE_LEVEL_INFO,
-              "%s: Connection is in progress, Do not allow the scan", __func__);
-        return VOS_FALSE;
-    }
 
     status = hdd_get_front_adapter ( pHddCtx, &pAdapterNode );
 
@@ -6833,6 +6879,9 @@ static int wlan_hdd_cfg80211_set_power_mgmt(struct wiphy *wiphy,
         (eConnectionState_Associated ==
              (WLAN_HDD_GET_STATION_CTX_PTR(pAdapter))->conn_info.connState))
     {
+
+        hddLog(VOS_TRACE_LEVEL_INFO,
+               "offload: in cfg80211_set_power_mgmt, calling arp offload");
         vos_status = hdd_conf_arp_offload(pAdapter, TRUE);
         if (!VOS_IS_STATUS_SUCCESS(vos_status))
         {
@@ -7217,7 +7266,7 @@ static int wlan_hdd_cfg80211_sched_scan_start(struct wiphy *wiphy,
     tpSirPNOScanReq pPnoRequest = NULL;
     hdd_context_t *pHddCtx;
     tHalHandle hHal;
-    v_U32_t i, indx, num_ch;
+    v_U32_t i, indx, num_ch, tempInterval;
     u8 valid_ch[WNI_CFG_VALID_CHANNEL_LIST_LEN];
     u8 channels_allowed[WNI_CFG_VALID_CHANNEL_LIST_LEN];
     v_U32_t num_channels_allowed = WNI_CFG_VALID_CHANNEL_LIST_LEN;
@@ -7331,11 +7380,48 @@ static int wlan_hdd_cfg80211_sched_scan_start(struct wiphy *wiphy,
         pPnoRequest->aNetworks[i].rssiThreshold = 0; //Default value
     }
 
-    /* framework provides interval in ms */
-    pPnoRequest->scanTimers.ucScanTimersCount = 1;
-    pPnoRequest->scanTimers.aTimerValues[0].uTimerValue =
-          (request->interval)/1000;
-    pPnoRequest->scanTimers.aTimerValues[0].uTimerRepeat = 0;
+    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+              "request->ie_len = %d", request->ie_len);
+    if ((0 < request->ie_len) && (NULL != request->ie))
+    {
+        pPnoRequest->us24GProbeTemplateLen = request->ie_len;
+        memcpy(&pPnoRequest->p24GProbeTemplate, request->ie,
+                pPnoRequest->us24GProbeTemplateLen);
+
+        pPnoRequest->us5GProbeTemplateLen = request->ie_len;
+        memcpy(&pPnoRequest->p5GProbeTemplate, request->ie,
+                pPnoRequest->us5GProbeTemplateLen);
+    }
+
+    /* Driver gets only one time interval which is hardcoded in
+     * supplicant for 10000ms. Taking power consumption into account 6 timers
+     * will be used, Timervalue is increased exponentially i.e 10,20,40,
+     * 80,160,320 secs. And number of scan cycle for each timer
+     * is configurable through INI param gPNOScanTimerRepeatValue.
+     * If it is set to 0 only one timer will be used and PNO scan cycle
+     * will be repeated after each interval specified by supplicant
+     * till PNO is disabled.
+     */
+    if (0 == pHddCtx->cfg_ini->configPNOScanTimerRepeatValue)
+        pPnoRequest->scanTimers.ucScanTimersCount = HDD_PNO_SCAN_TIMERS_SET_ONE;
+    else
+        pPnoRequest->scanTimers.ucScanTimersCount =
+                                               HDD_PNO_SCAN_TIMERS_SET_MULTIPLE;
+
+    tempInterval = (request->interval)/1000;
+    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+              "Base scan interval = %d PNOScanTimerRepeatValue = %d",
+              tempInterval, pHddCtx->cfg_ini->configPNOScanTimerRepeatValue);
+    for ( i = 0; i < pPnoRequest->scanTimers.ucScanTimersCount; i++)
+    {
+        pPnoRequest->scanTimers.aTimerValues[i].uTimerRepeat =
+                                 pHddCtx->cfg_ini->configPNOScanTimerRepeatValue;
+        pPnoRequest->scanTimers.aTimerValues[i].uTimerValue = tempInterval;
+        tempInterval *= 2;
+    }
+    //Repeat last timer until pno disabled.
+    pPnoRequest->scanTimers.aTimerValues[i-1].uTimerRepeat = 0;
+
     pPnoRequest->modePNO = SIR_PNO_MODE_ON_SUSPEND;
 
     status = sme_SetPreferredNetworkList(WLAN_HDD_GET_HAL_CTX(pAdapter),

@@ -695,6 +695,7 @@ limCleanupRxPath(tpAniSirGlobal pMac, tpDphHashNode pStaDs,tpPESession psessionE
         psessionEntry->limMlmState = eLIM_MLM_WT_DEL_STA_RSP_STATE;
         /* Deactivating probe after heart beat timer */
         limDeactivateAndChangeTimer(pMac, eLIM_PROBE_AFTER_HB_TIMER);
+        limDeactivateAndChangeTimer(pMac, eLIM_JOIN_FAIL_TIMER);
         limHeartBeatDeactivateAndChangeTimer(pMac, psessionEntry);
         limDeactivateAndChangeTimer(pMac, eLIM_KEEPALIVE_TIMER);
         pMac->lim.gLastBeaconDtimCount = 0;
@@ -1833,7 +1834,9 @@ limPopulatePeerRateSet(tpAniSirGlobal pMac,
         limLog(pMac, LOGE, FL("more than SIR_MAC_RATESET_EID_MAX rates\n"));
         goto error;
     }
-    if (psessionEntry->dot11mode == WNI_CFG_PHY_MODE_11G)
+    if ((psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11G) ||
+        (psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11A) ||
+        (psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11N))
     {
         if (psessionEntry->extRateSet.numRates < SIR_MAC_RATESET_EID_MAX)
         {
