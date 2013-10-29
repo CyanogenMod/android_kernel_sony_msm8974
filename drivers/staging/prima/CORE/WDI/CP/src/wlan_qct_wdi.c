@@ -11032,6 +11032,7 @@ WDI_ProcessAddPeriodicTxPtrnInd
   {
     WPAL_TRACE(eWLAN_MODULE_DAL_CTRL, eWLAN_PAL_TRACE_LEVEL_ERROR,
                "%s: Failed to get selfStaIdx!", __func__);
+    wpalMemoryFree(pSendBuffer);
 
     return WDI_STATUS_E_FAILURE;
   }
@@ -11124,6 +11125,7 @@ WDI_ProcessDelPeriodicTxPtrnInd
   {
     WPAL_TRACE(eWLAN_MODULE_DAL_CTRL, eWLAN_PAL_TRACE_LEVEL_ERROR,
                "%s: Failed to get selfStaIdx!", __func__);
+    wpalMemoryFree(pSendBuffer);
 
     return WDI_STATUS_E_FAILURE;
   }
@@ -27105,9 +27107,6 @@ WDI_ProcessGtkOffloadRsp
    WDI_GtkOffloadCb    wdiGtkOffloadCb   = NULL;
    tHalGtkOffloadRspParams halGtkOffloadRspParams;
    WDI_GtkOffloadRspParams  wdiGtkOffloadRsparams;
-   /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-
-   wdiGtkOffloadCb = (WDI_GtkOffloadCb)pWDICtx->pfncRspCB; 
 
    /*-------------------------------------------------------------------------
      Sanity check 
@@ -27120,6 +27119,8 @@ WDI_ProcessGtkOffloadRsp
       WDI_ASSERT(0);
       return WDI_STATUS_E_FAILURE; 
    }
+
+   wdiGtkOffloadCb = (WDI_GtkOffloadCb)pWDICtx->pfncRspCB;
 
    /*-------------------------------------------------------------------------
      Extract response and send it to UMAC
@@ -27169,9 +27170,6 @@ WDI_ProcessGTKOffloadGetInfoRsp
    WDI_GtkOffloadGetInfoRspParams wdiGtkOffloadGetInfoRsparams;
    WDI_BSSSessionType*              pBSSSes = NULL;
 
-   /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-
-   wdiGtkOffloadGetInfoCb = (WDI_GtkOffloadGetInfoCb)pWDICtx->pfncRspCB; 
 
    /*-------------------------------------------------------------------------
      Sanity check 
@@ -27185,7 +27183,9 @@ WDI_ProcessGTKOffloadGetInfoRsp
       return WDI_STATUS_E_FAILURE; 
    }
 
-   /*-------------------------------------------------------------------------
+   wdiGtkOffloadGetInfoCb = (WDI_GtkOffloadGetInfoCb)pWDICtx->pfncRspCB;
+
+  /*-------------------------------------------------------------------------
      Extract response and send it to UMAC
    -------------------------------------------------------------------------*/
    if(WDI_getFwWlanFeatCaps(SLM_SESSIONIZATION))
