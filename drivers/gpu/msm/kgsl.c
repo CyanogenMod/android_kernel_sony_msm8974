@@ -951,8 +951,6 @@ static int kgsl_release(struct inode *inodep, struct file *filep)
 	struct kgsl_mem_entry *entry;
 	int next = 0;
 
-	bool have_active_count = false;
-
 	filep->private_data = NULL;
 
 	mutex_lock(&device->mutex);
@@ -972,11 +970,6 @@ static int kgsl_release(struct inode *inodep, struct file *filep)
 			 */
 
 			if (_kgsl_context_get(context)) {
-				if (!have_active_count) {
-					result = kgsl_active_count_get(device);
-					BUG_ON(result);
-					have_active_count = true;
-				}
 				kgsl_context_detach(context);
 				kgsl_context_put(context);
 			}
@@ -1010,9 +1003,6 @@ static int kgsl_release(struct inode *inodep, struct file *filep)
 	 * it is still in use by the GPU.
 	 */
 	kgsl_cancel_events(device, dev_priv);
-
-	if (have_active_count)
-		kgsl_active_count_put(device);
 
 	result = kgsl_close_device(device);
 	mutex_unlock(&device->mutex);
