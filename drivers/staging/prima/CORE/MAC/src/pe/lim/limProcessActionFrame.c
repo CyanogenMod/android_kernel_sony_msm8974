@@ -657,8 +657,7 @@ __limProcessAddTsRsp(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,tpPESession pse
         return;   //Error handling. send the response with error status. need to send DelTS to tear down the TSPEC status.
     }
     if((addts.tspec.tsinfo.traffic.accessPolicy != SIR_MAC_ACCESSPOLICY_EDCA) ||
-       ((upToAc(addts.tspec.tsinfo.traffic.userPrio) < MAX_NUM_AC) &&
-       (psessionEntry->gLimEdcaParams[upToAc(addts.tspec.tsinfo.traffic.userPrio)].aci.acm)))
+       ((upToAc(addts.tspec.tsinfo.traffic.userPrio) < MAX_NUM_AC)))
     {
         retval = limSendHalMsgAddTs(pMac, pSta->staIndex, tspecInfo->idx, addts.tspec, psessionEntry->peSessionId);
         if(eSIR_SUCCESS != retval)
@@ -758,13 +757,17 @@ __limProcessDelTsReq(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,tpPESession pse
     if ((tsinfo->traffic.accessPolicy == SIR_MAC_ACCESSPOLICY_EDCA))
     {
     
-        if ((upToAc(tsinfo->traffic.userPrio) >= MAX_NUM_AC) || (! psessionEntry->gLimEdcaParams[upToAc(tsinfo->traffic.userPrio)].aci.acm))
+        if (upToAc(tsinfo->traffic.userPrio) >= MAX_NUM_AC)
         {
             limLog(pMac, LOGW, FL("DelTs with UP %d has no AC - ignoring request"),
                    tsinfo->traffic.userPrio);
             return;
         }
     }
+
+    if ((psessionEntry->limSystemRole != eLIM_AP_ROLE) &&
+        (psessionEntry->limSystemRole != eLIM_BT_AMP_AP_ROLE))
+        limSendSmeDeltsInd(pMac, &delts, aid,psessionEntry);
 
     // try to delete the TS
     if (eSIR_SUCCESS != limAdmitControlDeleteTS(pMac, pSta->assocId, tsinfo, &tsStatus, &tspecIdx))
@@ -781,7 +784,12 @@ __limProcessDelTsReq(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,tpPESession pse
     else
     {
       //send message to HAL to delete TS
-      if(eSIR_SUCCESS != limSendHalMsgDelTs(pMac, pSta->staIndex, tspecIdx, delts, psessionEntry->peSessionId))
+      if(eSIR_SUCCESS != limSendHalMsgDelTs(pMac,
+                                            pSta->staIndex,
+                                            tspecIdx,
+                                            delts,
+                                            psessionEntry->peSessionId,
+                                            psessionEntry->bssId))
       {
         limLog(pMac, LOGW, FL("DelTs with UP %d failed in limSendHalMsgDelTs - ignoring request"),
                          tsinfo->traffic.userPrio);
@@ -841,8 +849,6 @@ __limProcessDelTsReq(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,tpPESession pse
         limLog(pMac, LOGE, FL("Self entry missing in Hash Table "));
 
     PELOG1(limLog(pMac, LOG1, FL("DeleteTS succeeded"));)
-    if((psessionEntry->limSystemRole != eLIM_AP_ROLE)&&(psessionEntry->limSystemRole != eLIM_BT_AMP_AP_ROLE))
-      limSendSmeDeltsInd(pMac, &delts, aid,psessionEntry);
 
 #ifdef FEATURE_WLAN_CCX
     limDeactivateAndChangeTimer(pMac,eLIM_TSM_TIMER);
