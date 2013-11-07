@@ -600,6 +600,9 @@ typedef struct {
    /**Track whether OS TX queue has been disabled.*/
    v_BOOL_t txSuspended[NUM_TX_QUEUES];
 
+   /**Track whether 3/4th of resources are used on softAP/P2P GO side. */
+   v_BOOL_t vosLowResource;
+
    /** Track QoS status of station */
    v_BOOL_t isQosEnabled;
 
@@ -789,6 +792,9 @@ struct hdd_adapter_s
    hdd_list_t wmm_tx_queue[NUM_TX_QUEUES];
    /**Track whether VOS is in a low resource state*/
    v_BOOL_t isVosOutOfResource;
+
+   /**Track whether 3/4th of resources are used on STA/p2p client side */
+   v_BOOL_t isVosLowResource;
   
    /**Track whether OS TX queue has been disabled.*/
    v_BOOL_t isTxSuspended[NUM_TX_QUEUES];
