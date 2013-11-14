@@ -2275,9 +2275,9 @@ static int wlan_hdd_cfg80211_stop_ap (struct wiphy *wiphy,
         staAdapter = hdd_get_adapter(pAdapter->pHddCtx, WLAN_HDD_P2P_CLIENT);
         if (NULL == staAdapter)
         {
-            VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-                    "%s: HDD adapter context is Null", __func__);
-            return -ENODEV;
+            VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
+                      "%s: HDD adapter context for STA/P2P-CLI is Null",
+                      __func__);
         }
     }
 
@@ -2286,7 +2286,7 @@ static int wlan_hdd_cfg80211_stop_ap (struct wiphy *wiphy,
     hddLog(VOS_TRACE_LEVEL_INFO, "%s: device_mode = %d\n",
                               __func__,pAdapter->device_mode);
 
-    if ((pScanInfo != NULL) && pScanInfo->mScanPending)
+    if ((pScanInfo != NULL) && pScanInfo->mScanPending && staAdapter)
     {
         INIT_COMPLETION(pScanInfo->abortscan_event_var);
         hdd_abort_mac_scan(staAdapter->pHddCtx);
@@ -2295,11 +2295,10 @@ static int wlan_hdd_cfg80211_stop_ap (struct wiphy *wiphy,
                            msecs_to_jiffies(WLAN_WAIT_TIME_ABORTSCAN));
         if (!status)
         {
-            VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
+            VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                          "%s: Timeout occurred while waiting for abortscan" ,
                          __func__);
             VOS_ASSERT(pScanInfo->mScanPending);
-            return 0;
         }
     }
 
@@ -3989,14 +3988,40 @@ wlan_hdd_cfg80211_inform_bss_frame( hdd_adapter_t *pAdapter,
     struct cfg80211_bss *bss_status = NULL;
     size_t frame_len = sizeof (struct ieee80211_mgmt) + ie_length;
     int rssi = 0;
+    hdd_context_t *pHddCtx;
+    int status;
 #ifdef WLAN_OPEN_SOURCE
     struct timespec ts;
 #endif
 
     ENTER();
 
-    if (!mgmt)
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+    status = wlan_hdd_validate_context(pHddCtx);
+
+    /*bss_update is not allowed during wlan driver loading or unloading*/
+    if (pHddCtx->isLoadUnloadInProgress)
+    {
+         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                    "%s:Loading_unloading in Progress. Ignore!!!",__func__);
+         return NULL;
+    }
+
+
+    if (0 != status)
+    {
+        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                   "%s: HDD context is not valid", __func__);
         return NULL;
+    }
+
+
+    if (!mgmt)
+    {
+        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                   "%s: memory allocation failed ", __func__);
+        return NULL;
+    }
 
     memcpy(mgmt->bssid, bss_desc->bssId, ETH_ALEN);
 
@@ -4154,14 +4179,28 @@ static int wlan_hdd_cfg80211_update_bss( struct wiphy *wiphy,
     eHalStatus status = 0;
     tScanResultHandle pResult;
     struct cfg80211_bss *bss_status = NULL;
+    hdd_context_t *pHddCtx;
 
     ENTER();
 
-    if ((WLAN_HDD_GET_CTX(pAdapter))->isLogpInProgress)
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+
+    if (pHddCtx->isLogpInProgress)
     {
-      VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL, "%s:LOGP in Progress. Ignore!!!",__func__);
-      return -EAGAIN;
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
+                   "%s:LOGP in Progress. Ignore!!!",__func__);
+        return -EAGAIN;
     }
+
+
+    /*bss_update is not allowed during wlan driver loading or unloading*/
+    if (pHddCtx->isLoadUnloadInProgress)
+    {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                   "%s:Loading_unloading in Progress. Ignore!!!",__func__);
+        return VOS_STATUS_E_PERM;
+    }
+
 
     /*
      * start getting scan results and populate cgf80211 BSS database
