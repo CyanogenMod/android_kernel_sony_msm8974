@@ -300,7 +300,7 @@ int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
    // If the memory differentiation mode is enabled, the memory limit of each queue will be 
    // checked. Over-limit packets will be dropped.
-    spin_lock(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
+    spin_lock_bh(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
     hdd_list_size(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac], &pktListSize);
     if(pktListSize >= pAdapter->aTxQueueLimit[ac])
     {
@@ -326,7 +326,7 @@ int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
           pAdapter->aStaInfo[STAId].vosLowResource = VOS_FALSE;
       }
    }
-   spin_unlock(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
+   spin_unlock_bh(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
 
    if (VOS_TRUE == txSuspended)
    {
@@ -348,9 +348,9 @@ int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
    INIT_LIST_HEAD(&pktNode->anchor);
 
-   spin_lock(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
+   spin_lock_bh(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
    status = hdd_list_insert_back_size(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac], &pktNode->anchor, &pktListSize );
-   spin_unlock(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
+   spin_unlock_bh(&pAdapter->aStaInfo[STAId].wmm_tx_queue[ac].lock);
 
    if ( !VOS_IS_STATUS_SUCCESS( status ) )
    {
@@ -778,6 +778,7 @@ VOS_STATUS hdd_softap_deinit_tx_rx_sta ( hdd_adapter_t *pAdapter, v_U8_t STAId )
    v_BOOL_t txSuspended[NUM_TX_QUEUES];
    v_U8_t tlAC;
    hdd_hostapd_state_t *pHostapdState;
+   v_U8_t i;
 
    pHostapdState = WLAN_HDD_GET_HOSTAP_STATE_PTR(pAdapter);
 
@@ -811,6 +812,15 @@ VOS_STATUS hdd_softap_deinit_tx_rx_sta ( hdd_adapter_t *pAdapter, v_U8_t STAId )
       }
    }
    vos_mem_zero(&pAdapter->aStaInfo[STAId], sizeof(hdd_station_info_t));
+
+   /* re-init spin lock, since netdev can still open adapter until
+    * driver gets unloaded
+    */
+   for (i = 0; i < NUM_TX_QUEUES; i ++)
+   {
+      hdd_list_init(&pAdapter->aStaInfo[STAId].wmm_tx_queue[i],
+                    HDD_TX_QUEUE_MAX_LEN);
+   }
 
    if (BSS_START == pHostapdState->bssState)
    {
@@ -1643,8 +1653,18 @@ VOS_STATUS hdd_softap_Deregister_BC_STA( hdd_adapter_t *pAdapter)
 
 VOS_STATUS hdd_softap_stop_bss( hdd_adapter_t *pAdapter)
 {
+    hdd_context_t *pHddCtx;
     VOS_STATUS vosStatus = VOS_STATUS_E_FAILURE;
     v_U8_t staId = 0;
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+
+    /*bss deregister is not allowed during wlan driver loading or unloading*/
+    if (pHddCtx->isLoadUnloadInProgress)
+    {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                   "%s:Loading_unloading in Progress. Ignore!!!",__func__);
+        return VOS_STATUS_E_PERM;
+    }
 
     vosStatus = hdd_softap_Deregister_BC_STA( pAdapter);
 
