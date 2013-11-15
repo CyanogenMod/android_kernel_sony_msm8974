@@ -266,7 +266,7 @@ config ARCH_MSM8974
 	select MSM_L2_SPM
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
 	select MSM_RPM_SMD
@@ -298,7 +298,7 @@ config ARCH_APQ8084
 	select MULTI_IRQ_HANDLER
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
 	select REGULATOR
@@ -310,7 +310,7 @@ config ARCH_APQ8084
 	select QMI_ENCDEC
 	select MSM_SPM_V2
 	select MSM_L2_SPM
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MSM_RPM_SMD
 
 config ARCH_MPQ8092
@@ -429,7 +429,7 @@ config ARCH_MSMKRYPTON
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
 	select MSM_SPM_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MULTI_IRQ_HANDLER
 	select GPIO_MSM_V3
 	select MAY_HAVE_SPARSE_IRQ
@@ -459,7 +459,7 @@ config ARCH_MSM8610
 	select MSM_RPM_SMD
 	select MSM_SPM_V2
 	select MSM_L2_SPM
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MEMORY_HOLE_CARVEOUT
 	select DONT_MAP_HOLE_AFTER_MEMBANK0
 	select MSM_BUS_SCALING
@@ -499,7 +499,7 @@ config ARCH_MSM8226
 	select MSM_RPM_SMD
 	select MSM_SPM_V2
 	select MSM_L2_SPM
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MEMORY_HOLE_CARVEOUT
 	select DONT_MAP_HOLE_AFTER_MEMBANK0
 	select MSM_BUS_SCALING
@@ -531,7 +531,7 @@ config ARCH_MSMSAMARIUM
 	select MSM_L2_SPM
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
 	select ARM_HAS_SG_CHAIN
@@ -656,7 +656,7 @@ config MSM_MPM_OF
 config MSM_LPM_TEST
 	bool "Low Power Mode test framework"
 	depends on MSM_RPM || MSM_RPM_SMD
-	depends on MSM_PM8X60
+	depends on MSM_PM
 	help
 	  LPM_TEST is a test framework that assists in exercising the low
 	  power mode algorithm on MSM targets. This test framework tracks
@@ -2495,7 +2495,7 @@ config MSM_PM2
 	depends on PM
 	bool
 
-config MSM_PM8X60
+config MSM_PM
 	depends on PM
 	bool
 
