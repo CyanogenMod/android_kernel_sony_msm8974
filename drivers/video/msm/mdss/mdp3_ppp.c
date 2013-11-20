@@ -550,8 +550,8 @@ static int mdp3_ppp_process_req(struct ppp_blit_op *blit_op,
 			return ret;
 
 		blit_op->solid_fill_color = (req->const_color.g & 0xFF)|
-				(req->const_color.b & 0xFF) << 8 |
-				(req->const_color.r & 0xFF)  << 16 |
+				(req->const_color.r & 0xFF) << 8 |
+				(req->const_color.b & 0xFF)  << 16 |
 				(req->const_color.alpha & 0xFF) << 24;
 		blit_op->solid_fill = true;
 	} else {
