@@ -25,6 +25,7 @@
 #include <mach/subsystem_restart.h>
 #include <mach/msm_smem.h>
 #include <asm/memory.h>
+#include <linux/iopoll.h>
 #include "hfi_packetization.h"
 #include "venus_hfi.h"
 #include "vidc_hfi_io.h"
@@ -65,6 +66,9 @@ struct tzbsp_resp {
 };
 
 #define TZBSP_VIDEO_SET_STATE 0xa
+
+/* Poll interval in uS */
+#define POLL_INTERVAL_US 50
 
 enum tzbsp_video_state {
 	TZBSP_VIDEO_STATE_SUSPEND = 0,
