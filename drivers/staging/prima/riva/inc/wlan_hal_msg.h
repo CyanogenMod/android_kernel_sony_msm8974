@@ -113,7 +113,7 @@ typedef tANI_U8 tHalIpv4Addr[4];
 #define CHANNEL_LIST_DYNAMIC_UPDATE           4 /* Occupied channel list can be learnt after update */
 #define WLAN_HAL_ROAM_SCAN_MAX_PROBE_SIZE     450
 #define WLAN_HAL_ROAM_SCAN_MAX_CHANNELS       NUM_RF_CHANNELS
-#define WLAN_HAL_ROAM_SCAN_RESERVED_BYTES     61
+#define WLAN_HAL_ROAM_SCAN_RESERVED_BYTES     57
 #endif
 
 #define HAL_PERIODIC_TX_PTRN_MAX_SIZE 1536
@@ -5462,6 +5462,7 @@ typedef PACKED_PRE struct PACKED_POST {
    /* Add Reserved bytes */
    tANI_U8           nProbes;
    tANI_U16          HomeAwayTime;
+   eAniBoolean       MAWCEnabled;
    tANI_U8           ReservedBytes[WLAN_HAL_ROAM_SCAN_RESERVED_BYTES];
    tRoamNetworkType  ConnectedNetwork;
    tMobilityDomainInfo MDID;
