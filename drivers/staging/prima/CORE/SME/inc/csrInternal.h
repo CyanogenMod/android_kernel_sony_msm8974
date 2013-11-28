@@ -610,6 +610,7 @@ typedef struct tagCsrConfig
 
 #ifdef FEATURE_WLAN_LFR
     tANI_U8      isFastRoamIniFeatureEnabled;
+    tANI_U8      MAWCEnabled;
 #ifdef WLAN_FEATURE_ROAM_SCAN_OFFLOAD
     tANI_U8      isRoamOffloadScanEnabled;
     tANI_BOOLEAN bFastRoamInConIniFeatureEnabled;
@@ -626,6 +627,7 @@ typedef struct tagCsrConfig
     tANI_U8       nImmediateRoamRssiDiff;
     tANI_BOOLEAN  nRoamPrefer5GHz;
     tANI_BOOLEAN  nRoamIntraBand;
+    tANI_BOOLEAN  isWESModeEnabled;
     tANI_BOOLEAN  nRoamScanControl;
     tANI_U8       nProbes;
     tANI_U16      nRoamScanHomeAwayTime;
@@ -995,6 +997,7 @@ typedef struct tagCsrRoamStruct
 #endif
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
     tANI_U8        RoamRssiDiff;
+    tANI_BOOLEAN   isWESModeEnabled;
 #endif
 }tCsrRoamStruct;
 

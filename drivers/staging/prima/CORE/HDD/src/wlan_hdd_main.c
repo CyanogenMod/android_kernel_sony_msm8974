@@ -109,6 +109,7 @@
 int wlan_hdd_ftm_start(hdd_context_t *pAdapter);
 #include "sapApi.h"
 #include <linux/semaphore.h>
+#include <linux/ctype.h>
 #include <mach/subsystem_restart.h>
 #include <wlan_hdd_hostapd.h>
 #include <wlan_hdd_softap_tx_rx.h>
@@ -597,7 +598,17 @@ int hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
        goto exit;
    }
 
-   command = kmalloc(priv_data.total_len, GFP_KERNEL);
+   if (priv_data.total_len <= 0)
+   {
+       VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
+                 "%s:invalid priv_data.total_len(%d)!!!", __func__,
+                 priv_data.total_len);
+       ret = -EINVAL;
+       goto exit;
+   }
+
+   /* Allocate +1 for '\0' */
+   command = kmalloc(priv_data.total_len + 1, GFP_KERNEL);
    if (!command)
    {
        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
@@ -611,6 +622,9 @@ int hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
        ret = -EFAULT;
        goto exit;
    }
+
+   /* Making sure the command is NUL-terminated */
+   command[priv_data.total_len] = '\0';
 
    if ((SIOCDEVPRIVATE + 1) == cmd)
    {
@@ -1709,7 +1723,60 @@ int hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
            sme_HandoffRequest(pHddCtx->hHal, &handoffInfo);
 #endif
        }
-#endif
+       else if (strncmp(command, "SETWESMODE", 10) == 0)
+       {
+           tANI_U8 *value = command;
+           tANI_BOOLEAN wesMode = CFG_ENABLE_WES_MODE_NAME_DEFAULT;
+
+           /* Move pointer to ahead of SETWESMODE<delimiter> */
+           value = value + 11;
+           /* Convert the value from ascii to integer */
+           ret = kstrtou8(value, 10, &wesMode);
+           if (ret < 0)
+           {
+               /* If the input value is greater than max value of datatype, then also
+                  kstrtou8 fails */
+               VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                      "%s: kstrtou8 failed range [%d - %d]", __func__,
+                      CFG_ENABLE_WES_MODE_NAME_MIN,
+                      CFG_ENABLE_WES_MODE_NAME_MAX);
+               ret = -EINVAL;
+               goto exit;
+           }
+
+           if ((wesMode < CFG_ENABLE_WES_MODE_NAME_MIN) ||
+               (wesMode > CFG_ENABLE_WES_MODE_NAME_MAX))
+           {
+               VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                      "WES Mode value %d is out of range"
+                      " (Min: %d Max: %d)", wesMode,
+                      CFG_ENABLE_WES_MODE_NAME_MIN,
+                      CFG_ENABLE_WES_MODE_NAME_MAX);
+               ret = -EINVAL;
+               goto exit;
+           }
+           VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+                      "%s: Received Command to Set WES Mode rssi diff = %d", __func__, wesMode);
+
+           pHddCtx->cfg_ini->isWESModeEnabled = wesMode;
+           sme_UpdateWESMode((tHalHandle)(pHddCtx->hHal), wesMode);
+       }
+       else if (strncmp(priv_data.buf, "GETWESMODE", 10) == 0)
+       {
+           tANI_BOOLEAN wesMode = sme_GetWESMode((tHalHandle)(pHddCtx->hHal));
+           char extra[32];
+           tANI_U8 len = 0;
+
+           len = snprintf(extra, sizeof(extra), "%s %d", command, wesMode);
+           if (copy_to_user(priv_data.buf, &extra, len + 1))
+           {
+               VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                  "%s: failed to copy data to user buffer", __func__);
+               ret = -EFAULT;
+               goto exit;
+           }
+       }
+#endif /* WLAN_FEATURE_VOWIFI_11R || FEATURE_WLAN_CCX || FEATURE_WLAN_LFR */
 #ifdef FEATURE_WLAN_LFR
        else if (strncmp(command, "SETFASTROAM", 11) == 0)
        {
@@ -1972,6 +2039,7 @@ int hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 
            pHddCtx->cfg_ini->isOkcIniFeatureEnabled = okcMode;
        }
+#endif  /* FEATURE_WLAN_OKC */
        else if (strncmp(priv_data.buf, "GETROAMSCANCONTROL", 18) == 0)
        {
            tANI_BOOLEAN roamScanControl = sme_GetRoamScanControl((tHalHandle)(pHddCtx->hHal));
@@ -1987,7 +2055,6 @@ int hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
                goto exit;
            }
        }
-#endif
 #ifdef WLAN_FEATURE_PACKET_FILTERING
        else if (strncmp(command, "ENABLE_PKTFILTER_IPV6", 21) == 0)
        {
@@ -2496,6 +2563,8 @@ VOS_STATUS hdd_parse_send_action_frame_data(tANI_U8 *pValue, tANI_U8 *pTargetApB
     int v = 0;
     tANI_U8 tempBuf[32];
     tANI_U8 tempByte = 0;
+    /* 12 hexa decimal digits and 5 ':' */
+    tANI_U8 macAddress[17];
 
     inPtr = strnchr(pValue, strlen(pValue), SPACE_ASCII_VALUE);
     /*no argument after the command*/
@@ -2519,14 +2588,20 @@ VOS_STATUS hdd_parse_send_action_frame_data(tANI_U8 *pValue, tANI_U8 *pTargetApB
         return -EINVAL;
     }
 
-    /*getting the first argument ie the target AP bssid */
-    if (inPtr[2] != ':' || inPtr[5] != ':' || inPtr[8] != ':' || inPtr[11] != ':' || inPtr[14] != ':')
+    v = sscanf(inPtr, "%17s", macAddress);
+    if (!((1 == v) && hdd_is_valid_mac_address(macAddress)))
     {
-       return -EINVAL;
+        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+             "Invalid MAC address or All hex inputs are not read (%d)", v);
+        return -EINVAL;
     }
-    j = sscanf(inPtr, "%2x:%2x:%2x:%2x:%2x:%2x", (unsigned int *)&pTargetApBssid[0], (unsigned int *)&pTargetApBssid[1],
-                  (unsigned int *)&pTargetApBssid[2], (unsigned int *)&pTargetApBssid[3],
-                  (unsigned int *)&pTargetApBssid[4], (unsigned int *)&pTargetApBssid[5]);
+
+    pTargetApBssid[0] = hdd_parse_hex(macAddress[0]) << 4 | hdd_parse_hex(macAddress[1]);
+    pTargetApBssid[1] = hdd_parse_hex(macAddress[3]) << 4 | hdd_parse_hex(macAddress[4]);
+    pTargetApBssid[2] = hdd_parse_hex(macAddress[6]) << 4 | hdd_parse_hex(macAddress[7]);
+    pTargetApBssid[3] = hdd_parse_hex(macAddress[9]) << 4 | hdd_parse_hex(macAddress[10]);
+    pTargetApBssid[4] = hdd_parse_hex(macAddress[12]) << 4 | hdd_parse_hex(macAddress[13]);
+    pTargetApBssid[5] = hdd_parse_hex(macAddress[15]) << 4 | hdd_parse_hex(macAddress[16]);
 
     /* point to the next argument */
     inPtr = strnchr(inPtr, strlen(inPtr), SPACE_ASCII_VALUE);
@@ -2543,7 +2618,9 @@ VOS_STATUS hdd_parse_send_action_frame_data(tANI_U8 *pValue, tANI_U8 *pTargetApB
     }
 
     /*getting the next argument ie the channel number */
-    j = sscanf(inPtr, "%32s ", tempBuf);
+    v = sscanf(inPtr, "%32s ", tempBuf);
+    if (1 != v) return -EINVAL;
+
     v = kstrtos32(tempBuf, 10, &tempInt);
     if ( v < 0) return -EINVAL;
 
@@ -2563,7 +2640,9 @@ VOS_STATUS hdd_parse_send_action_frame_data(tANI_U8 *pValue, tANI_U8 *pTargetApB
     }
 
     /*getting the next argument ie the dwell time */
-    j = sscanf(inPtr, "%32s ", tempBuf);
+    v = sscanf(inPtr, "%32s ", tempBuf);
+    if (1 != v) return -EINVAL;
+
     v = kstrtos32(tempBuf, 10, &tempInt);
     if ( v < 0) return -EINVAL;
 
@@ -2669,7 +2748,9 @@ VOS_STATUS hdd_parse_channellist(tANI_U8 *pValue, tANI_U8 *pChannelList, tANI_U8
     }
 
     /*getting the first argument ie the number of channels*/
-    sscanf(inPtr, "%32s ", buf);
+    v = sscanf(inPtr, "%32s ", buf);
+    if (1 != v) return -EINVAL;
+
     v = kstrtos32(buf, 10, &tempInt);
     if ((v < 0) ||
         (tempInt <= 0) ||
@@ -2718,7 +2799,9 @@ VOS_STATUS hdd_parse_channellist(tANI_U8 *pValue, tANI_U8 *pChannelList, tANI_U8
             }
         }
 
-        sscanf(inPtr, "%32s ", buf);
+        v = sscanf(inPtr, "%32s ", buf);
+        if (1 != v) return -EINVAL;
+
         v = kstrtos32(buf, 10, &tempInt);
         if ((v < 0) ||
             (tempInt <= 0) ||
@@ -2744,7 +2827,7 @@ VOS_STATUS hdd_parse_channellist(tANI_U8 *pValue, tANI_U8 *pChannelList, tANI_U8
   This function parses the reasoc command data passed in the format
   REASSOC<space><bssid><space><channel>
 
-  \param  - pValue Pointer to input data
+  \param  - pValue Pointer to input data (its a NUL terminated string)
   \param  - pTargetApBssid Pointer to target Ap bssid
   \param  - pChannel Pointer to the Target AP channel
 
@@ -2757,6 +2840,8 @@ VOS_STATUS hdd_parse_reassoc_command_data(tANI_U8 *pValue, tANI_U8 *pTargetApBss
     int tempInt;
     int v = 0;
     tANI_U8 tempBuf[32];
+    /* 12 hexa decimal digits and 5 ':' */
+    tANI_U8 macAddress[17];
 
     inPtr = strnchr(pValue, strlen(pValue), SPACE_ASCII_VALUE);
     /*no argument after the command*/
@@ -2780,14 +2865,20 @@ VOS_STATUS hdd_parse_reassoc_command_data(tANI_U8 *pValue, tANI_U8 *pTargetApBss
         return -EINVAL;
     }
 
-    /*getting the first argument ie the target AP bssid */
-    if (inPtr[2] != ':' || inPtr[5] != ':' || inPtr[8] != ':' || inPtr[11] != ':' || inPtr[14] != ':')
+    v = sscanf(inPtr, "%17s", macAddress);
+    if (!((1 == v) && hdd_is_valid_mac_address(macAddress)))
     {
-       return -EINVAL;
+        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+             "Invalid MAC address or All hex inputs are not read (%d)", v);
+        return -EINVAL;
     }
-    sscanf(inPtr, "%2x:%2x:%2x:%2x:%2x:%2x", (unsigned int *)&pTargetApBssid[0], (unsigned int *)&pTargetApBssid[1],
-                  (unsigned int *)&pTargetApBssid[2], (unsigned int *)&pTargetApBssid[3],
-                  (unsigned int *)&pTargetApBssid[4], (unsigned int *)&pTargetApBssid[5]);
+
+    pTargetApBssid[0] = hdd_parse_hex(macAddress[0]) << 4 | hdd_parse_hex(macAddress[1]);
+    pTargetApBssid[1] = hdd_parse_hex(macAddress[3]) << 4 | hdd_parse_hex(macAddress[4]);
+    pTargetApBssid[2] = hdd_parse_hex(macAddress[6]) << 4 | hdd_parse_hex(macAddress[7]);
+    pTargetApBssid[3] = hdd_parse_hex(macAddress[9]) << 4 | hdd_parse_hex(macAddress[10]);
+    pTargetApBssid[4] = hdd_parse_hex(macAddress[12]) << 4 | hdd_parse_hex(macAddress[13]);
+    pTargetApBssid[5] = hdd_parse_hex(macAddress[15]) << 4 | hdd_parse_hex(macAddress[16]);
 
     /* point to the next argument */
     inPtr = strnchr(inPtr, strlen(inPtr), SPACE_ASCII_VALUE);
@@ -2804,9 +2895,16 @@ VOS_STATUS hdd_parse_reassoc_command_data(tANI_U8 *pValue, tANI_U8 *pTargetApBss
     }
 
     /*getting the next argument ie the channel number */
-    sscanf(inPtr, "%s ", tempBuf);
+    v = sscanf(inPtr, "%32s ", tempBuf);
+    if (1 != v) return -EINVAL;
+
     v = kstrtos32(tempBuf, 10, &tempInt);
-    if ( v < 0) return -EINVAL;
+    if ((v < 0) ||
+        (tempInt <= 0) ||
+        (tempInt > WNI_CFG_CURRENT_CHANNEL_STAMAX))
+    {
+        return -EINVAL;
+    }
 
     *pChannel = tempInt;
     return VOS_STATUS_SUCCESS;
@@ -2898,6 +2996,52 @@ VOS_STATUS hdd_parse_get_cckm_ie(tANI_U8 *pValue, tANI_U8 **pCckmIe,
     return VOS_STATUS_SUCCESS;
 }
 #endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
+
+/**---------------------------------------------------------------------------
+
+  \brief hdd_is_valid_mac_address() - Validate MAC address
+
+  This function validates whether the given MAC address is valid or not
+  Expected MAC address is of the format XX:XX:XX:XX:XX:XX
+  where X is the hexa decimal digit character and separated by ':'
+  This algorithm works even if MAC address is not separated by ':'
+
+  This code checks given input string mac contains exactly 12 hexadecimal digits.
+  and a separator colon : appears in the input string only after
+  an even number of hex digits.
+
+  \param  - pMacAddr pointer to the input MAC address
+  \return - 1 for valid and 0 for invalid.
+
+  --------------------------------------------------------------------------*/
+
+v_BOOL_t hdd_is_valid_mac_address(const tANI_U8 *pMacAddr)
+{
+    int xdigit = 0;
+    int separator = 0;
+    while (*pMacAddr)
+    {
+        if (isxdigit(*pMacAddr))
+        {
+            xdigit++;
+        }
+        else if (':' == *pMacAddr)
+        {
+            if (0 == xdigit || ((xdigit / 2) - 1) != separator)
+                break;
+
+            ++separator;
+        }
+        else
+        {
+            separator = -1;
+            /* Invalid MAC found */
+            return 0;
+        }
+        ++pMacAddr;
+    }
+    return (xdigit == 12 && (separator == 5 || separator == 0));
+}
 
 /**---------------------------------------------------------------------------
 

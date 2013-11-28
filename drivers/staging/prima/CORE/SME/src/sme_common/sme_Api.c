@@ -7803,6 +7803,36 @@ eHalStatus sme_UpdateFastTransitionEnabled(tHalHandle hHal,
 }
 
 /* ---------------------------------------------------------------------------
+    \fn sme_UpdateWESMode
+    \brief  Update WES Mode
+            This function is called through dynamic setConfig callback function
+            to configure isWESModeEnabled
+    \param  hHal - HAL handle for device
+    \return eHAL_STATUS_SUCCESS - SME update isWESModeEnabled config successfully.
+          Other status means SME is failed to update isWESModeEnabled.
+    -------------------------------------------------------------------------*/
+
+eHalStatus sme_UpdateWESMode(tHalHandle hHal, v_BOOL_t isWESModeEnabled)
+{
+    tpAniSirGlobal pMac = PMAC_STRUCT( hHal );
+    eHalStatus          status    = eHAL_STATUS_SUCCESS;
+
+    status = sme_AcquireGlobalLock( &pMac->sme );
+    if ( HAL_STATUS_SUCCESS( status ) )
+    {
+        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_DEBUG,
+                     "LFR runtime successfully set WES Mode to %d - old value is %d - roam state is %d",
+                     isWESModeEnabled,
+                     pMac->roam.configParam.isWESModeEnabled,
+                     pMac->roam.neighborRoamInfo.neighborRoamState);
+        pMac->roam.configParam.isWESModeEnabled = isWESModeEnabled;
+        sme_ReleaseGlobalLock( &pMac->sme );
+    }
+
+    return status ;
+}
+
+/* ---------------------------------------------------------------------------
     \fn sme_SetRoamScanControl
     \brief  Set roam scan control
             This function is called to set roam scan control
@@ -7877,6 +7907,38 @@ eHalStatus sme_UpdateIsFastRoamIniFeatureEnabled(tHalHandle hHal,
   csrNeighborRoamUpdateFastRoamingEnabled(pMac, isFastRoamIniFeatureEnabled);
 
   return eHAL_STATUS_SUCCESS;
+}
+
+/*--------------------------------------------------------------------------
+  \brief sme_UpdateIsMAWCIniFeatureEnabled() -
+  Enable/disable LFR MAWC support at runtime
+  It is used at in the REG_DYNAMIC_VARIABLE macro definition of
+  isMAWCIniFeatureEnabled.
+  This is a synchronous call
+  \param hHal - The handle returned by macOpen.
+  \return eHAL_STATUS_SUCCESS - SME update MAWCEnabled config successfully.
+          Other status means SME is failed to update MAWCEnabled.
+  \sa
+  --------------------------------------------------------------------------*/
+eHalStatus sme_UpdateIsMAWCIniFeatureEnabled(tHalHandle hHal,
+        const v_BOOL_t MAWCEnabled)
+{
+  tpAniSirGlobal pMac = PMAC_STRUCT( hHal );
+  eHalStatus status = eHAL_STATUS_SUCCESS;
+
+  status = sme_AcquireGlobalLock( &pMac->sme );
+  if ( HAL_STATUS_SUCCESS( status ) )
+  {
+      VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
+                "%s: MAWCEnabled is changed from %d to %d", __func__,
+                pMac->roam.configParam.MAWCEnabled,
+                MAWCEnabled);
+      pMac->roam.configParam.MAWCEnabled = MAWCEnabled;
+      sme_ReleaseGlobalLock( &pMac->sme );
+  }
+
+  return status ;
+
 }
 
 #ifdef WLAN_FEATURE_ROAM_SCAN_OFFLOAD
@@ -8566,6 +8628,19 @@ tANI_BOOLEAN sme_getIsCcxFeatureEnabled(tHalHandle hHal)
 #else
     return eANI_BOOLEAN_FALSE;
 #endif
+}
+
+/*--------------------------------------------------------------------------
+  \brief sme_GetWESMode() - get WES Mode
+  This is a synchronous call
+  \param hHal - The handle returned by macOpen
+  \return v_U8_t - WES Mode Enabled(1)/Disabled(0)
+  \sa
+  --------------------------------------------------------------------------*/
+v_BOOL_t sme_GetWESMode(tHalHandle hHal)
+{
+    tpAniSirGlobal pMac = PMAC_STRUCT( hHal );
+    return pMac->roam.configParam.isWESModeEnabled;
 }
 
 /*--------------------------------------------------------------------------
