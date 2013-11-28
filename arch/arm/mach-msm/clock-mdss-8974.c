@@ -152,6 +152,7 @@
 
 #define PLL_POLL_MAX_READS	10
 #define PLL_POLL_TIMEOUT_US	50
+#define SEQ_M_MAX_COUNTER	7
 
 static long vco_cached_rate;
 static unsigned char *mdss_dsi_base;
@@ -1035,12 +1036,12 @@ static int analog_get_div(struct div_clk *clk)
 static void dsi_pll_toggle_lock_detect(void)
 {
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2,
-		0x05);
+		0x0d);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2,
-		0x04);
+		0x0c);
 	udelay(1);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2,
-		0x05);
+		0x0d);
 }
 
 static int dsi_pll_lock_status(void)
@@ -1094,24 +1095,25 @@ static int dsi_pll_enable_seq_m(void)
 	 * the updates to take effect. These delays are necessary for the
 	 * PLL to successfully lock
 	 */
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG1, 0x34);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x01);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x05);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0f);
-	udelay(1000);
+	udelay(600);
 
 	pll_locked = dsi_pll_toggle_lock_detect_and_check_status();
-	for (i = 0; (i < 4) && !pll_locked; i++) {
+	for (i = 0; (i < SEQ_M_MAX_COUNTER) && !pll_locked; i++) {
+		DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_PWRGEN_CFG,
+			0x00);
+		udelay(50);
 		DSS_REG_W(mdss_dsi_base,
-			DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x07);
-		if (i != 0)
-			DSS_REG_W(mdss_dsi_base,
-				DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG1, 0x34);
-		udelay(1);
+			DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x05);
+		udelay(100);
 		DSS_REG_W(mdss_dsi_base,
 			DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0f);
-		udelay(1000);
+		udelay(600);
 		pll_locked = dsi_pll_toggle_lock_detect_and_check_status();
 	}
 
@@ -1135,6 +1137,8 @@ static int dsi_pll_enable_seq_d(void)
 	 * the updates to take effect. These delays are necessary for the
 	 * PLL to successfully lock
 	 */
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_PWRGEN_CFG, 0x00);
+	udelay(50);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x01);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x05);
@@ -1146,7 +1150,7 @@ static int dsi_pll_enable_seq_d(void)
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x07);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0f);
-	udelay(1000);
+	udelay(600);
 
 	pll_locked = dsi_pll_toggle_lock_detect_and_check_status();
 	pr_debug("%s: PLL status = %s\n", __func__,
@@ -1166,6 +1170,8 @@ static int dsi_pll_enable_seq_f1(void)
 	 * the updates to take effect. These delays are necessary for the
 	 * PLL to successfully lock
 	 */
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_PWRGEN_CFG, 0x00);
+	udelay(50);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x01);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x05);
@@ -1175,7 +1181,7 @@ static int dsi_pll_enable_seq_f1(void)
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0d);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0f);
-	udelay(1000);
+	udelay(600);
 
 	pll_locked = dsi_pll_toggle_lock_detect_and_check_status();
 	pr_debug("%s: PLL status = %s\n", __func__,
@@ -1195,12 +1201,14 @@ static int dsi_pll_enable_seq_c(void)
 	 * the updates to take effect. These delays are necessary for the
 	 * PLL to successfully lock
 	 */
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_PWRGEN_CFG, 0x00);
+	udelay(50);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x01);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x05);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0f);
-	udelay(1000);
+	udelay(600);
 
 	pll_locked = dsi_pll_toggle_lock_detect_and_check_status();
 	pr_debug("%s: PLL status = %s\n", __func__,
@@ -1220,6 +1228,8 @@ static int dsi_pll_enable_seq_e(void)
 	 * the updates to take effect. These delays are necessary for the
 	 * PLL to successfully lock
 	 */
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_PWRGEN_CFG, 0x00);
+	udelay(50);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x01);
 	udelay(200);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x05);
@@ -1227,7 +1237,7 @@ static int dsi_pll_enable_seq_e(void)
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0d);
 	udelay(1);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_GLB_CFG, 0x0f);
-	udelay(1000);
+	udelay(600);
 
 	pll_locked = dsi_pll_toggle_lock_detect_and_check_status();
 	pr_debug("%s: PLL status = %s\n", __func__,
@@ -1259,10 +1269,10 @@ static int dsi_pll_enable_seq_8974(void)
 	for (i = 0; i < 3; i++) {
 		/* DSI Uniphy lock detect setting */
 		DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2,
-			0x04);
+			0x0c);
 		udelay(100);
 		DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2,
-			0x05);
+			0x0d);
 		udelay(500);
 		/* poll for PLL ready status */
 		max_reads = 5;
@@ -1460,7 +1470,7 @@ static int vco_set_rate(struct clk *c, unsigned long rate)
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CHGPUMP_CFG, 0x02);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG3, 0x2b);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG4, 0x66);
-	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2, 0x05);
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_LKDET_CFG2, 0x0d);
 
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_SDM_CFG1,
 		(u32)(sdm_cfg1 & 0xff));
@@ -1479,7 +1489,7 @@ static int vco_set_rate(struct clk *c, unsigned long rate)
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_VCOLPF_CFG, 0x71);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_SDM_CFG0,
 		(u32)sdm_cfg0);
-	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG0, 0x0a);
+	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG0, 0x12);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG6, 0x30);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG7, 0x00);
 	DSS_REG_W(mdss_dsi_base, DSI_0_PHY_PLL_UNIPHY_PLL_CAL_CFG8, 0x60);
@@ -1641,13 +1651,14 @@ struct dsi_pll_vco_clk dsi_vco_clk_8226 = {
 	.ref_clk_rate = 19200000,
 	.min_rate = 350000000,
 	.max_rate = 750000000,
-	.pll_en_seq_cnt = 6,
+	.pll_en_seq_cnt = 7,
 	.pll_enable_seqs[0] = dsi_pll_enable_seq_m,
-	.pll_enable_seqs[1] = dsi_pll_enable_seq_d,
+	.pll_enable_seqs[1] = dsi_pll_enable_seq_m,
 	.pll_enable_seqs[2] = dsi_pll_enable_seq_d,
-	.pll_enable_seqs[3] = dsi_pll_enable_seq_f1,
-	.pll_enable_seqs[4] = dsi_pll_enable_seq_c,
-	.pll_enable_seqs[5] = dsi_pll_enable_seq_e,
+	.pll_enable_seqs[3] = dsi_pll_enable_seq_d,
+	.pll_enable_seqs[4] = dsi_pll_enable_seq_f1,
+	.pll_enable_seqs[5] = dsi_pll_enable_seq_c,
+	.pll_enable_seqs[6] = dsi_pll_enable_seq_e,
 	.lpfr_lut_size = 10,
 	.lpfr_lut = (struct lpfr_cfg[]){
 		{479500000, 8},
