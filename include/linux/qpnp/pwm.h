@@ -148,6 +148,12 @@ int pwm_lut_config(struct pwm_device *pwm, int period_us,
 		int duty_pct[], struct lut_params lut_params);
 
 /*
+ * support microsecond level configuration
+ */
+int pwm_config_us(struct pwm_device *pwm,
+		int duty_us, int period_us);
+
+/*
  * lut_config: LUT config
  * @hi_index: LUT high index for ramp
  * @lo_index: LUT low index for ramp
@@ -194,8 +200,8 @@ void pwm_set_max_pwm_value(struct pwm_device *pwm, int max);
 /*
  * pwm_config - change a PWM device configuration
  * @pwm: the PWM device
- * @period_us: period in microsecond
- * @duty_us: duty cycle in microsecond
+ * @period_ns: period in nanosecond
+ * @duty_ns: duty cycle in nanosecond
  */
 
 /*
