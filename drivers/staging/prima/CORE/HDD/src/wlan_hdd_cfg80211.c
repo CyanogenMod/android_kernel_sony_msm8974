@@ -676,10 +676,13 @@ int wlan_hdd_cfg80211_init(struct device *dev,
                  |  WIPHY_FLAG_TDLS_EXTERNAL_SETUP;
 #endif
 #ifdef FEATURE_WLAN_SCAN_PNO
-    wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
-    wiphy->max_sched_scan_ssids = SIR_PNO_MAX_SUPP_NETWORKS;
-    wiphy->max_match_sets       = SIR_PNO_MAX_SUPP_NETWORKS;
-    wiphy->max_sched_scan_ie_len = SIR_MAC_MAX_IE_LENGTH;
+    if (pCfg->configPNOScanSupport)
+    {
+        wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
+        wiphy->max_sched_scan_ssids = SIR_PNO_MAX_SUPP_NETWORKS;
+        wiphy->max_match_sets       = SIR_PNO_MAX_SUPP_NETWORKS;
+        wiphy->max_sched_scan_ie_len = SIR_MAC_MAX_IE_LENGTH;
+    }
 #endif/*FEATURE_WLAN_SCAN_PNO*/
 
     /* even with WIPHY_FLAG_CUSTOM_REGULATORY,
@@ -5454,9 +5457,7 @@ int wlan_hdd_cfg80211_set_ie( hdd_adapter_t *pAdapter,
                     pWextState->roamProfile.nWPAReqIELength = eLen + 2;//ie_len;
                 }
                 else if ( (0 == memcmp(&genie[0], P2P_OUI_TYPE,
-                                                         P2P_OUI_TYPE_SIZE))
-                        /*Consider P2P IE, only for P2P Client */
-                         && (WLAN_HDD_P2P_CLIENT == pAdapter->device_mode) )
+                                                         P2P_OUI_TYPE_SIZE)))
                 {
                     v_U16_t curAddIELen = pWextState->assocAddIE.length;
                     hddLog (VOS_TRACE_LEVEL_INFO, "%s Set P2P IE(len %d)",
