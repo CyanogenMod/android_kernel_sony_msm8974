@@ -291,7 +291,7 @@ again:
 	INIT_COMPLETION(ddc_ctrl->ddc_sw_done);
 	DSS_REG_W_ND(ddc_ctrl->io, HDMI_DDC_CTRL, BIT(0) | BIT(20));
 
-	time_out_count = wait_for_completion_interruptible_timeout(
+	time_out_count = wait_for_completion_timeout(
 		&ddc_ctrl->ddc_sw_done, HZ/2);
 	DSS_REG_W_ND(ddc_ctrl->io, HDMI_DDC_INT_CTRL, BIT(1));
 	if (!time_out_count) {
@@ -542,7 +542,7 @@ again:
 	INIT_COMPLETION(ddc_ctrl->ddc_sw_done);
 	DSS_REG_W_ND(ddc_ctrl->io, HDMI_DDC_CTRL, BIT(0) | BIT(21));
 
-	time_out_count = wait_for_completion_interruptible_timeout(
+	time_out_count = wait_for_completion_timeout(
 		&ddc_ctrl->ddc_sw_done, HZ/2);
 
 	reg_val = DSS_REG_R(ddc_ctrl->io, HDMI_DDC_INT_CTRL);
@@ -716,7 +716,7 @@ again:
 	INIT_COMPLETION(ddc_ctrl->ddc_sw_done);
 	DSS_REG_W_ND(ddc_ctrl->io, HDMI_DDC_CTRL, BIT(0) | BIT(20));
 
-	time_out_count = wait_for_completion_interruptible_timeout(
+	time_out_count = wait_for_completion_timeout(
 		&ddc_ctrl->ddc_sw_done, HZ/2);
 
 	reg_val = DSS_REG_R(ddc_ctrl->io, HDMI_DDC_INT_CTRL);
