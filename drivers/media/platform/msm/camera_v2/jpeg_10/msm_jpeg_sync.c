@@ -17,6 +17,7 @@
 #include <linux/list.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
+#include <linux/ratelimit.h>
 #include <media/msm_jpeg.h>
 #include "msm_jpeg_sync.h"
 #include "msm_jpeg_core.h"
@@ -877,7 +878,7 @@ long __msm_jpeg_ioctl(struct msm_jpeg_device *pgmn_dev,
 		break;
 
 	default:
-		JPEG_PR_ERR(KERN_INFO "%s:%d] cmd = %d not supported\n",
+		pr_err_ratelimited("%s:%d] cmd = %d not supported\n",
 			__func__, __LINE__, _IOC_NR(cmd));
 		rc = -EINVAL;
 		break;
