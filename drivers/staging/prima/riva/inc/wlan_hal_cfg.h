@@ -216,7 +216,11 @@
 #define QWLAN_HAL_CFG_MWS_COEX_CONFIG6                  163
 #define QWLAN_HAL_CFG_SAR_POWER_BACKOFF                 164
 #define QWLAN_HAL_CFG_GO_LINK_MONITOR_TIMEOUT           165
-#define QWLAN_HAL_CFG_MAX_PARAMS                        166
+#define QWLAN_HAL_CFG_BTC_STATIC_OPP_WLAN_ACTIVE_WLAN_LEN        166
+#define QWLAN_HAL_CFG_BTC_STATIC_OPP_WLAN_ACTIVE_BT_LEN          167
+#define QWLAN_HAL_CFG_BTC_SAP_STATIC_OPP_WLAN_ACTIVE_WLAN_LEN    168
+#define QWLAN_HAL_CFG_BTC_SAP_STATIC_OPP_WLAN_ACTIVE_BT_LEN      169
+#define QWLAN_HAL_CFG_MAX_PARAMS                        170
 
 
 /* Total number of Integer CFGs. This is used while allocating the memory for TLV */

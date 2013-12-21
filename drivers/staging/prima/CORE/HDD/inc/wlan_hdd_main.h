@@ -858,6 +858,10 @@ struct hdd_adapter_s
 #if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
    tAniTrafStrmMetrics tsmStats;
 #endif
+   /* Flag to ensure PSB is configured through framework */
+   v_U8_t psbChanged;
+   /* UAPSD psb value configured through framework */
+   v_U8_t configuredPsb;
 };
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(pAdapter) (&(pAdapter)->sessionCtx.station)
@@ -1170,4 +1174,5 @@ v_BOOL_t hdd_is_valid_mac_address(const tANI_U8* pMacAddr);
 #ifdef WLAN_FEATURE_PACKET_FILTERING
 int wlan_hdd_setIPv6Filter(hdd_context_t *pHddCtx, tANI_U8 filterType, tANI_U8 sessionId);
 #endif
+int hdd_wmmps_helper(hdd_adapter_t *pAdapter, tANI_U8 *ptr);
 #endif    // end #if !defined( WLAN_HDD_MAIN_H )

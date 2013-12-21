@@ -2778,6 +2778,13 @@ REG_VARIABLE( CFG_TDLS_PUAPSD_RX_FRAME_THRESHOLD, WLAN_PARAM_Integer,
                  CFG_PNO_SCAN_TIMER_REPEAT_VALUE_MIN,
                  CFG_PNO_SCAN_TIMER_REPEAT_VALUE_MAX),
 #endif
+
+   REG_VARIABLE( CFG_DISABLE_ATH_NAME , WLAN_PARAM_Integer,
+                 hdd_config_t, cfgAthDisable,
+                 VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+                 CFG_DISABLE_ATH_DEFAULT,
+                 CFG_DISABLE_ATH_MIN,
+                 CFG_DISABLE_ATH_MAX ),
 };
 
 /*
@@ -3233,7 +3240,7 @@ VOS_STATUS hdd_cfg_get_config(hdd_context_t *pHddCtx, char *pBuf, int buflen)
       {
          snprintf(valueStr, CFG_VALUE_MAX_LEN, "(unhandled)");
       }
-      curlen = snprintf(configStr, CFG_ENTRY_MAX_LEN,
+      curlen = scnprintf(configStr, CFG_ENTRY_MAX_LEN,
                         "%s=[%s]%s\n",
                         pRegEntry->RegName,
                         valueStr,
@@ -4341,6 +4348,14 @@ v_BOOL_t hdd_update_config_dat( hdd_context_t *pHddCtx )
       hddLog(LOGE, "Could not pass on WNI_CFG_ANTENNA_DIVESITY to CCM");
    }
 
+   if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_ATH_DISABLE,
+                    pConfig->cfgAthDisable, NULL,
+                    eANI_BOOLEAN_FALSE)==eHAL_STATUS_FAILURE)
+   {
+      fStatus = FALSE;
+      hddLog(LOGE, "Could not pass on WNI_CFG_ATH_DISABLE to CCM");
+   }
+
    return fStatus;
 }
 
@@ -4382,8 +4397,20 @@ VOS_STATUS hdd_set_sme_config( hdd_context_t *pHddCtx )
 
    smeConfig.csrConfig.phyMode                  = hdd_cfg_xlate_to_csr_phy_mode ( pConfig->dot11Mode );
 
-   smeConfig.csrConfig.channelBondingMode24GHz  = pConfig->nChannelBondingMode24GHz;
-   smeConfig.csrConfig.channelBondingMode5GHz   = pConfig->nChannelBondingMode5GHz;
+   if( (pConfig->dot11Mode == eHDD_DOT11_MODE_abg) ||
+       (pConfig->dot11Mode == eHDD_DOT11_MODE_11b) ||
+       (pConfig->dot11Mode == eHDD_DOT11_MODE_11g) ||
+       (pConfig->dot11Mode == eHDD_DOT11_MODE_11b_ONLY) ||
+       (pConfig->dot11Mode == eHDD_DOT11_MODE_11g_ONLY))
+   {
+       smeConfig.csrConfig.channelBondingMode24GHz  = 0;
+       smeConfig.csrConfig.channelBondingMode5GHz  = 0;
+   }
+   else
+   {
+       smeConfig.csrConfig.channelBondingMode24GHz   = pConfig->nChannelBondingMode24GHz;
+       smeConfig.csrConfig.channelBondingMode5GHz   = pConfig->nChannelBondingMode5GHz;
+   }
    smeConfig.csrConfig.TxRate                   = pConfig->TxRate;
    smeConfig.csrConfig.nScanResultAgeCount      = pConfig->ScanResultAgeCount;
    smeConfig.csrConfig.scanAgeTimeNCNPS         = pConfig->nScanAgeTimeNCNPS;
