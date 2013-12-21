@@ -1931,6 +1931,11 @@ typedef enum
 #define CFG_PNO_SCAN_TIMER_REPEAT_VALUE_MAX          ( 0xffffffff )
 #endif
 
+#define CFG_DISABLE_ATH_NAME                       "gAthDisable"
+#define CFG_DISABLE_ATH_MIN                        (0)
+#define CFG_DISABLE_ATH_MAX                        (1)
+#define CFG_DISABLE_ATH_DEFAULT                    (0)
+
 /*--------------------------------------------------------------------------- 
   Type declarations
   -------------------------------------------------------------------------*/ 
@@ -2334,6 +2339,7 @@ typedef struct
    v_BOOL_t                    configPNOScanSupport;
    v_U32_t                     configPNOScanTimerRepeatValue;
 #endif
+   v_BOOL_t                    cfgAthDisable;
 } hdd_config_t;
 /*--------------------------------------------------------------------------- 
   Function declarations and documenation

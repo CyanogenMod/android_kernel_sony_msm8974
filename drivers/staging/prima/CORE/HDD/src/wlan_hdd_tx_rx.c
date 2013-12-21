@@ -628,7 +628,7 @@ int hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
    {
       if (pAdapter->wmm_tx_queue[ac].count >= HDD_TX_QUEUE_LOW_WATER_MARK)
       {
-          VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
+          VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
                      "%s: Best Effort AC Tx queue is 3/4th full", __func__);
           pAdapter->isVosLowResource = VOS_TRUE;
       }
@@ -678,15 +678,25 @@ int hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
    ++pAdapter->hdd_stats.hddTxRxStats.txXmitQueuedAC[ac];
    ++pAdapter->hdd_stats.hddTxRxStats.pkt_tx_count;
 
+   if (HDD_PSB_CHANGED == pAdapter->psbChanged)
+   {
+      /* Function which will determine acquire admittance for a
+       * WMM AC is required or not based on psb configuration done
+       * in the framework
+       */
+       hdd_wmm_acquire_access_required(pAdapter, ac);
+   }
+
    //Make sure we have access to this access category
-   if (likely(pAdapter->hddWmmStatus.wmmAcStatus[ac].wmmAcAccessAllowed) ||
-           ( pHddStaCtx->conn_info.uIsAuthenticated == VOS_FALSE))
+   if (((pAdapter->psbChanged & (1 << ac)) && likely(pAdapter->hddWmmStatus.wmmAcStatus[ac].wmmAcAccessAllowed)) ||
+           (pHddStaCtx->conn_info.uIsAuthenticated == VOS_FALSE))
    {
       granted = VOS_TRUE;
    }
    else
    {
       status = hdd_wmm_acquire_access( pAdapter, ac, &granted );
+      pAdapter->psbChanged |= (1 << ac);
    }
    if ( granted && ( pktListSize == 1 ))
    {
