@@ -348,18 +348,23 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 #endif
 
 	if (!mqrq_cur->bounce_buf && !mqrq_prev->bounce_buf) {
+		unsigned short max_segs = host->max_segs;
+		if (mmc_card_sd(card)) {
+			max_segs = 256;
+		}
+
 		blk_queue_bounce_limit(mq->queue, limit);
 		blk_queue_max_hw_sectors(mq->queue,
 			min(host->max_blk_count, host->max_req_size / 512));
-		blk_queue_max_segments(mq->queue, host->max_segs);
+		blk_queue_max_segments(mq->queue, max_segs);
 		blk_queue_max_segment_size(mq->queue, host->max_seg_size);
 
-		mqrq_cur->sg = mmc_alloc_sg(host->max_segs, &ret);
+		mqrq_cur->sg = mmc_alloc_sg(max_segs, &ret);
 		if (ret)
 			goto cleanup_queue;
 
 
-		mqrq_prev->sg = mmc_alloc_sg(host->max_segs, &ret);
+		mqrq_prev->sg = mmc_alloc_sg(max_segs, &ret);
 		if (ret)
 			goto cleanup_queue;
 	}
