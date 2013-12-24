@@ -213,36 +213,10 @@ struct dsi_panel_cmds {
 	int link_state;
 };
 
-<<<<<<< HEAD
-#define CMD_REQ_MAX     4
-
-#define CMD_REQ_RX      0x0001
-#define CMD_REQ_COMMIT  0x0002
-#define CMD_CLK_CTRL    0x0004
-#define CMD_REQ_NO_MAX_PKT_SIZE 0x0008
-
 #define DEFAULT_CMDS	0
 #define DETECTED_CMDS	1
 #define MAX_CMDS	2
 
-struct dcs_cmd_req {
-	struct dsi_cmd_desc *cmds;
-	int cmds_cnt;
-	u32 flags;
-	int rlen;       /* rx length */
-	char *rbuf;	/* rx buf */
-	void (*cb)(int data);
-};
-
-struct dcs_cmd_list {
-	int put;
-	int get;
-	int tot;
-	struct dcs_cmd_req list[CMD_REQ_MAX];
-};
-
-=======
->>>>>>> c121a61... msm: mdss: abstract the dsi command utility API
 struct dsi_kickoff_action {
 	struct list_head act_entry;
 	void (*action) (void *);
