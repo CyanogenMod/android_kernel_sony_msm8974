@@ -344,7 +344,7 @@ static ssize_t reg_read(struct file *file, const char __user *ubuf,
 		pr_err("%s: payload[%d] = 0x%x\n",
 			__func__, j, dsi.payload[j]);
 
-	mdss_dsi_cmds_rx(ctrl_pdata, &dsi, nbr_bytes_to_read, 0);
+	mdss_dsi_cmds_rx(ctrl_pdata, &dsi, nbr_bytes_to_read);
 
 	ret = post_reg_access(mfd);
 	if (ret)

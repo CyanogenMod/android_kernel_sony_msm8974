@@ -776,7 +776,7 @@ static int mdss_dsi_panel_detect(struct mdss_panel_data *pdata)
 
 	mdss_dsi_op_mode_config(DSI_CMD_MODE, pdata);
 	mdss_dsi_cmds_rx(ctrl_pdata,
-			 spec_pdata->id_read_cmds.cmds, 10, 0);
+			 spec_pdata->id_read_cmds.cmds, 10);
 
 	pr_debug("%s: Panel ID", __func__);
 	pr_debug("0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
@@ -1208,7 +1208,7 @@ static void get_uv_data(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 	len = get_uv_param_len(param_type);
 
 	for (i = 0; i < ctrl_pdata->spec_pdata->uv_read_cmds.cmd_cnt; i++) {
-		mdss_dsi_cmds_rx(ctrl_pdata, cmds, len, 0);
+		mdss_dsi_cmds_rx(ctrl_pdata, cmds, len);
 		memcpy(pos, ctrl_pdata->rx_buf.data, len);
 		pos += len;
 		cmds++;
