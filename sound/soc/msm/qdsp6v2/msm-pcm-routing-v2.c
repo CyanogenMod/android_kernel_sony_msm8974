@@ -1618,7 +1618,7 @@ static int msm_routing_set_clearaudio_vpt_control_(
 		.rampingcurve = SOFT_VOLUME_CURVE_LINEAR,
 	};
 
-	ac = q6asm_get_audio_client(fe_dai_map[idx][SESSION_TYPE_RX]);
+	ac = q6asm_get_audio_client(fe_dai_map[idx][SESSION_TYPE_RX].strm_id);
 
 	uvalue16 = (uint16_t)ucontrol->value.integer.value[0];
 	if (uvalue16 == 1) {
@@ -1750,7 +1750,7 @@ static int msm_routing_set_vpt51_control_(struct snd_kcontrol *kcontrol,
 	uint16_t value16;
 	int ret = 0;
 
-	ac = q6asm_get_audio_client(fe_dai_map[idx][SESSION_TYPE_RX]);
+	ac = q6asm_get_audio_client(fe_dai_map[idx][SESSION_TYPE_RX].strm_id);
 
 	value16 = (uint16_t)ucontrol->value.integer.value[0];
 	if (value16 > 1) {
@@ -1808,7 +1808,7 @@ static int msm_routing_set_dynamicnormalizer_control_(
 	uint16_t value16;
 	int ret = 0;
 
-	ac = q6asm_get_audio_client(fe_dai_map[idx][SESSION_TYPE_RX]);
+	ac = q6asm_get_audio_client(fe_dai_map[idx][SESSION_TYPE_RX].strm_id);
 
 	value16 = (uint16_t)ucontrol->value.integer.value[0];
 	if (value16 > 1) {
