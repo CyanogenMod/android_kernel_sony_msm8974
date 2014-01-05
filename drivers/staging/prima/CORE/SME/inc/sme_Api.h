@@ -855,6 +855,17 @@ eHalStatus sme_GetTsmStats(tHalHandle hHal,
 eHalStatus sme_SetCCKMIe(tHalHandle hHal, tANI_U8 sessionId, tANI_U8 *pCckmIe, tANI_U8 cckmIeLen);
 
 
+/* ---------------------------------------------------------------------------
+    \fn sme_SetCcxBeaconRequest
+    \brief  function to set CCX beacon request parameters
+    \param  hHal - HAL handle for device
+    \param  pCcxBcnReq - pointer to CCX beacon request
+    \- return Success or failure
+    -------------------------------------------------------------------------*/
+eHalStatus sme_SetCcxBeaconRequest(tHalHandle hHal, const tANI_U8 sessionId,
+                                   const tCsrCcxBeaconReq* pCcxBcnReq);
+
+
 #endif /*FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
 /* ---------------------------------------------------------------------------
     \fn sme_CfgSetInt
@@ -1485,6 +1496,27 @@ eHalStatus sme_ChangeCountryCode( tHalHandle hHal,
                                   void *pContext,
                                   void* pVosContext,
                                   tAniBool countryFromUserSpace );
+
+/* ---------------------------------------------------------------------------
+
+    \fn sme_GenericChangeCountryCode
+
+    \brief Generic API to change country code
+
+    \param hHal - The handle returned by macOpen.
+
+    \param pCountry New Country Code String
+
+    \param reg_domain Regulatory domain for the new country code
+
+    \return eHalStatus  SUCCESS.
+
+                        FAILURE or RESOURCES  The API finished and failed.
+
+  -------------------------------------------------------------------------------*/
+eHalStatus sme_GenericChangeCountryCode( tHalHandle hHal,
+                                         tANI_U8 *pCountry,
+                                         v_REGDOMAIN_t reg_domain);
 
 /* ---------------------------------------------------------------------------
 
@@ -3064,5 +3096,59 @@ eHalStatus smeIssueFastRoamNeighborAPEvent (tHalHandle hHal,
 void smeGetCommandQStatus( tHalHandle hHal );
 
 eHalStatus sme_RoamDelPMKIDfromCache( tHalHandle hHal, tANI_U8 sessionId, tANI_U8 *pBSSId );
+#ifdef FEATURE_WLAN_BATCH_SCAN
+/* ---------------------------------------------------------------------------
+    \fn sme_SetBatchScanReq
+    \brief  API to set batch scan request in FW
+    \param  hHal - The handle returned by macOpen.
+    \param  pRequest -  Pointer to the batch request.
+    \param  sessionId - session ID
+    \param  callbackRoutine - HDD callback which needs to be invoked after
+            getting set batch scan response from FW
+    \param  callbackContext - pAdapter context
+    \return eHalStatus
+  ---------------------------------------------------------------------------*/
+eHalStatus
+sme_SetBatchScanReq
+(
+    tHalHandle hHal, tSirSetBatchScanReq *pRequest, tANI_U8 sessionId,
+    void (*callbackRoutine) (void *callbackCtx, tSirSetBatchScanRsp *pRsp),
+    void *callbackContext
+);
+
+/* ---------------------------------------------------------------------------
+    \fn sme_TriggerBatchScanResultInd
+    \brief  API to trigger batch scan result indications from from FW
+    \param  hHal - The handle returned by macOpen.
+    \param  pRequest -  Pointer to get batch request.
+    \param  sessionId - session ID
+    \param  callbackRoutine - HDD callback which needs to be invoked after
+            getting get batch scan response from FW
+    \param  callbackContext - pAdapter context
+    \return eHalStatus
+  ---------------------------------------------------------------------------*/
+eHalStatus
+sme_TriggerBatchScanResultInd
+(
+    tHalHandle hHal, tSirTriggerBatchScanResultInd *pRequest, tANI_U8 sessionId,
+    void (*callbackRoutine) (void *callbackCtx, void *pRsp),
+    void *callbackContext
+);
+
+/* ---------------------------------------------------------------------------
+    \fn sme_StopBatchScanInd
+    \brief  API to stop batch scan request in FW
+    \param  hHal - The handle returned by macOpen.
+    \param  pRequest -  Pointer to stop batch indication
+    \return eHalStatus
+  ---------------------------------------------------------------------------*/
+eHalStatus
+sme_StopBatchScanInd
+(
+    tHalHandle hHal, tSirStopBatchScanInd *pInd, tANI_U8 sessionId
+);
+
+#endif
+
 
 #endif //#if !defined( __SME_API_H )

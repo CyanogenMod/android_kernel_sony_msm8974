@@ -93,6 +93,7 @@
 #define FREQ_BASE_80211G          (2407)
 #define FREQ_BAND_DIFF_80211G     (5)
 #define MAX_SCAN_SSID 9
+#define MAX_PENDING_LOG 5
 #define GET_IE_LEN_IN_BSS_DESC(lenInBss) ( lenInBss + sizeof(lenInBss) - \
         ((int) OFFSET_OF( tSirBssDescription, ieFields)))
 
@@ -553,7 +554,6 @@ struct wiphy *wlan_hdd_cfg80211_wiphy_alloc(int priv_size)
         return NULL;
     }
 
-    wiphy->country_ie_pref = NL80211_COUNTRY_IE_IGNORE_CORE;
 
     return wiphy;
 }
@@ -633,31 +633,32 @@ int wlan_hdd_cfg80211_init(struct device *dev,
                                )
 {
     int i, j;
-    hdd_context_t *pHddCtx = wiphy_priv(wiphy);
     ENTER();
 
     /* Now bind the underlying wlan device with wiphy */
     set_wiphy_dev(wiphy, dev);
 
     wiphy->mgmt_stypes = wlan_hdd_txrx_stypes;
-    if (memcmp(pHddCtx->cfg_ini->crdaDefaultCountryCode,
-                      CFG_CRDA_DEFAULT_COUNTRY_CODE_DEFAULT , 2) != 0)
-    {
-       wiphy->flags |=   WIPHY_FLAG_CUSTOM_REGULATORY;
-    }
-    else
-    {
-       /* This will disable updating of NL channels from passive to
-        * active if a beacon is received on passive channel. */
-       wiphy->flags |=   WIPHY_FLAG_DISABLE_BEACON_HINTS;
-       wiphy->flags |=   WIPHY_FLAG_STRICT_REGULATORY;
-    }
+
+#ifndef CONFIG_ENABLE_LINUX_REG
+    /* the flag for the other case would be initialzed in
+       vos_init_wiphy_from_nv_bin */
+    wiphy->flags |= WIPHY_FLAG_STRICT_REGULATORY;
+#endif
+
+    /* This will disable updating of NL channels from passive to
+     * active if a beacon is received on passive channel. */
+    wiphy->flags |=   WIPHY_FLAG_DISABLE_BEACON_HINTS;
+
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0))
     wiphy->flags |= WIPHY_FLAG_HAVE_AP_SME
                  |  WIPHY_FLAG_AP_PROBE_RESP_OFFLOAD
                  |  WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL
                     | WIPHY_FLAG_OFFCHAN_TX;
+    wiphy->country_ie_pref = NL80211_COUNTRY_IE_IGNORE_CORE;
 #endif
+
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
     if (pCfg->isFastTransitionEnabled
 #ifdef FEATURE_WLAN_LFR
@@ -676,21 +677,23 @@ int wlan_hdd_cfg80211_init(struct device *dev,
                  |  WIPHY_FLAG_TDLS_EXTERNAL_SETUP;
 #endif
 #ifdef FEATURE_WLAN_SCAN_PNO
-    if (pCfg->configPNOScanSupport)
-    {
-        wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
-        wiphy->max_sched_scan_ssids = SIR_PNO_MAX_SUPP_NETWORKS;
-        wiphy->max_match_sets       = SIR_PNO_MAX_SUPP_NETWORKS;
-        wiphy->max_sched_scan_ie_len = SIR_MAC_MAX_IE_LENGTH;
-    }
+    wiphy->flags |= WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
+    wiphy->max_sched_scan_ssids = SIR_PNO_MAX_SUPP_NETWORKS;
+    wiphy->max_match_sets       = SIR_PNO_MAX_SUPP_NETWORKS;
+    wiphy->max_sched_scan_ie_len = SIR_MAC_MAX_IE_LENGTH;
 #endif/*FEATURE_WLAN_SCAN_PNO*/
 
+#ifdef CONFIG_ENABLE_LINUX_REG
     /* even with WIPHY_FLAG_CUSTOM_REGULATORY,
        driver can still register regulatory callback and
-       it will get CRDA setting in wiphy->band[], but
+       it will get regulatory settings in wiphy->band[], but
        driver need to determine what to do with both
        regulatory settings */
+
+    wiphy->reg_notifier = wlan_hdd_linux_reg_notifier;
+#else
     wiphy->reg_notifier = wlan_hdd_crda_reg_notifier;
+#endif
 
     wiphy->max_scan_ssids = MAX_SCAN_SSID;
 
@@ -800,39 +803,6 @@ int wlan_hdd_cfg80211_register(struct wiphy *wiphy)
 
     EXIT();
     return 0;
-}
-
-/* In this function we will try to get default country code from crda.
-   If the gCrdaDefaultCountryCode is configured in ini file,
-   we will try to call user space crda to get the regulatory settings for
-   that country. We will timeout if we can't get it from crda.
-   It's called by hdd_wlan_startup() after wlan_hdd_cfg80211_init.
-*/
-int wlan_hdd_get_crda_regd_entry(struct wiphy *wiphy, hdd_config_t *pCfg)
-{
-   hdd_context_t *pHddCtx = wiphy_priv(wiphy);
-   int status;
-
-   if (memcmp(pCfg->crdaDefaultCountryCode,
-              CFG_CRDA_DEFAULT_COUNTRY_CODE_DEFAULT , 2) != 0)
-   {
-      INIT_COMPLETION(pHddCtx->driver_crda_req);
-      regulatory_hint(wiphy, pCfg->crdaDefaultCountryCode);
-      status = wait_for_completion_interruptible_timeout(
-              &pHddCtx->driver_crda_req,
-              msecs_to_jiffies(CRDA_WAIT_TIME));
-      if (!status)
-      {
-          hddLog(VOS_TRACE_LEVEL_ERROR,"%s: timeout waiting for CRDA REQ",
-                  __func__);
-      }
-
-      /* if the country is not found from current regulatory.bin,
-         fall back to world domain */
-      if (is_crda_regulatory_entry_valid() == VOS_FALSE)
-         crda_regulatory_entry_default(pCfg->crdaDefaultCountryCode, NUM_REG_DOMAINS-1);
-   }
-   return 0;
 }
 
 /* In this function we are updating channel list when,
@@ -3853,9 +3823,9 @@ static int wlan_hdd_cfg80211_set_default_key( struct wiphy *wiphy,
        )
     {
         if ( (eCSR_ENCRYPT_TYPE_TKIP !=
-                pHddStaCtx->conn_info.ucEncryptionType) &&
+                pWextState->roamProfile.EncryptionType.encryptionType[0]) &&
              (eCSR_ENCRYPT_TYPE_AES !=
-                pHddStaCtx->conn_info.ucEncryptionType)
+                pWextState->roamProfile.EncryptionType.encryptionType[0])
            )
         {
             /* if default key index is not same as previous one,
@@ -4404,6 +4374,8 @@ static eHalStatus hdd_cfg80211_scan_done_callback(tHalHandle halHandle,
             "scanID = %d, returned status = %d\n",
             __func__, halHandle, pContext, (int) scanId, (int) status);
 
+    pScanInfo->mScanPendingCounter = 0;
+
     //Block on scan req completion variable. Can't wait forever though.
     ret = wait_for_completion_interruptible_timeout(
                          &pScanInfo->scan_req_completion_event,
@@ -4650,7 +4622,10 @@ int wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
 
     if (TRUE == pScanInfo->mScanPending)
     {
-        hddLog(VOS_TRACE_LEVEL_INFO, "%s: mScanPending is TRUE", __func__);
+        if ( MAX_PENDING_LOG > pScanInfo->mScanPendingCounter++ )
+        {
+            hddLog(VOS_TRACE_LEVEL_ERROR, "%s: mScanPending is TRUE", __func__);
+        }
         return -EBUSY;
     }
 
@@ -4660,7 +4635,7 @@ int wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
     //If no action frame pending
     if (0 != wlan_hdd_check_remain_on_channel(pAdapter))
     {
-        hddLog(VOS_TRACE_LEVEL_INFO, "%s: Remain On Channel Pending", __func__);
+        hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Remain On Channel Pending", __func__);
         return -EBUSY;
     }
 #ifdef FEATURE_WLAN_TDLS
