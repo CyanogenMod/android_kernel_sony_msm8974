@@ -245,7 +245,8 @@ SME_PMC_OBJS := $(SME_SRC_DIR)/pmc/pmcApi.o \
 SME_QOS_OBJS := $(SME_SRC_DIR)/QoS/sme_Qos.o
 
 SME_CMN_OBJS := $(SME_SRC_DIR)/sme_common/sme_Api.o \
-		$(SME_SRC_DIR)/sme_common/sme_FTApi.o
+		$(SME_SRC_DIR)/sme_common/sme_FTApi.o \
+		$(SME_SRC_DIR)/sme_common/sme_Trace.o
 
 SME_BTC_OBJS := $(SME_SRC_DIR)/btc/btcApi.o
 
@@ -493,6 +494,7 @@ CDEFINES :=	-DANI_BUS_TYPE_PLATFORM=1 \
 		-DWLAN_FEATURE_GTK_OFFLOAD \
 		-DWLAN_WAKEUP_EVENTS \
 		-DWLAN_KD_READY_NOTIFIER \
+		-DFEATURE_WLAN_BATCH_SCAN \
 		-DFEATURE_WLAN_LPHB
 
 ifneq ($(CONFIG_PRONTO_WLAN),)
@@ -504,6 +506,7 @@ ifeq ($(BUILD_DEBUG_VERSION),1)
 CDEFINES +=	-DWLAN_DEBUG \
 		-DTRACE_RECORD \
 		-DLIM_TRACE_RECORD \
+		-DSME_TRACE_RECORD \
 		-DPE_DEBUG_LOGW \
 		-DPE_DEBUG_LOGE \
 		-DDEBUG
@@ -571,26 +574,6 @@ ifeq ($(CONFIG_WLAN_FEATURE_11W),y)
 CDEFINES += -DWLAN_FEATURE_11W
 endif
 
-ifeq ($(CONFIG_ARCH_MSM8960),y)
-EXTRA_CFLAGS += -march=armv7-a
-CDEFINES += -DMSM_PLATFORM_8960
-endif
-
-ifeq ($(CONFIG_ARCH_MSM8X60),y)
-EXTRA_CFLAGS += -march=armv7-a
-CDEFINES += -DMSM_PLATFORM_8660
-endif
-
-ifeq ($(CONFIG_MACH_MSM7X30_SURF),y)
-EXTRA_CFLAGS += -march=armv7-a
-CDEFINES += -DMSM_PLATFORM_7x30
-endif
-
-ifeq ($(CONFIG_MACH_MSM7X27_SURF),y)
-EXTRA_CFLAGS += -march=armv6
-CDEFINES += -DMSM_PLATFORM_7x27
-endif
-
 ifeq ($(PANIC_ON_BUG),1)
 CDEFINES += -DPANIC_ON_BUG
 endif
@@ -600,6 +583,10 @@ CDEFINES += -DWDI_RE_ENABLE_WIFI_ON_WDI_TIMEOUT
 endif
 
 CDEFINES += -DWLAN_OPEN_SOURCE
+
+ifeq ($(CONFIG_ENABLE_LINUX_REG), y)
+CDEFINES += -DCONFIG_ENABLE_LINUX_REG
+endif
 
 # Fix build for GCC 4.7
 EXTRA_CFLAGS += -Wno-maybe-uninitialized -Wno-unused-function
