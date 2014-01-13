@@ -90,6 +90,7 @@ struct hdmi_tx_ctrl {
 
 	bool hdcp_feature_on;
 	bool ds_registered;
+	bool hpd_disabled;
 	u32 present_hdcp;
 	u8 aksv[5];
 	enum hdmi_hdcp_state hdcp_status;
