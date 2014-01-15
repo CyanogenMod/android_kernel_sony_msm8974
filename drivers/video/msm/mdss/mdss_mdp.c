@@ -80,6 +80,7 @@ struct msm_mdp_interface mdp5 = {
 static DEFINE_SPINLOCK(mdp_lock);
 static DEFINE_MUTEX(mdp_clk_lock);
 static DEFINE_MUTEX(bus_bw_lock);
+static DEFINE_MUTEX(mdp_iommu_lock);
 
 #define MDP_BUS_VECTOR_ENTRY(ab_val, ib_val)		\
 	{						\
@@ -652,6 +653,8 @@ void mdss_bus_bandwidth_ctrl(int enable)
 			pm_runtime_get_sync(&mdata->pdev->dev);
 			msm_bus_scale_client_update_request(
 				mdata->bus_hdl, mdata->current_bus_idx);
+			if (!mdata->handoff_pending)
+				mdss_iommu_attach(mdata);
 		}
 	}
 
@@ -782,8 +785,10 @@ int mdss_iommu_attach(struct mdss_data_type *mdata)
 	struct mdss_iommu_map_type *iomap;
 	int i;
 
+	mutex_lock(&mdp_iommu_lock);
 	if (mdata->iommu_attached) {
 		pr_debug("mdp iommu already attached\n");
+		mutex_unlock(&mdp_iommu_lock);
 		return 0;
 	}
 
@@ -800,6 +805,7 @@ int mdss_iommu_attach(struct mdss_data_type *mdata)
 	}
 
 	mdata->iommu_attached = true;
+	mutex_unlock(&mdp_iommu_lock);
 
 	return 0;
 }
@@ -810,8 +816,10 @@ int mdss_iommu_dettach(struct mdss_data_type *mdata)
 	struct mdss_iommu_map_type *iomap;
 	int i;
 
+	mutex_lock(&mdp_iommu_lock);
 	if (!mdata->iommu_attached) {
 		pr_debug("mdp iommu already dettached\n");
+		mutex_unlock(&mdp_iommu_lock);
 		return 0;
 	}
 
@@ -828,6 +836,7 @@ int mdss_iommu_dettach(struct mdss_data_type *mdata)
 	}
 
 	mdata->iommu_attached = false;
+	mutex_unlock(&mdp_iommu_lock);
 
 	return 0;
 }
@@ -1037,11 +1046,13 @@ void mdss_mdp_footswitch_ctrl_splash(int on)
 	if (mdata != NULL) {
 		if (on) {
 			pr_debug("Enable MDP FS for splash.\n");
+			mdata->handoff_pending = true;
 			regulator_enable(mdata->fs);
 			mdss_hw_init(mdata);
 		} else {
 			pr_debug("Disable MDP FS for splash.\n");
 			regulator_disable(mdata->fs);
+			mdata->handoff_pending = false;
 		}
 	} else {
 		pr_warn("mdss mdata not initialized\n");
