@@ -1770,13 +1770,21 @@ kgsl_iommu_unmap(struct kgsl_pagetable *pt,
 		return ret;
 	}
 
+	/*
+	 * Check to see if the current thread already holds the device mutex.
+	 * If it does not, then take the device mutex which is required for
+	 * flushing the tlb
+	 */
 	if (!mutex_is_locked(&device->mutex) ||
 		device->mutex.owner != current) {
 		mutex_lock(&device->mutex);
 		lock_taken = 1;
 	}
 
-	/* If current pt then flush immediately */
+	/*
+	 * Flush the tlb only if the iommu device is attached and the pagetable
+	 * hasn't been switched yet
+	 */
 	if (kgsl_mmu_is_perprocess(pt->mmu) &&
 		iommu->iommu_units[0].dev[KGSL_IOMMU_CONTEXT_USER].attached &&
 		kgsl_iommu_pt_equal(pt->mmu, pt,
