@@ -1,4 +1,5 @@
 /* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,6 +9,9 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * NOTE: This file has been modified by Sony Mobile Communications AB.
+ * Modifications are licensed under the License.
  */
 
 #include <linux/io.h>
@@ -15,14 +19,9 @@
 #include <mach/board.h>
 #include "mdss_hdmi_edid.h"
 
+#define EDID_DUMP
+
 #define DBC_START_OFFSET 4
-
-/*
- * As per CEA-861-E specification 7.5.2, there can be
- * upto 31 bytes following any tag (data block type).
- */
-#define MAX_DATA_BLOCK_SIZE 31
-
 #define HDMI_VSDB_3D_EVF_DATA_OFFSET(vsd) \
 	(!((vsd)[8] & BIT(7)) ? 9 : (!((vsd)[8] & BIT(6)) ? 11 : 13))
 
@@ -38,19 +37,6 @@
 
 /* Support for first 5 EDID blocks */
 #define MAX_EDID_BLOCK_SIZE (0x80 * 5)
-
-#define BUFF_SIZE_3D 128
-
-enum data_block_types {
-	RESERVED,
-	AUDIO_DATA_BLOCK,
-	VIDEO_DATA_BLOCK,
-	VENDOR_SPECIFIC_DATA_BLOCK,
-	SPEAKER_ALLOCATION_DATA_BLOCK,
-	VESA_DTC_DATA_BLOCK,
-	RESERVED2,
-	USE_EXTENDED_TAG
-};
 
 struct hdmi_edid_sink_data {
 	u32 disp_mode_list[HDMI_VFRMT_MAX];
@@ -407,6 +393,24 @@ static struct attribute_group hdmi_edid_fs_attrs_group = {
 	.attrs = hdmi_edid_fs_attrs,
 };
 
+#ifdef EDID_DUMP
+static void hdmi_edid_block_dump(int block, u8 *buf)
+{
+	int ndx;
+	char tmp_buff[16];
+
+	DEV_INFO("EDID BLK=%d\n", block);
+	for (ndx = 0; ndx < 0x80; ndx += 16) {
+		memset(tmp_buff, '\0', sizeof(tmp_buff));
+		snprintf(tmp_buff, 16, "%02X | ", ndx);
+		print_hex_dump(KERN_INFO, tmp_buff, DUMP_PREFIX_NONE, 16, 1,
+				(void *)&buf[ndx], 0x10, false);
+	}
+}
+#else
+static inline void hdmi_edid_block_dump(int block, u8 *buf) {}
+#endif
+
 static int hdmi_edid_read_block(struct hdmi_edid_ctrl *edid_ctrl, int block,
 	u8 *edid_buf)
 {
@@ -458,6 +462,8 @@ read_retry:
 
 	if (status)
 		goto error;
+
+	hdmi_edid_block_dump(block, edid_buf);
 
 	/* Calculate checksum */
 	check_sum = 0;
@@ -544,8 +550,7 @@ static void hdmi_edid_extract_extended_data_blocks(
 	}
 
 	/* A Tage code of 7 identifies extended data blocks */
-	etag = hdmi_edid_find_block(in_buf, start_offset, USE_EXTENDED_TAG,
-		&len);
+	etag = hdmi_edid_find_block(in_buf, start_offset, 7, &len);
 
 	while (etag != NULL) {
 		/* The extended data block should at least be 2 bytes long */
@@ -591,8 +596,7 @@ static void hdmi_edid_extract_extended_data_blocks(
 
 		/* There could be more that one extended data block */
 		start_offset = etag - in_buf + len + 1;
-		etag = hdmi_edid_find_block(in_buf, start_offset,
-			USE_EXTENDED_TAG, &len);
+		etag = hdmi_edid_find_block(in_buf, start_offset, 7, &len);
 	}
 } /* hdmi_edid_extract_extended_data_blocks */
 
@@ -607,12 +611,18 @@ static void hdmi_edid_extract_3d_present(struct hdmi_edid_ctrl *edid_ctrl,
 		return;
 	}
 
-	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET,
-		VENDOR_SPECIFIC_DATA_BLOCK, &len);
+	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, 3, &len);
 
 	edid_ctrl->present_3d = 0;
-	if (vsd == NULL || len == 0 || len > MAX_DATA_BLOCK_SIZE) {
-		DEV_DBG("%s: No/Invalid vendor Specific Data Block\n",
+	if (vsd == NULL || len < 9) {
+		DEV_DBG("%s: blk-id 3 not found or not long enough\n",
+			__func__);
+		return;
+	}
+
+	/* Check HDMI_Video_present. */
+	if (!(vsd[8] & BIT(5))) {
+		DEV_DBG("%s: 3D present is not found\n",
 			__func__);
 		return;
 	}
@@ -639,13 +649,9 @@ static void hdmi_edid_extract_audio_data_blocks(
 		return;
 	}
 
-	adb = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, AUDIO_DATA_BLOCK,
-		&len);
-	if ((adb == NULL) || (len > MAX_AUDIO_DATA_BLOCK_SIZE)) {
-		DEV_DBG("%s: No/Invalid Audio Data Block\n",
-			__func__);
+	adb = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, 1, &len);
+	if ((adb == NULL) || (len > MAX_AUDIO_DATA_BLOCK_SIZE))
 		return;
-	}
 
 	memcpy(edid_ctrl->audio_data_block, adb + 1, len);
 	edid_ctrl->adb_size = len;
@@ -671,13 +677,9 @@ static void hdmi_edid_extract_speaker_allocation_data(
 		return;
 	}
 
-	sadb = hdmi_edid_find_block(in_buf, DBC_START_OFFSET,
-		SPEAKER_ALLOCATION_DATA_BLOCK, &len);
-	if ((sadb == NULL) || (len != MAX_SPKR_ALLOC_DATA_BLOCK_SIZE)) {
-		DEV_DBG("%s: No/Invalid Speaker Allocation Data Block\n",
-			__func__);
+	sadb = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, 4, &len);
+	if ((sadb == NULL) || (len != MAX_SPKR_ALLOC_DATA_BLOCK_SIZE))
 		return;
-	}
 
 	memcpy(edid_ctrl->spkr_alloc_data_block, sadb + 1, len);
 	edid_ctrl->sadb_size = len;
@@ -704,11 +706,9 @@ static void hdmi_edid_extract_latency_fields(struct hdmi_edid_ctrl *edid_ctrl,
 		return;
 	}
 
-	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET,
-		VENDOR_SPECIFIC_DATA_BLOCK, &len);
+	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, 3, &len);
 
-	if (vsd == NULL || len == 0 || len > MAX_DATA_BLOCK_SIZE ||
-		!(vsd[8] & BIT(7))) {
+	if (vsd == NULL || len < 12 || !(vsd[8] & BIT(7))) {
 		edid_ctrl->video_latency = (u16)-1;
 		edid_ctrl->audio_latency = (u16)-1;
 		DEV_DBG("%s: EDID: No audio/video latency present\n", __func__);
@@ -732,17 +732,18 @@ static u32 hdmi_edid_extract_ieee_reg_id(struct hdmi_edid_ctrl *edid_ctrl,
 		return 0;
 	}
 
-	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET,
-		VENDOR_SPECIFIC_DATA_BLOCK, &len);
-
-	if (vsd == NULL || len == 0 || len > MAX_DATA_BLOCK_SIZE) {
-		DEV_DBG("%s: No/Invalid Vendor Specific Data Block\n",
-			__func__);
+	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, 3, &len);
+	if (vsd == NULL || len < 5)
 		return 0;
-	}
 
-	DEV_DBG("%s: EDID: VSD PhyAddr=%04x, MaxTMDS=%dMHz\n", __func__,
-		((u32)vsd[4] << 8) + (u32)vsd[5], (u32)vsd[7] * 5);
+	if (len < 7)
+		DEV_DBG("%s: EDID: VSD len=%d,PhyAddr=%04x, MaxTMDS=%dMHz\n",
+			__func__, len,
+			((u32)vsd[4] << 8) + (u32)vsd[5], (u32)0);
+	else
+		DEV_DBG("%s: EDID: VSD len=%d,PhyAddr=%04x, MaxTMDS=%dMHz\n",
+			__func__, len,
+			((u32)vsd[4] << 8) + (u32)vsd[5], (u32)vsd[7] * 5);
 
 	edid_ctrl->physical_address = ((u16)vsd[4] << 8) + (u16)vsd[5];
 
@@ -936,14 +937,11 @@ static int hdmi_edid_get_display_vsd_3d_mode(const u8 *data_buf,
 	u16 structure_all, structure_mask;
 	const u8 *vsd = num_of_cea_blocks ?
 		hdmi_edid_find_block(data_buf+0x80, DBC_START_OFFSET,
-			VENDOR_SPECIFIC_DATA_BLOCK, &len) : NULL;
+				3, &len) : NULL;
 	int i;
 
-	if (vsd == NULL || len == 0 || len > MAX_DATA_BLOCK_SIZE) {
-		DEV_DBG("%s: No/Invalid Vendor Specific Data Block\n",
-			__func__);
+	if (!vsd)
 		return -ENXIO;
-	}
 
 	offset = HDMI_VSDB_3D_EVF_DATA_OFFSET(vsd);
 	if (offset >= len - 1)
@@ -1085,11 +1083,10 @@ static void hdmi_edid_get_extended_video_formats(
 		return;
 	}
 
-	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET,
-		VENDOR_SPECIFIC_DATA_BLOCK, &db_len);
+	vsd = hdmi_edid_find_block(in_buf, DBC_START_OFFSET, 3, &db_len);
 
-	if (vsd == NULL || db_len == 0 || db_len > MAX_DATA_BLOCK_SIZE) {
-		DEV_DBG("%s: No/Invalid Vendor Specific Data Block\n",
+	if (vsd == NULL || db_len < 9) {
+		DEV_DBG("%s: blk-id 3 not found or not long enough\n",
 			__func__);
 		return;
 	}
@@ -1139,14 +1136,8 @@ static void hdmi_edid_get_display_mode(struct hdmi_edid_ctrl *edid_ctrl,
 	edid_blk0 = &data_buf[0x0];
 	edid_blk1 = &data_buf[0x80];
 	svd = num_of_cea_blocks ?
-		hdmi_edid_find_block(data_buf+0x80, DBC_START_OFFSET,
-			VIDEO_DATA_BLOCK, &len) : NULL;
-
-	if (svd == NULL || len == 0 || len > MAX_DATA_BLOCK_SIZE) {
-		DEV_DBG("%s: No/Invalid Video Data Block\n",
-			__func__);
-		return;
-	}
+		hdmi_edid_find_block(data_buf+0x80, DBC_START_OFFSET, 2,
+			&len) : NULL;
 
 	sink_data = &edid_ctrl->sink_data;
 

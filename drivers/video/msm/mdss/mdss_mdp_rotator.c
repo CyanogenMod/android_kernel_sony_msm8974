@@ -137,6 +137,7 @@ static int mdss_mdp_rotator_kickoff(struct mdss_mdp_ctl *ctl,
 {
 	int ret;
 	struct mdss_mdp_writeback_arg wb_args = {
+		.callback_fnc = NULL,
 		.data = dst_data,
 		.priv_data = rot,
 	};
@@ -437,6 +438,7 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 		rot->flags |= MDP_DEINTERLACE;
 		rot->src_rect.h /= 2;
 		rot->src_rect.y = DIV_ROUND_UP(rot->src_rect.y, 2);
+		rot->src_rect.y &= ~1;
 	}
 
 	rot->dst = rot->src_rect;

@@ -686,7 +686,6 @@ int msm_vdec_reqbufs(struct msm_vidc_inst *inst, struct v4l2_requestbuffers *b)
 int msm_vdec_g_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 {
 	const struct msm_vidc_format *fmt = NULL;
-	unsigned int *plane_sizes = NULL;
 	struct hfi_device *hdev;
 	int stride, scanlines;
 	int extra_idx = 0;
@@ -742,19 +741,9 @@ int msm_vdec_g_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 			goto exit;
 		}
 		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-			plane_sizes =
-			&inst->bufq[OUTPUT_PORT].vb2_bufq.plane_sizes[0];
 			for (i = 0; i < fmt->num_planes; ++i) {
-				if (plane_sizes[i] == 0) {
-					f->fmt.pix_mp.plane_fmt[i].sizeimage =
-						fmt->get_frame_size(i,
-						inst->capability.height.max,
-						inst->capability.width.max);
-					plane_sizes[i] =
-					f->fmt.pix_mp.plane_fmt[i].sizeimage;
-				} else
-					f->fmt.pix_mp.plane_fmt[i].sizeimage =
-						plane_sizes[i];
+				f->fmt.pix_mp.plane_fmt[i].sizeimage =
+				inst->bufq[OUTPUT_PORT].vb2_bufq.plane_sizes[i];
 			}
 		} else {
 			switch (fmt->fourcc) {
@@ -990,10 +979,8 @@ int msm_vdec_s_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 					inst->capability.height.max,
 					inst->capability.width.max);
 
-		if (f->fmt.pix_mp.plane_fmt[0].sizeimage > max_input_size ||
-			f->fmt.pix_mp.plane_fmt[0].sizeimage == 0) {
+		if (f->fmt.pix_mp.plane_fmt[0].sizeimage > max_input_size)
 			f->fmt.pix_mp.plane_fmt[0].sizeimage = max_input_size;
-		}
 
 		f->fmt.pix_mp.num_planes = fmt->num_planes;
 		for (i = 0; i < fmt->num_planes; ++i) {
@@ -1820,7 +1807,7 @@ static struct v4l2_ctrl **get_cluster(int type, int *size)
 int msm_vdec_ctrl_init(struct msm_vidc_inst *inst)
 {
 	int idx = 0;
-	struct v4l2_ctrl_config ctrl_cfg = {0};
+	struct v4l2_ctrl_config ctrl_cfg;
 	int ret_val = 0;
 
 	ret_val = v4l2_ctrl_handler_init(&inst->ctrl_handler, NUM_CTRLS);
