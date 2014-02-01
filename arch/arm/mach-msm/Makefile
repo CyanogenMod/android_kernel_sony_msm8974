@@ -453,3 +453,4 @@ CFLAGS_board-rdtags.o  := \
 	-D"INFO_VARIANT= \
 	\"$(if $(TARGET_BUILD_VARIANT),$(TARGET_BUILD_VARIANT),unknown)\"" \
 	-D"INFO_BUILDID=\"$(if $(SEMC_SYSTEM_VERSION),$(SEMC_SYSTEM_VERSION),private)\""
+CFLAGS_board-8974-console.o += -Idrivers/staging/android
