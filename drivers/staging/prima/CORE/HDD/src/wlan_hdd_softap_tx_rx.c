@@ -187,7 +187,7 @@ VOS_STATUS hdd_stop_trafficMonitor( hdd_adapter_t *pAdapter )
 
     status = wlan_hdd_validate_context(pHddCtx);
 
-    if (0 != status)
+    if (-ENODEV == status)
     {
         VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                    "%s: HDD context is not valid", __func__);
@@ -209,7 +209,7 @@ VOS_STATUS hdd_stop_trafficMonitor( hdd_adapter_t *pAdapter )
         vos_lock_destroy(&pHddCtx->traffic_monitor.trafficLock);
         pHddCtx->traffic_monitor.isInitialized = 0;
     }
-    return status;
+    return VOS_STATUS_SUCCESS;
 }
 
 /**============================================================================
@@ -439,6 +439,7 @@ int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
    ++pAdapter->hdd_stats.hddTxRxStats.txXmitQueued;
    ++pAdapter->hdd_stats.hddTxRxStats.txXmitQueuedAC[ac];
+   ++pAdapter->hdd_stats.hddTxRxStats.pkt_tx_count;
 
    if (1 == pktListSize)
    {
@@ -1552,29 +1553,14 @@ VOS_STATUS hdd_softap_RegisterSTA( hdd_adapter_t *pAdapter,
    VOS_TRACE( VOS_MODULE_ID_HDD_SOFTAP, VOS_TRACE_LEVEL_INFO,
               "register station \n");
    VOS_TRACE( VOS_MODULE_ID_HDD_SOFTAP, VOS_TRACE_LEVEL_INFO,
-              "station mac %02x:%02x:%02x:%02x:%02x:%02x",
-              staDesc.vSTAMACAddress.bytes[0],
-              staDesc.vSTAMACAddress.bytes[1],
-              staDesc.vSTAMACAddress.bytes[2],
-              staDesc.vSTAMACAddress.bytes[3],
-              staDesc.vSTAMACAddress.bytes[4],
-              staDesc.vSTAMACAddress.bytes[5]);
+              "station mac " MAC_ADDRESS_STR,
+              MAC_ADDR_ARRAY(staDesc.vSTAMACAddress.bytes));
    VOS_TRACE( VOS_MODULE_ID_HDD_SOFTAP, VOS_TRACE_LEVEL_INFO,
-              "BSSIDforIBSS %02x:%02x:%02x:%02x:%02x:%02x",
-              staDesc.vBSSIDforIBSS.bytes[0],
-              staDesc.vBSSIDforIBSS.bytes[1],
-              staDesc.vBSSIDforIBSS.bytes[2],
-              staDesc.vBSSIDforIBSS.bytes[3],
-              staDesc.vBSSIDforIBSS.bytes[4],
-              staDesc.vBSSIDforIBSS.bytes[5]);
+              "BSSIDforIBSS " MAC_ADDRESS_STR,
+              MAC_ADDR_ARRAY(staDesc.vBSSIDforIBSS.bytes));
    VOS_TRACE( VOS_MODULE_ID_HDD_SOFTAP, VOS_TRACE_LEVEL_INFO,
-              "SOFTAP SELFMAC %02x:%02x:%02x:%02x:%02x:%02x",
-              staDesc.vSelfMACAddress.bytes[0],
-              staDesc.vSelfMACAddress.bytes[1],
-              staDesc.vSelfMACAddress.bytes[2],
-              staDesc.vSelfMACAddress.bytes[3],
-              staDesc.vSelfMACAddress.bytes[4],
-              staDesc.vSelfMACAddress.bytes[5]);
+              "SOFTAP SELFMAC " MAC_ADDRESS_STR,
+              MAC_ADDR_ARRAY(staDesc.vSelfMACAddress.bytes));
 
    vosStatus = hdd_softap_init_tx_rx_sta(pAdapter, staId, &staDesc.vSTAMACAddress);
 
