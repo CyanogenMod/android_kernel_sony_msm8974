@@ -4248,6 +4248,8 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 #endif
 	char *orig_data = kstrdup(data, GFP_KERNEL);
 
+	sync_filesystem(sb);
+
 	/* Store the original options */
 	lock_super(sb);
 	old_sb_flags = sb->s_flags;
