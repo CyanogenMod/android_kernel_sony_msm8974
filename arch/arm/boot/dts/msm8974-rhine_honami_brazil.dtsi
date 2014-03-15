@@ -47,7 +47,7 @@
 			touch_vdd-supply = <&pm8941_l22>;
 			touch_vio-supply = <&pm8941_s3>;
 			synaptics,irq_gpio = <&msmgpio 61 0x00>;
-			pen_enabled = <1>;
+			pen_enabled = <0>;
 			preset_x_max = <1079>;
 			preset_y_max = <1919>;
 			preset_n_fingers = <10>;
