@@ -755,7 +755,7 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 	do_div(time, 1000);
 	dev->last_residency = (int)time;
 	local_irq_enable();
-	return idx;
+	return index;
 }
 
 static int lpm_suspend_enter(suspend_state_t state)
@@ -969,8 +969,9 @@ static int lpm_system_probe(struct platform_device *pdev)
 			goto fail;
 		}
 
-		key = "qcom,send-rpm-sleep-set";
-		l->notify_rpm = of_property_read_bool(node, key);
+		if (l->l2_mode == MSM_SPM_L2_MODE_GDHS ||
+				l->l2_mode == MSM_SPM_L2_MODE_POWER_COLLAPSE)
+			l->notify_rpm = true;
 
 		if (l->l2_mode >= MSM_SPM_L2_MODE_GDHS)
 			l->sync = true;
