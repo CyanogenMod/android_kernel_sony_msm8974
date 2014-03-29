@@ -13,7 +13,6 @@
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/ratelimit.h>
 #include <linux/irqreturn.h>
 #include "msm_csid.h"
 #include "msm_csid_hwreg.h"
@@ -489,7 +488,7 @@ static long msm_csid_cmd(struct csid_device *csid_dev, void *arg)
 		rc = msm_csid_release(csid_dev);
 		break;
 	default:
-		pr_err_ratelimited("%s: %d failed\n", __func__, __LINE__);
+		pr_err("%s: %d failed\n", __func__, __LINE__);
 		rc = -ENOIOCTLCMD;
 		break;
 	}

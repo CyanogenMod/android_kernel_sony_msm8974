@@ -15,7 +15,6 @@
 #define _MSM_H
 
 #include <linux/version.h>
-#include <linux/completion.h>
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
 #include <linux/pm_qos.h>
@@ -76,7 +75,7 @@ struct msm_command {
 struct msm_command_ack {
 	struct list_head list;
 	struct msm_queue_head command_q;
-	struct completion wait_complete;
+	wait_queue_head_t wait;
 	int stream_id;
 };
 
