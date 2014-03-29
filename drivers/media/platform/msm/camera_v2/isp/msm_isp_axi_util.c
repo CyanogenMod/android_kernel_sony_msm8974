@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -69,17 +69,9 @@ int msm_isp_validate_axi_request(struct msm_vfe_axi_shared_data *axi_data,
 	struct msm_vfe_axi_stream_request_cmd *stream_cfg_cmd)
 {
 	int rc = -1, i;
-	struct msm_vfe_axi_stream *stream_info = NULL;
-	uint32_t idx = 0;
-
-	if (NULL == stream_cfg_cmd || NULL == axi_data)
-		return rc;
-
-	idx = HANDLE_TO_IDX(stream_cfg_cmd->axi_stream_handle);
-	if (idx < MAX_NUM_STREAM)
-		stream_info = &axi_data->stream_info[idx];
-	else
-		return rc;
+	struct msm_vfe_axi_stream *stream_info =
+		&axi_data->stream_info[
+			HANDLE_TO_IDX(stream_cfg_cmd->axi_stream_handle)];
 
 	switch (stream_cfg_cmd->output_format) {
 	case V4L2_PIX_FMT_SBGGR8:
@@ -211,13 +203,8 @@ static uint32_t msm_isp_axi_get_plane_size(
 			size = plane_cfg[plane_idx].output_height *
 				plane_cfg[plane_idx].output_width;
 		else
-#if defined(CONFIG_SONY_CAM_V4L2)
 			size = plane_cfg[plane_idx].output_height *
 				plane_cfg[plane_idx].output_width / 2;
-#else
-			size = plane_cfg[plane_idx].output_height *
-				plane_cfg[plane_idx].output_width;
-#endif
 		break;
 	case V4L2_PIX_FMT_NV14:
 	case V4L2_PIX_FMT_NV41:
@@ -226,7 +213,7 @@ static uint32_t msm_isp_axi_get_plane_size(
 				plane_cfg[plane_idx].output_width;
 		else
 			size = plane_cfg[plane_idx].output_height *
-				plane_cfg[plane_idx].output_width;
+				plane_cfg[plane_idx].output_width / 8;
 		break;
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_NV61:
@@ -332,8 +319,7 @@ int msm_isp_axi_check_stream_state(
 				stream_info->state == PAUSED ||
 				stream_info->state == RESUME_PENDING ||
 				stream_info->state == RESUMING) &&
-				(stream_cfg_cmd->cmd == STOP_STREAM ||
-				stream_cfg_cmd->cmd == STOP_IMMEDIATELY)) {
+				stream_cfg_cmd->cmd == STOP_STREAM) {
 				stream_info->state = ACTIVE;
 			} else {
 				pr_err("%s: Invalid stream state: %d\n",
@@ -445,22 +431,11 @@ void msm_isp_calculate_framedrop(
 	struct msm_vfe_axi_shared_data *axi_data,
 	struct msm_vfe_axi_stream_request_cmd *stream_cfg_cmd)
 {
-	struct msm_vfe_axi_stream *stream_info = NULL;
-	uint32_t framedrop_period = 0;
-	uint8_t idx = 0;
-
-	if (NULL == axi_data || NULL == stream_cfg_cmd)
-		return;
-
-	idx = HANDLE_TO_IDX(stream_cfg_cmd->axi_stream_handle);
-
-	if (idx < MAX_NUM_STREAM)
-		stream_info = &axi_data->stream_info[idx];
-	else
-		return;
-
-	framedrop_period = msm_isp_get_framedrop_period(
-			stream_cfg_cmd->frame_skip_pattern);
+	struct msm_vfe_axi_stream *stream_info =
+		&axi_data->stream_info[
+		HANDLE_TO_IDX(stream_cfg_cmd->axi_stream_handle)];
+	uint32_t framedrop_period = msm_isp_get_framedrop_period(
+	   stream_cfg_cmd->frame_skip_pattern);
 
 	if (stream_cfg_cmd->frame_skip_pattern == SKIP_ALL)
 		stream_info->framedrop_pattern = 0x0;
@@ -548,17 +523,8 @@ int msm_isp_request_axi_stream(struct vfe_device *vfe_dev, void *arg)
 
 			io_format = stream_info->output_format;
 		}
-		rc = vfe_dev->hw_info->vfe_ops.axi_ops.cfg_io_format(
+		vfe_dev->hw_info->vfe_ops.axi_ops.cfg_io_format(
 			vfe_dev, stream_info->stream_src, io_format);
-		if (rc) {
-			pr_err("%s: cfg io format failed\n", __func__);
-			msm_isp_axi_free_wm(&vfe_dev->axi_data,
-				stream_info);
-			msm_isp_axi_destroy_stream(&vfe_dev->axi_data,
-				HANDLE_TO_IDX(
-				stream_cfg_cmd->axi_stream_handle));
-			return rc;
-		}
 	}
 
 	msm_isp_calculate_framedrop(&vfe_dev->axi_data, stream_cfg_cmd);
@@ -692,9 +658,7 @@ void msm_isp_axi_stream_update(struct vfe_device *vfe_dev)
 		}
 	}
 
-	if (vfe_dev->axi_data.pipeline_update == DISABLE_CAMIF ||
-		(vfe_dev->axi_data.pipeline_update ==
-		DISABLE_CAMIF_IMMEDIATELY)) {
+	if (vfe_dev->axi_data.pipeline_update == DISABLE_CAMIF) {
 		vfe_dev->hw_info->vfe_ops.stats_ops.
 			enable_module(vfe_dev, 0xFF, 0);
 		vfe_dev->axi_data.pipeline_update = NO_UPDATE;
@@ -800,9 +764,8 @@ static int msm_isp_cfg_ping_pong_address(struct vfe_device *vfe_dev,
 	rc = vfe_dev->buf_mgr->ops->get_buf(vfe_dev->buf_mgr,
 			vfe_dev->pdev->id, bufq_handle, &buf);
 	if (rc < 0) {
-		if(stream_idx < MAX_NUM_STREAM)
-			vfe_dev->error_info.
-				stream_framedrop_count[stream_idx]++;
+		vfe_dev->error_info.
+			stream_framedrop_count[stream_idx]++;
 		return rc;
 	}
 
@@ -906,10 +869,6 @@ static enum msm_isp_camif_update_state
 			(cur_pix_stream_cnt - pix_stream_cnt) == 0 &&
 			stream_cfg_cmd->cmd == STOP_STREAM)
 			return DISABLE_CAMIF;
-		else if (cur_pix_stream_cnt &&
-			(cur_pix_stream_cnt - pix_stream_cnt) == 0 &&
-			stream_cfg_cmd->cmd == STOP_IMMEDIATELY)
-			return DISABLE_CAMIF_IMMEDIATELY;
 	}
 	return NO_UPDATE;
 }
@@ -954,68 +913,6 @@ static void msm_isp_update_camif_output_count(
 					raw_stream_count--;
 		}
 	}
-}
-
-static void msm_isp_update_rdi_output_count(
-	  struct vfe_device *vfe_dev,
-	  struct msm_vfe_axi_stream_cfg_cmd *stream_cfg_cmd)
-{
-	int i;
-	struct msm_vfe_axi_stream *stream_info;
-	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
-
-	if (stream_cfg_cmd->num_streams > MAX_NUM_STREAM) {
-		return;
-	}
-
-	for (i = 0; i < stream_cfg_cmd->num_streams; i++) {
-		if (HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i])
-		> MAX_NUM_STREAM) {
-			return;
-		}
-		stream_info =
-			&axi_data->stream_info[
-			HANDLE_TO_IDX(stream_cfg_cmd->stream_handle[i])];
-		if (stream_info->stream_src < RDI_INTF_0)
-			continue;
-		if (stream_info->stream_src == RDI_INTF_0) {
-			if (stream_cfg_cmd->cmd == START_STREAM)
-				vfe_dev->axi_data.src_info[VFE_RAW_0].
-					raw_stream_count++;
-			else
-				vfe_dev->axi_data.src_info[VFE_RAW_0].
-					raw_stream_count--;
-		} else if (stream_info->stream_src == RDI_INTF_1) {
-			if (stream_cfg_cmd->cmd == START_STREAM)
-				vfe_dev->axi_data.src_info[VFE_RAW_1].
-					raw_stream_count++;
-			else
-				vfe_dev->axi_data.src_info[VFE_RAW_1].
-					raw_stream_count--;
-		} else if (stream_info->stream_src == RDI_INTF_2) {
-		       if (stream_cfg_cmd->cmd == START_STREAM)
-				vfe_dev->axi_data.src_info[VFE_RAW_2].
-					raw_stream_count++;
-			else
-				vfe_dev->axi_data.src_info[VFE_RAW_2].
-					raw_stream_count--;
-		}
-
-	}
-}
-
-static uint8_t msm_isp_get_curr_stream_cnt(
-	  struct vfe_device *vfe_dev)
-{
-         uint8_t curr_stream_cnt = 0;
-	  curr_stream_cnt = vfe_dev->axi_data.src_info[VFE_RAW_0].
-					raw_stream_count + vfe_dev->axi_data.src_info[VFE_RAW_1].
-					raw_stream_count + vfe_dev->axi_data.src_info[VFE_RAW_2].
-					raw_stream_count + vfe_dev->axi_data.src_info[VFE_PIX_0].
-					pix_stream_count  + vfe_dev->axi_data.src_info[VFE_PIX_0].
-					raw_stream_count;
-
-	  return curr_stream_cnt;
 }
 
 void msm_camera_io_dump_2(void __iomem *addr, int size)
@@ -1224,23 +1121,11 @@ static int msm_isp_start_axi_stream(struct vfe_device *vfe_dev,
 	vfe_dev->hw_info->vfe_ops.core_ops.reg_update(vfe_dev);
 
 	msm_isp_update_camif_output_count(vfe_dev, stream_cfg_cmd);
-	msm_isp_update_rdi_output_count(vfe_dev, stream_cfg_cmd);
 	if (camif_update == ENABLE_CAMIF) {
 		vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id = 0;
 		vfe_dev->hw_info->vfe_ops.core_ops.
 			update_camif_state(vfe_dev, camif_update);
 	}
-
-	if (vfe_dev->axi_data.src_info[VFE_RAW_0].raw_stream_count > 0) {
-		vfe_dev->axi_data.src_info[VFE_RAW_0].frame_id = 0;
-	}
-	else if (vfe_dev->axi_data.src_info[VFE_RAW_1].raw_stream_count > 0) {
-		vfe_dev->axi_data.src_info[VFE_RAW_1].frame_id = 0;
-	}
-	else if (vfe_dev->axi_data.src_info[VFE_RAW_2].raw_stream_count > 0) {
-		vfe_dev->axi_data.src_info[VFE_RAW_2].frame_id = 0;
-	}
-
 	if (wait_for_complete)
 		rc = msm_isp_axi_wait_for_cfg_done(vfe_dev, camif_update);
 
@@ -1252,7 +1137,7 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 			enum msm_isp_camif_update_state camif_update)
 {
 	int i, rc = 0;
-	uint8_t wait_for_complete = 0, cur_stream_cnt = 0;
+	uint8_t wait_for_complete = 0;
 	struct msm_vfe_axi_stream *stream_info;
 	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
 
@@ -1304,19 +1189,7 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 	if (camif_update == DISABLE_CAMIF)
 		vfe_dev->hw_info->vfe_ops.core_ops.
 			update_camif_state(vfe_dev, DISABLE_CAMIF);
-	else if (camif_update == DISABLE_CAMIF_IMMEDIATELY)
-		vfe_dev->hw_info->vfe_ops.core_ops.
-			update_camif_state(vfe_dev, DISABLE_CAMIF_IMMEDIATELY);
 	msm_isp_update_camif_output_count(vfe_dev, stream_cfg_cmd);
-	msm_isp_update_rdi_output_count(vfe_dev, stream_cfg_cmd);
-	cur_stream_cnt = msm_isp_get_curr_stream_cnt(vfe_dev);
-	if (cur_stream_cnt == 0) {
-		if (camif_update == DISABLE_CAMIF_IMMEDIATELY) {
-			vfe_dev->hw_info->vfe_ops.axi_ops.halt(vfe_dev);
-		}
-		vfe_dev->hw_info->vfe_ops.core_ops.reset_hw(vfe_dev, ISP_RST_SOFT);
-		vfe_dev->hw_info->vfe_ops.core_ops.init_hw_reg(vfe_dev);
-	}
 
 	for (i = 0; i < stream_cfg_cmd->num_streams; i++) {
 		stream_info = &axi_data->stream_info[

@@ -669,9 +669,7 @@ int msm_camera_power_down(struct msm_camera_power_ctrl_t *ctrl,
 			}
 			gpio_set_value_cansleep(
 				ctrl->gpio_conf->gpio_num_info->gpio_num
-				[power_setting->seq_val],
-				ctrl->gpio_conf->gpio_num_info->gpio_num
-				[power_setting->config_val]);
+				[power_setting->seq_val], GPIOF_OUT_INIT_LOW);
 			break;
 		case SENSOR_VREG:
 			if (power_setting->seq_val >= CAM_VREG_MAX) {

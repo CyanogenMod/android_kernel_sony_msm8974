@@ -1,6 +1,6 @@
 /* drivers/media/platform/msm/camera_v2/sensor/sony_camera_v4l2.h
  *
- * Copyright (C) 2012 Sony Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2, as
@@ -12,8 +12,6 @@
 #define __LINUX_SONY_CAMERA_V4L2_H
 
 #ifdef __KERNEL__
-
-#define MAX_PLL_NUM 30
 
 enum sony_camera_cmd {
 	SONY_CAM_VDIG,
@@ -29,8 +27,7 @@ enum sony_camera_cmd {
 
 struct sony_camera_seq {
 	enum sony_camera_cmd	cmd;
-	int			val1;
-	int			val2;
+	int			val;
 	int			wait;
 };
 
@@ -40,11 +37,6 @@ struct sony_camera_module {
 	struct sony_camera_seq	*seq_off;
 	uint32_t		mount_angle;
 	uint32_t		sensor_rotation;
-	uint32_t		sensor_facing;
-	uint32_t		has_3a;
-	uint32_t		pll_num;
-	uint32_t		pll[MAX_PLL_NUM];
-	uint32_t		reserved;
 };
 
 struct sony_camera_info {

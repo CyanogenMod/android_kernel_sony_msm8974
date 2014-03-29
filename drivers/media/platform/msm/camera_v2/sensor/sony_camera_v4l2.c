@@ -1,6 +1,6 @@
 /* drivers/media/platform/msm/camera_v2/sensor/sony_camera_v4l2.c
  *
- * Copyright (C) 2012 Sony Mobile Communications AB.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2, as
@@ -78,12 +78,8 @@ struct sony_camera_data {
 struct camera_dev_info {
 	uint32_t			mount_angle;
 	uint32_t			sensor_rotation;
-	uint32_t			sensor_facing;
-	uint32_t			has_3a;
 	uint32_t			eeprom_size;
 	uint8_t				eeprom[EEPROM_MAX_DATA_LEN];
-	uint32_t			pll_num;
-	uint32_t			pll[MAX_PLL_NUM];
 };
 
 static struct sony_camera_info *camera_info;
@@ -121,7 +117,7 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 	int count = 0;
 	uint16_t i = 0;
 	uint16_t j = 0;
-	uint32_t val_u32[4] = {0};
+	uint32_t val_u32[3] = {0};
 	struct device_node *of_node = pdev->dev.of_node;
 	struct device_node *of_node_power_sequence = NULL;
 	struct device_node *of_node_modules = NULL;
@@ -235,41 +231,6 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 			goto fail;
 		}
 
-		rc = of_property_read_u32(of_node_modules,
-				"sensor_facing",
-				&camera_info[id].modules[i].sensor_facing);
-
-		if (rc < 0) {
-			LOGE("%s failed %d\n", __func__, __LINE__);
-			goto fail;
-		}
-
-		rc = of_property_read_u32(of_node_modules,
-				"has_3a",
-				&camera_info[id].modules[i].has_3a);
-
-		if (rc < 0) {
-			LOGE("%s failed %d\n", __func__, __LINE__);
-			goto fail;
-		}
-
-		rc = of_property_read_u32(of_node_modules,
-				"pll_num",
-				&camera_info[id].modules[i].pll_num);
-		if (rc < 0) {
-			LOGE("%s failed %d\n", __func__, __LINE__);
-			goto fail;
-		}
-
-		rc = of_property_read_u32_array(of_node_modules,
-				"pll",
-				camera_info[id].modules[i].pll,
-				camera_info[id].modules[i].pll_num);
-		if (rc < 0) {
-			LOGE("%s failed %d\n", __func__, __LINE__);
-			goto fail;
-		}
-
 		of_node_modules_power_off = of_find_node_by_name(
 						of_node_modules,
 						"power_off");
@@ -306,19 +267,17 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 
 			rc = of_property_read_u32_array(
 				of_node_modules_power_off, power_order_name,
-				&val_u32[0], 4);
+				&val_u32[0], 3);
 			if (rc < 0) {
 				LOGE("%s failed %d\n", __func__, __LINE__);
 				goto fail;
 			}
 			camera_info[id].modules[i].seq_off[j].cmd =
 								val_u32[0];
-			camera_info[id].modules[i].seq_off[j].val1 =
+			camera_info[id].modules[i].seq_off[j].val =
 								val_u32[1];
-			camera_info[id].modules[i].seq_off[j].val2 =
-								val_u32[2];
 			camera_info[id].modules[i].seq_off[j].wait =
-								val_u32[3];
+								val_u32[2];
 		}
 
 		of_node_modules_power_on = of_find_node_by_name(of_node_modules,
@@ -357,19 +316,17 @@ static int sony_util_camera_info_init(struct platform_device *pdev, uint16_t id)
 
 			rc = of_property_read_u32_array(
 				of_node_modules_power_on, power_order_name,
-				&val_u32[0], 4);
+				&val_u32[0], 3);
 			if (rc < 0) {
 				LOGE("%s failed %d\n", __func__, __LINE__);
 				goto fail;
 			}
 			camera_info[id].modules[i].seq_on[j].cmd =
 								val_u32[0];
-			camera_info[id].modules[i].seq_on[j].val1 =
+			camera_info[id].modules[i].seq_on[j].val =
 								val_u32[1];
-			camera_info[id].modules[i].seq_on[j].val2 =
-								val_u32[2];
 			camera_info[id].modules[i].seq_on[j].wait =
-								val_u32[3];
+								val_u32[2];
 		}
 	}
 
@@ -459,8 +416,7 @@ static int sony_util_gpio_set(struct msm_sensor_ctrl_t *s_ctrl,
 }
 
 static int sony_util_vreg_set(struct msm_sensor_ctrl_t *s_ctrl,
-	struct sony_camera_data *data, enum sony_camera_cmd cmd, int level,
-	int op_mode)
+	struct sony_camera_data *data, enum sony_camera_cmd cmd, int level)
 {
 	int rc = 0;
 	struct regulator *vreg;
@@ -526,34 +482,20 @@ static int sony_util_vreg_set(struct msm_sensor_ctrl_t *s_ctrl,
 
 	level *= 1000;
 	if (level >= 0) {
-		if (level > 0) {
+		if (level > 0)
 			rc = regulator_set_voltage(vreg, level, level);
+		if (rc == 0) {
+			rc = regulator_enable(vreg);
 			if (rc < 0)
-				goto set_voltage_fail;
+				regulator_disable(vreg);
 		}
-		if (op_mode > 0) {
-			rc = regulator_set_optimum_mode(vreg, op_mode);
-			if (rc < 0)
-				goto set_voltage_fail;
-		}
-		rc = regulator_enable(vreg);
 		if (rc < 0)
-			goto enable_fail;
+			regulator_put(vreg);
 	} else {
-		if (op_mode == 0)
-			(void)regulator_set_optimum_mode(vreg, 0);
-		(void)regulator_disable(vreg);
+		rc = regulator_disable(vreg);
 		regulator_put(vreg);
 	}
-	goto exit;
 
-enable_fail:
-	(void)regulator_set_optimum_mode(vreg, 0);
-
-set_voltage_fail:
-	regulator_put(vreg);
-
-exit:
 	if (rc < 0 || level < 0) {
 		if (vreg == data->cam_vdig)
 			data->cam_vdig = NULL;
@@ -565,6 +507,7 @@ exit:
 			data->cam_vaf = NULL;
 	}
 
+exit:
 	if (rc < 0)
 		LOGE("error happened (%d)\n", rc);
 	return rc;
@@ -733,7 +676,7 @@ static int sony_util_power_ctrl(struct msm_sensor_ctrl_t *s_ctrl,
 			rc = sony_util_gpio_set(s_ctrl,
 				s_ctrl->sensordata
 					->gpio_conf->cam_gpio_req_tbl[1].gpio,
-				seq->val1);
+				seq->val);
 			break;
 		case SONY_GPIO_AF:
 			if (camera_info[id].gpio_af <= 0) {
@@ -742,22 +685,22 @@ static int sony_util_power_ctrl(struct msm_sensor_ctrl_t *s_ctrl,
 			}
 
 			rc = sony_util_gpio_set(s_ctrl,
-				camera_info[id].gpio_af, seq->val1);
+				camera_info[id].gpio_af, seq->val);
 			break;
 		case SONY_CAM_VDIG:
 		case SONY_CAM_VIO:
 		case SONY_CAM_VANA:
 		case SONY_CAM_VAF:
 			rc = sony_util_vreg_set(s_ctrl,
-				data, seq->cmd, seq->val1, seq->val2);
+				data, seq->cmd, seq->val);
 			break;
 		case SONY_CAM_CLK:
-			rc = sony_util_mclk_set(s_ctrl, seq->val1);
+			rc = sony_util_mclk_set(s_ctrl, seq->val);
 			break;
 		case SONY_I2C_WRITE:
 			rc = sony_util_cam_i2c_write(s_ctrl,
 				camera_info[id].i2c_addr,
-				seq->val1,
+				seq->val,
 				MSM_CAMERA_I2C_WORD_ADDR,
 				1,
 				&iodt);
@@ -792,15 +735,6 @@ static ssize_t sony_camera_info_read(struct device *ldev,
 				camera_data[id].module->mount_angle;
 			info->sensor_rotation =
 				camera_data[id].module->sensor_rotation;
-			info->sensor_facing =
-				camera_data[id].module->sensor_facing;
-			info->has_3a =
-				camera_data[id].module->has_3a;
-			info->pll_num =
-				camera_data[id].module->pll_num;
-			memset(info->pll, 0, sizeof(info->pll));
-			memcpy(info->pll, camera_data[id].module->pll,
-				sizeof(info->pll));
 			memset(info->eeprom, 0, sizeof(info->eeprom));
 			memcpy(info->eeprom, camera_data[id].eeprom,
 				camera_data[id].eeprom_len);
@@ -890,87 +824,7 @@ static int sony_eeprom_load(struct msm_sensor_ctrl_t *s_ctrl)
 		}
 		len = i;
 	} else {
-		len = camera_info[id].eeprom_max_len;
-
-		d[0] = 0x03;
-		d[1] = 0x25;
-		rc = sony_util_cam_i2c_write(
-			&camera_data[id].s_ctrl,
-			camera_info[id].eeprom_addr,
-			0x0010, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-		if (rc < 0)
-			goto exit;
-
-		d[0] = 0x08;
-		d[1] = 0x00;
-		rc = sony_util_cam_i2c_write(
-			&camera_data[id].s_ctrl,
-			camera_info[id].eeprom_addr,
-			0x0012, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-		if (rc < 0)
-			goto exit;
-
-		i = 0;
-		do {
-			msleep(20);
-			i++;
-			rc = sony_util_cam_i2c_read(
-				 &camera_data[id].s_ctrl,
-				 camera_info[id].eeprom_addr,
-				 0x0014, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-			if (rc < 0)
-				goto exit;
-		} while ((d[0] & 0x80) && i < 100);
-
-		if (i >= 100) {
-			rc = -ENODEV;
-			goto exit;
-		}
-
-		d[0] = 0x45;
-		d[1] = 0x04;
-		rc = sony_util_cam_i2c_write(
-			&camera_data[id].s_ctrl,
-			camera_info[id].eeprom_addr,
-			0x0018, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-		if (rc < 0)
-			goto exit;
-
-		i = 0;
-		do {
-			msleep(20);
-			i++;
-			rc = sony_util_cam_i2c_read(
-				 &camera_data[id].s_ctrl,
-				 camera_info[id].eeprom_addr,
-				 0x0018, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-			if (rc < 0)
-				goto exit;
-		} while ((d[1] & 0x40) && i < 100);
-
-		if (i >= 100) {
-			rc = -ENODEV;
-			goto exit;
-		}
-
-		d[0] = 0x05;
-		d[1] = 0x20;
-		rc = sony_util_cam_i2c_write(
-			&camera_data[id].s_ctrl,
-			camera_info[id].eeprom_addr,
-			0x001A, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-		if (rc < 0)
-			goto exit;
-
-		d[0] = 0x05;
-		d[1] = 0x64;
-		rc = sony_util_cam_i2c_write(
-			&camera_data[id].s_ctrl,
-			camera_info[id].eeprom_addr,
-			0x001A, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
-		if (rc < 0)
-			goto exit;
-
+		len = 16;
 		rc = sony_util_cam_i2c_read(&camera_data[id].s_ctrl,
 					camera_info[id].eeprom_addr,
 					0x0000, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
@@ -1034,6 +888,32 @@ static int sony_eeprom_load(struct msm_sensor_ctrl_t *s_ctrl)
 			else
 				memcpy(d, MODULE_APT01BM0, SENSOR_NAME_LEN);
 		} else if (((uint16_t)d[0] << 8 | d[1]) == SENSOR_ID_MT9V115) {
+			d[0] = 0x00;
+			d[1] = 0x00;
+			rc = sony_util_cam_i2c_write(
+				&camera_data[id].s_ctrl,
+				camera_info[id].eeprom_addr,
+				0x0018, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
+			if (rc < 0)
+				goto exit;
+
+			i = 0;
+			do {
+				msleep(20);
+				i++;
+				rc = sony_util_cam_i2c_read(
+					&camera_data[id].s_ctrl,
+					camera_info[id].eeprom_addr,
+					0x0018, MSM_CAMERA_I2C_WORD_ADDR, 2, d);
+				if (rc < 0)
+					goto exit;
+			} while ((d[1] & 0x40) && i < 100);
+
+			if (i >= 100) {
+				rc = -ENODEV;
+				goto exit;
+			}
+
 			rc = sony_util_cam_i2c_read(
 					&camera_data[id].s_ctrl,
 					camera_info[id].eeprom_addr,

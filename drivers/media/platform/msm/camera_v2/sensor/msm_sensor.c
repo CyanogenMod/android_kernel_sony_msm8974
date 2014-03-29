@@ -1702,8 +1702,13 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
+#if defined(CONFIG_SONY_CAM_V4L2)
+			pr_info("%s:%d sensor state %d\n", __func__, __LINE__,
+				s_ctrl->sensor_state);
+#else
 			pr_err("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
+#endif
 		} else {
 			rc = -EFAULT;
 		}
@@ -1730,8 +1735,13 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
+#if defined(CONFIG_SONY_CAM_V4L2)
+			pr_info("%s:%d sensor state %d\n", __func__, __LINE__,
+				s_ctrl->sensor_state);
+#else
 			pr_err("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
+#endif
 		} else {
 			rc = -EFAULT;
 		}
@@ -1866,8 +1876,6 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev, void *data)
 		(struct msm_sensor_ctrl_t *)data;
 	struct msm_camera_cci_client *cci_client = NULL;
 	uint32_t session_id;
-	unsigned long mount_pos;
-
 	s_ctrl->pdev = pdev;
 	s_ctrl->dev = &pdev->dev;
 	CDBG("%s called data %p\n", __func__, data);
@@ -1933,11 +1941,6 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev, void *data)
 	s_ctrl->msm_sd.sd.entity.group_id = MSM_CAMERA_SUBDEV_SENSOR;
 	s_ctrl->msm_sd.sd.entity.name =
 		s_ctrl->msm_sd.sd.name;
-	mount_pos = s_ctrl->sensordata->sensor_init_params->position;
-	mount_pos = mount_pos << 8;
-	mount_pos = mount_pos |
-	(s_ctrl->sensordata->sensor_init_params->sensor_mount_angle / 90);
-	s_ctrl->msm_sd.sd.entity.flags = mount_pos;
 
 	rc = camera_init_v4l2(&s_ctrl->pdev->dev, &session_id);
 	CDBG("%s rc %d session_id %d\n", __func__, rc, session_id);
@@ -1956,8 +1959,6 @@ int32_t msm_sensor_i2c_probe(struct i2c_client *client,
 {
 	int rc = 0;
 	uint32_t session_id;
-	unsigned long mount_pos;
-
 	CDBG("%s %s_i2c_probe called\n", __func__, client->name);
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		pr_err("%s %s i2c_check_functionality failed\n",
@@ -2053,12 +2054,6 @@ int32_t msm_sensor_i2c_probe(struct i2c_client *client,
 	s_ctrl->msm_sd.sd.entity.group_id = MSM_CAMERA_SUBDEV_SENSOR;
 	s_ctrl->msm_sd.sd.entity.name =
 		s_ctrl->msm_sd.sd.name;
-
-	mount_pos = s_ctrl->sensordata->sensor_init_params->position;
-	mount_pos = mount_pos << 8;
-	mount_pos = mount_pos |
-	(s_ctrl->sensordata->sensor_init_params->sensor_mount_angle / 90);
-	s_ctrl->msm_sd.sd.entity.flags = mount_pos;
 
 	rc = camera_init_v4l2(&s_ctrl->sensor_i2c_client->client->dev,
 		&session_id);

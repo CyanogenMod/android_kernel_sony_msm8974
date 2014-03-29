@@ -1,5 +1,5 @@
 /* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2014 Sony Mobile Communications AB.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -671,11 +671,7 @@ int msm_jpeg_ioctl_hw_cmd(struct msm_jpeg_device *pgmn_dev,
 			JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
 			return -EFAULT;
 		}
-#if defined(CONFIG_SONY_CAM_V4L2)
-	} else if (-1 != is_copy_to_user) {
-#else
 	} else {
-#endif
 		return is_copy_to_user;
 	}
 
@@ -812,36 +808,6 @@ int msm_jpeg_ioctl_test_dump_region(struct msm_jpeg_device *pgmn_dev,
 	return 0;
 }
 
-int msm_jpeg_ioctl_set_clk_rate(struct msm_jpeg_device *pgmn_dev,
-	unsigned long arg)
-{
-	long clk_rate;
-	int rc;
-
-	if ((pgmn_dev->state != MSM_JPEG_INIT) &&
-		(pgmn_dev->state != MSM_JPEG_RESET)) {
-		JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
-		return -EFAULT;
-	}
-	if (get_user(clk_rate, (long __user *)arg)) {
-		JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
-		return -EFAULT;
-	}
-	JPEG_DBG("%s:%d] Requested clk rate %ld\n", __func__, __LINE__,
-		clk_rate);
-	if (clk_rate < 0) {
-		JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
-		return -EFAULT;
-	}
-	rc = msm_jpeg_platform_set_clk_rate(pgmn_dev, clk_rate);
-	if (rc < 0) {
-		JPEG_PR_ERR("%s: clk failed rc = %d\n", __func__, rc);
-		return -EFAULT;
-	}
-
-	return 0;
-}
-
 long __msm_jpeg_ioctl(struct msm_jpeg_device *pgmn_dev,
 	unsigned int cmd, unsigned long arg)
 {
@@ -911,9 +877,6 @@ long __msm_jpeg_ioctl(struct msm_jpeg_device *pgmn_dev,
 		rc = msm_jpeg_ioctl_test_dump_region(pgmn_dev, arg);
 		break;
 
-	case MSM_JPEG_IOCTL_SET_CLK_RATE:
-		rc = msm_jpeg_ioctl_set_clk_rate(pgmn_dev, arg);
-		break;
 	default:
 		pr_err_ratelimited("%s:%d] cmd = %d not supported\n",
 			__func__, __LINE__, _IOC_NR(cmd));
@@ -948,8 +911,13 @@ int __msm_jpeg_init(struct msm_jpeg_device *pgmn_dev)
 
 	mutex_init(&pgmn_dev->lock);
 
+#if defined(CONFIG_SONY_CAM_V4L2)
+	pr_info("%s:%d] Jpeg Device id %d", __func__, __LINE__,
+		   pgmn_dev->pdev->id);
+#else
 	pr_err("%s:%d] Jpeg Device id %d", __func__, __LINE__,
 		   pgmn_dev->pdev->id);
+#endif
 	idx = pgmn_dev->pdev->id;
 	pgmn_dev->idx = idx;
 	pgmn_dev->iommu_cnt = 1;

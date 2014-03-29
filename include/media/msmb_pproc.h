@@ -90,7 +90,6 @@ struct msm_cpp_buffer_info_t {
 	uint32_t offset;
 	uint8_t native_buff;
 	uint8_t processed_divert;
-	uint32_t identity;
 };
 
 struct msm_cpp_stream_buff_info_t {

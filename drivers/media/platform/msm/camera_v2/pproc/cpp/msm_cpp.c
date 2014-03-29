@@ -1,4 +1,5 @@
 /* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -823,7 +824,7 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 
 		/*Start firmware loading*/
 		msm_cpp_write(MSM_CPP_CMD_FW_LOAD, cpp_dev->base);
-		msm_cpp_write(fw->size, cpp_dev->base);
+		msm_cpp_write(MSM_CPP_END_ADDRESS, cpp_dev->base);
 		msm_cpp_write(MSM_CPP_START_ADDRESS, cpp_dev->base);
 
 		if (ptr_bin) {
@@ -936,6 +937,38 @@ static int cpp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 
 	cpp_dev->cpp_open_cnt--;
 	if (cpp_dev->cpp_open_cnt == 0) {
+#if defined(CONFIG_SONY_CAM_V4L2)
+		CPP_DBG("%s: irq_status: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x4));
+		CPP_DBG("%s: DEBUG_SP: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x40));
+		CPP_DBG("%s: DEBUG_T: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x44));
+		CPP_DBG("%s: DEBUG_N: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x48));
+		CPP_DBG("%s: DEBUG_R: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x4C));
+		CPP_DBG("%s: DEBUG_OPPC: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x50));
+		CPP_DBG("%s: DEBUG_MO: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x54));
+		CPP_DBG("%s: DEBUG_TIMER0: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x60));
+		CPP_DBG("%s: DEBUG_TIMER1: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x64));
+		CPP_DBG("%s: DEBUG_GPI: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x70));
+		CPP_DBG("%s: DEBUG_GPO: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x74));
+		CPP_DBG("%s: DEBUG_T0: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x80));
+		CPP_DBG("%s: DEBUG_R0: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x84));
+		CPP_DBG("%s: DEBUG_T1: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x88));
+		CPP_DBG("%s: DEBUG_R1: 0x%x\n", __func__,
+			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x8C));
+#else
 		pr_debug("irq_status: 0x%x\n",
 			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x4));
 		pr_debug("DEBUG_SP: 0x%x\n",
@@ -966,6 +999,7 @@ static int cpp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x88));
 		pr_debug("DEBUG_R1: 0x%x\n",
 			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x8C));
+#endif
 		msm_camera_io_w(0x0, cpp_dev->base + MSM_CPP_MICRO_CLKEN_CTL);
 		cpp_deinit_mem(cpp_dev);
 		iommu_detach_device(cpp_dev->domain, cpp_dev->iommu_ctx);
@@ -1258,8 +1292,8 @@ static int msm_cpp_cfg(struct cpp_device *cpp_dev,
 
 	in_phyaddr = msm_cpp_fetch_buffer_info(cpp_dev,
 		&new_frame->input_buffer_info,
-		((new_frame->input_buffer_info.identity >> 16) & 0xFFFF),
-		(new_frame->input_buffer_info.identity & 0xFFFF), &in_fd);
+		((new_frame->identity >> 16) & 0xFFFF),
+		(new_frame->identity & 0xFFFF), &in_fd);
 	if (!in_phyaddr) {
 		pr_err("error gettting input physical address\n");
 		rc = -EINVAL;
@@ -1688,7 +1722,6 @@ static long msm_cpp_subdev_do_ioctl(
 		struct cpp_device *cpp_dev = v4l2_get_subdevdata(sd);
 		struct msm_camera_v4l2_ioctl_t *ioctl_ptr = arg;
 		struct msm_cpp_frame_info_t inst_info;
-		memset(&inst_info, 0, sizeof(struct msm_cpp_frame_info_t));
 		for (i = 0; i < MAX_ACTIVE_CPP_INSTANCE; i++) {
 			if (cpp_dev->cpp_subscribe_list[i].vfh == vfh) {
 				inst_info.inst_id = i;
