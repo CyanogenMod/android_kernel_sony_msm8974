@@ -19,6 +19,7 @@
 #include <linux/msm_mdp.h>
 #include <linux/platform_device.h>
 #include <linux/notifier.h>
+#include <linux/kref.h>
 
 #include "mdss.h"
 #include "mdss_mdp_hwio.h"
@@ -368,7 +369,9 @@ struct mdss_mdp_pipe {
 	u32 xin_id;
 	struct mdss_mdp_shared_reg_ctrl clk_ctrl;
 	struct mdss_mdp_shared_reg_ctrl clk_status;
-	atomic_t ref_cnt;
+
+	struct kref kref;
+
 	u32 play_cnt;
 	int pid;
 	bool is_handed_off;
