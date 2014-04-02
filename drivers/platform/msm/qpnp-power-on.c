@@ -68,8 +68,8 @@
 
 #define QPNP_PON_S3_SRC_KPDPWR			0
 #define QPNP_PON_S3_SRC_RESIN			1
-#define QPNP_PON_S3_SRC_KPDPWR_OR_RESIN		2
-#define QPNP_PON_S3_SRC_KPDPWR_AND_RESIN	3
+#define QPNP_PON_S3_SRC_KPDPWR_AND_RESIN	2
+#define QPNP_PON_S3_SRC_KPDPWR_OR_RESIN		3
 #define QPNP_PON_S3_SRC_MASK			0x3
 
 #define QPNP_PON_WARM_RESET_TFT			BIT(4)
@@ -95,6 +95,12 @@
 #define QPNP_PON_WD_EN			BIT(7)
 #define QPNP_PON_RESET_EN			BIT(7)
 #define QPNP_PON_POWER_OFF_MASK			0xF
+
+#define QPNP_PON_S3_SRC_KPDPWR			0
+#define QPNP_PON_S3_SRC_RESIN			1
+#define QPNP_PON_S3_SRC_KPDPWR_AND_RESIN	2
+#define QPNP_PON_S3_SRC_KPDPWR_OR_RESIN		3
+#define QPNP_PON_S3_SRC_MASK			0x3
 
 /* Ranges */
 #define QPNP_PON_S1_TIMER_MAX			10256
@@ -1212,6 +1218,9 @@ static int __devinit qpnp_pon_probe(struct spmi_device *spmi)
 	else /* default combination */
 		s3_src_reg = QPNP_PON_S3_SRC_KPDPWR_AND_RESIN;
 
+	/* S3 source is a write once register. If the register has
+	 * been configured by bootloader then this operation will
+	 * not be effective. */
 	rc = qpnp_pon_masked_write(pon, QPNP_PON_S3_SRC(pon->base),
 			QPNP_PON_S3_SRC_MASK, s3_src_reg);
 	if (rc) {
