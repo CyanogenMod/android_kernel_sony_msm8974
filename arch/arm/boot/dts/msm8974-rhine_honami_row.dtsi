@@ -762,19 +762,6 @@
 		};
 	};
 
-	qcom,ion {
-		compatible = "qcom,msm-ion";
-
-		qcom,ion-heap@20 { /* CAMERA HEAP */
-			compatible = "qcom,msm-ion-reserve";
-			reg = <20>;
-			qcom,heap-align = <0x1000>;
-			qcom,memory-reservation-type = "EBI1"; /* reserve EBI memory */
-			qcom,memory-reservation-size = <0x6400000>;
-			qcom,ion-heap-type = "CARVEOUT";
-		};
-	};
-
 	sound {
 		qcom,audio-routing =
 			"RX_BIAS", "MCLK",
