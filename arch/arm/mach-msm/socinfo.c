@@ -877,6 +877,15 @@ msm_get_foundry_id(struct device *dev,
 }
 
 static ssize_t
+msm_get_foundry_id(struct device *dev,
+			struct device_attribute *attr,
+			char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+		socinfo_get_foundry_id());
+}
+
+static ssize_t
 msm_get_pmic_model(struct device *dev,
 			struct device_attribute *attr,
 			char *buf)
@@ -1106,6 +1115,10 @@ static struct device_attribute msm_soc_attr_accessory_chip =
 static struct device_attribute msm_soc_attr_platform_subtype =
 	__ATTR(platform_subtype, S_IRUGO,
 			msm_get_platform_subtype, NULL);
+
+static struct device_attribute msm_soc_attr_foundry_id =
+	__ATTR(foundry_id, S_IRUGO,
+			msm_get_foundry_id, NULL);
 
 static struct device_attribute msm_soc_attr_foundry_id =
 	__ATTR(foundry_id, S_IRUGO,
