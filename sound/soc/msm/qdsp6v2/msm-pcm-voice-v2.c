@@ -586,6 +586,8 @@ static struct snd_kcontrol_new msm_voice_controls[] = {
 	SOC_SINGLE_MULTI_EXT("Voice2 Tx Device Mute", SND_SOC_NOPM, 0, VSID_MAX,
 				0, 3, msm_voice2_tx_device_mute_get,
 				msm_voice2_tx_device_mute_put),
+	/* Dummy control to expose stereo recording support in kernel to user-space */
+	SOC_SINGLE_EXT("Stereo Recording", SND_SOC_NOPM, 1, VSID_MAX, 0, NULL, NULL),
 };
 
 static struct snd_pcm_ops msm_pcm_ops = {
