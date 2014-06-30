@@ -2713,7 +2713,7 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 	clear_bit(MMC_QUEUE_NEW_REQUEST, &mq->flags);
 	clear_bit(MMC_QUEUE_URGENT_REQUEST, &mq->flags);
-	if (req && req->cmd_flags & REQ_SANITIZE) {
+	if (cmd_flags & REQ_SANITIZE) {
 		/* complete ongoing async transfer before issuing sanitize */
 		if (card->host && card->host->areq)
 			mmc_blk_issue_rw_rq(mq, NULL);
@@ -2750,8 +2750,7 @@ out:
 	 */
 	if ((!req && !(test_bit(MMC_QUEUE_NEW_REQUEST, &mq->flags))) ||
 			((test_bit(MMC_QUEUE_URGENT_REQUEST, &mq->flags)) &&
-			 !(mq->mqrq_cur->req->cmd_flags &
-				MMC_REQ_NOREINSERT_MASK))) {
+			 !(cmd_flags & MMC_REQ_NOREINSERT_MASK))) {
 		if (mmc_card_need_bkops(card))
 			mmc_start_bkops(card, false);
 		/* release host only when there are no more requests */
