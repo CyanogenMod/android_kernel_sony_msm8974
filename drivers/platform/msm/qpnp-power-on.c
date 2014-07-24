@@ -152,6 +152,7 @@ struct qpnp_pon {
 	struct delayed_work bark_work;
 };
 
+static struct qpnp_pon *p_pon;
 static struct qpnp_pon *sys_reset_dev;
 
 static u32 s1_delay[PON_S1_COUNT_MAX + 1] = {
@@ -441,9 +442,21 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 
 	input_report_key(pon->pon_input, cfg->key_code,
 					(pon_rt_sts & pon_rt_bit));
+
 	input_sync(pon->pon_input);
 
 	return 0;
+}
+
+#define PON_KEYCODE		116
+
+void qpnp_ponkey_emulate(int press)
+{
+	pr_info("%s: %s\n", __func__, press ? "Press" : "Release");
+
+	input_report_key(p_pon->pon_input, PON_KEYCODE, press);
+
+	input_sync(p_pon->pon_input);
 }
 
 static irqreturn_t qpnp_kpdpwr_irq(int irq, void *_pon)
@@ -1115,6 +1128,42 @@ free_input_dev:
 	return rc;
 }
 
+static ssize_t ponkey_emu_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "Usage: <ms>\n");
+}
+
+static ssize_t ponkey_emu_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int ms;
+
+	if (sscanf(buf, "%d", &ms)) {
+		qpnp_ponkey_emulate(1);
+
+		if (ms > 10) {
+			msleep(ms);
+		} else {
+			msleep(10);
+		}
+
+		qpnp_ponkey_emulate(0);
+	}
+
+	return count;
+}
+static struct kobj_attribute ponkey_emu_interface = __ATTR(ponkey_emu, 0644, ponkey_emu_show, ponkey_emu_store);
+
+static struct attribute *pon_attrs[] = {
+	&ponkey_emu_interface.attr, 
+	NULL,
+};
+
+static struct attribute_group pon_interface_group = {
+	.attrs = pon_attrs,
+};
+
+static struct kobject *pon_kobject;
+
 static int __devinit qpnp_pon_probe(struct spmi_device *spmi)
 {
 	struct qpnp_pon *pon;
@@ -1142,6 +1191,8 @@ static int __devinit qpnp_pon_probe(struct spmi_device *spmi)
 	} else if (sys_reset) {
 		sys_reset_dev = pon;
 	}
+
+	p_pon = pon;
 
 	pon->spmi = spmi;
 
@@ -1287,6 +1338,15 @@ static int __devinit qpnp_pon_probe(struct spmi_device *spmi)
 #ifdef CONFIG_POWERKEY_FORCECRASH
 	qpnp_powerkey_forcecrash_init(spmi, pon->base);
 #endif
+
+	pon_kobject = kobject_create_and_add("ponkey", kernel_kobj);
+	if (!pon_kobject) {
+		pr_err("[POnKey] Failed to create kobject interface\n");
+	}
+	rc = sysfs_create_group(pon_kobject, &pon_interface_group);
+	if (rc) {
+		kobject_put(pon_kobject);
+	}
 
 	/* register the PON configurations */
 	rc = qpnp_pon_config_init(pon);
