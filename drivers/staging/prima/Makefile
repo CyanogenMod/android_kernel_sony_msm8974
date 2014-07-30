@@ -1,6 +1,43 @@
 KERNEL_BUILD := 1
-MODNAME := wlan
-WLAN_ROOT := drivers/staging/prima
+
+ifeq ($(KERNEL_BUILD),1)
+	# These are provided in Android-based builds
+	# Need to explicitly define for Kernel-based builds
+	MODNAME := wlan
+	WLAN_ROOT := drivers/staging/prima
+endif
+
+ifeq ($(KERNEL_BUILD), 0)
+	# These are configurable via Kconfig for kernel-based builds
+	# Need to explicitly configure for Android-based builds
+
+	#Flag to enable BlueTooth AMP feature
+	CONFIG_PRIMA_WLAN_BTAMP := n
+
+	#Flag to enable Legacy Fast Roaming(LFR)
+	CONFIG_PRIMA_WLAN_LFR := y
+
+	#JB kernel has PMKSA patches, hence enabling this flag
+	CONFIG_PRIMA_WLAN_OKC := y
+
+	# JB kernel has CPU enablement patches, so enable
+	CONFIG_PRIMA_WLAN_11AC_HIGH_TP := y
+
+	#Flag to enable TDLS feature
+	CONFIG_QCOM_TDLS := y
+
+	#Flag to enable Fast Transition (11r) feature
+	CONFIG_QCOM_VOWIFI_11R := y
+
+	#Flag to enable Protected Managment Frames (11w) feature
+	ifneq ($(CONFIG_PRONTO_WLAN),)
+	CONFIG_WLAN_FEATURE_11W := y
+	endif
+
+	#Flag to enable new Linux Regulatory implementation
+	CONFIG_ENABLE_LINUX_REG := y
+
+endif
 
 # To enable CCX upload, dependent config
 # CONFIG_QCOM_CCX must be enabled.
@@ -488,15 +525,14 @@ CDEFINES :=	-DANI_BUS_TYPE_PLATFORM=1 \
 		-DWLANTL_DEBUG\
 		-DWLAN_NS_OFFLOAD \
 		-DWLAN_ACTIVEMODE_OFFLOAD_FEATURE \
-        	-DWLAN_FEATURE_HOLD_RX_WAKELOCK \
+		-DWLAN_FEATURE_HOLD_RX_WAKELOCK \
 		-DWLAN_SOFTAP_VSTA_FEATURE \
 		-DWLAN_FEATURE_ROAM_SCAN_OFFLOAD \
 		-DWLAN_FEATURE_GTK_OFFLOAD \
 		-DWLAN_WAKEUP_EVENTS \
-		-DWLAN_KD_READY_NOTIFIER \
+	        -DWLAN_KD_READY_NOTIFIER \
 		-DFEATURE_WLAN_BATCH_SCAN \
-		-DFEATURE_WLAN_LPHB \
-		-DFEATURE_WLAN_CH144
+		-DFEATURE_WLAN_LPHB
 
 ifneq ($(CONFIG_PRONTO_WLAN),)
 CDEFINES += -DWCN_PRONTO
@@ -537,7 +573,9 @@ endif
 #normally, TDLS negative behavior is not needed
 ifeq ($(CONFIG_QCOM_TDLS),y)
 CDEFINES += -DFEATURE_WLAN_TDLS
+ifeq ($(BUILD_DEBUG_VERSION),1)
 CDEFINES += -DWLAN_FEATURE_TDLS_DEBUG
+endif
 CDEFINES += -DCONFIG_TDLS_IMPLICIT
 #CDEFINES += -DFEATURE_WLAN_TDLS_NEGATIVE
 #Code under FEATURE_WLAN_TDLS_INTERNAL is ported from volans, This code
@@ -583,13 +621,17 @@ ifeq ($(RE_ENABLE_WIFI_ON_WDI_TIMEOUT),1)
 CDEFINES += -DWDI_RE_ENABLE_WIFI_ON_WDI_TIMEOUT
 endif
 
+ifeq ($(KERNEL_BUILD),1)
 CDEFINES += -DWLAN_OPEN_SOURCE
+endif
+
+ifeq ($(findstring opensource, $(WLAN_ROOT)), opensource)
+CDEFINES += -DWLAN_OPEN_SOURCE
+endif
 
 ifeq ($(CONFIG_ENABLE_LINUX_REG), y)
 CDEFINES += -DCONFIG_ENABLE_LINUX_REG
 endif
-
-CDEFINES += -DFEATURE_WLAN_CH_AVOID
 
 # Fix build for GCC 4.7
 EXTRA_CFLAGS += -Wno-maybe-uninitialized -Wno-unused-function
