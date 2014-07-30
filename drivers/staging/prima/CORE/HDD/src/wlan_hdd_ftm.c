@@ -1511,7 +1511,6 @@ static int wlan_ftm_stop(hdd_context_t *pHddCtx)
 
   \brief wlan_hdd_ftm_get_nv_table() -
             Get Specific NV table
-            NV V2 dedicated API
 
   \param  - ftmCmd - Pointer FTM Commad Buffer
 
@@ -1529,21 +1528,13 @@ int wlan_hdd_ftm_get_nv_table
    VOS_STATUS          nvStatus = VOS_STATUS_SUCCESS;
    pttGetNvTable      *nvTable = (pttGetNvTable *)&ftmCmd->msgBody.GetNvTable;
    v_SIZE_t            nvSize;
-   sHalNvV2           *nvContents = NULL;
-   eNvVersionType      nvVersion;
+   sHalNv             *nvContents = NULL;
+
 
    if (NULL == pHddCtx)
    {
       VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
                 "Not valid driver context");
-      return -EINVAL;
-   }
-
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V2 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
       return -EINVAL;
    }
 
@@ -1683,7 +1674,6 @@ int wlan_hdd_ftm_get_nv_table
 
   \brief wlan_hdd_ftm_set_nv_table() -
             Set Specific NV table as given
-            NV V2 dedicated API
 
   \param  - ftmCmd - Pointer FTM Commad Buffer
 
@@ -1701,21 +1691,12 @@ int wlan_hdd_ftm_set_nv_table
    VOS_STATUS          nvStatus = VOS_STATUS_SUCCESS;
    pttSetNvTable      *nvTable = (pttSetNvTable *)&ftmCmd->msgBody.SetNvTable;
    v_SIZE_t            nvSize;
-   sHalNvV2           *nvContents = NULL;
-   eNvVersionType      nvVersion;
+   sHalNv             *nvContents = NULL;
 
    if (NULL == pHddCtx)
    {
       VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
                 "Not valid driver context");
-      return -EINVAL;
-   }
-
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V2 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
       return -EINVAL;
    }
 
@@ -1843,7 +1824,6 @@ int wlan_hdd_ftm_set_nv_table
 
   \brief wlan_hdd_ftm_blank_nv() -
             Set all NV table value as default
-            NV V2 dedicated API
 
   \param  - ftmCmd - Pointer FTM Commad Buffer
 
@@ -1857,11 +1837,10 @@ int wlan_hdd_ftm_blank_nv_table
    tPttMsgbuffer  *ftmCmd
 )
 {
-   VOS_STATUS          nvStatus = VOS_STATUS_SUCCESS;
+   VOS_STATUS      nvStatus = VOS_STATUS_SUCCESS;
    v_SIZE_t            nvSize;
    v_SIZE_t            itemSize;
-   sHalNvV2           *nvContents = NULL;
-   eNvVersionType      nvVersion;
+   sHalNv             *nvContents = NULL;
 
    nvStatus = vos_nv_getNVBuffer((void **)&nvContents, &nvSize);
    if((VOS_STATUS_SUCCESS != nvStatus) || (NULL == nvContents))
@@ -1871,62 +1850,54 @@ int wlan_hdd_ftm_blank_nv_table
       return -EIO;
    }
 
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V2 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
-      return -EINVAL;
-   }
-
    itemSize = sizeof(nvContents->tables.pwrOptimum);
    memcpy(&nvContents->tables.pwrOptimum,
-          &nvDefaultsV2.tables.pwrOptimum,
+          &nvDefaults.tables.pwrOptimum,
           itemSize);
 
    itemSize = sizeof(nvContents->tables.regDomains);
    memcpy(&nvContents->tables.regDomains,
-          &nvDefaultsV2.tables.regDomains,
+          &nvDefaults.tables.regDomains,
           itemSize);
 
    itemSize = sizeof(nvContents->tables.defaultCountryTable);
    memcpy(&nvContents->tables.defaultCountryTable,
-          &nvDefaultsV2.tables.defaultCountryTable,
+          &nvDefaults.tables.defaultCountryTable,
           itemSize);
 
    itemSize = sizeof(nvContents->tables.plutCharacterized);
    memcpy(&nvContents->tables.plutCharacterized[0],
-          &nvDefaultsV2.tables.plutCharacterized[0],
+          &nvDefaults.tables.plutCharacterized[0],
           itemSize);
 
    itemSize = sizeof(nvContents->tables.plutPdadcOffset);
    memcpy(&nvContents->tables.plutPdadcOffset[0],
-          &nvDefaultsV2.tables.plutPdadcOffset[0],
+          &nvDefaults.tables.plutPdadcOffset[0],
           itemSize);
 
    itemSize = sizeof(nvContents->tables.pwrOptimum_virtualRate);
    memcpy(&nvContents->tables.pwrOptimum_virtualRate[0],
-          &nvDefaultsV2.tables.pwrOptimum_virtualRate[0],
+          &nvDefaults.tables.pwrOptimum_virtualRate[0],
           itemSize);
 
    itemSize = sizeof(nvContents->tables.rssiChanOffsets);
    memcpy(&nvContents->tables.rssiChanOffsets[0],
-          &nvDefaultsV2.tables.rssiChanOffsets[0],
+          &nvDefaults.tables.rssiChanOffsets[0],
           itemSize);
 
    itemSize = sizeof(nvContents->tables.hwCalValues);
    memcpy(&nvContents->tables.hwCalValues,
-          &nvDefaultsV2.tables.hwCalValues,
+          &nvDefaults.tables.hwCalValues,
           itemSize);
 
    itemSize = sizeof(nvContents->tables.antennaPathLoss);
    memcpy(&nvContents->tables.antennaPathLoss[0],
-          &nvDefaultsV2.tables.antennaPathLoss[0],
+          &nvDefaults.tables.antennaPathLoss[0],
           itemSize);
 
    itemSize = sizeof(nvContents->tables.pktTypePwrLimits);
    memcpy(&nvContents->tables.pktTypePwrLimits[0][0],
-          &nvDefaultsV2.tables.pktTypePwrLimits[0][0],
+          &nvDefaults.tables.pktTypePwrLimits[0][0],
           itemSize);
 
    return 1;
@@ -1936,7 +1907,6 @@ int wlan_hdd_ftm_blank_nv_table
 
   \brief wlan_hdd_ftm_delete_nv_table() -
             Delete Specific NV table
-            NV V2 dedicated API
 
   \param  - ftmCmd - Pointer FTM Commad Buffer
 
@@ -1950,12 +1920,11 @@ int wlan_hdd_ftm_delete_nv_table
    tPttMsgbuffer  *ftmCmd
 )
 {
-   VOS_STATUS          nvStatus = VOS_STATUS_SUCCESS;
+   VOS_STATUS      nvStatus = VOS_STATUS_SUCCESS;
    tMsgPttDelNvTable  *nvTable = (tMsgPttDelNvTable *)&ftmCmd->msgBody.DelNvTable;
    v_SIZE_t            nvSize;
    v_SIZE_t            itemSize;
-   sHalNvV2           *nvContents = NULL;
-   eNvVersionType      nvVersion;
+   sHalNv             *nvContents = NULL;
 
    nvStatus = vos_nv_getNVBuffer((void **)&nvContents, &nvSize);
    if ((VOS_STATUS_SUCCESS != nvStatus) || (NULL == nvContents))
@@ -1965,90 +1934,82 @@ int wlan_hdd_ftm_delete_nv_table
       return -EIO;
    }
 
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V2 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
-      return -EINVAL;
-   }
-
    switch (nvTable->nvTable)
    {
       case NV_TABLE_RATE_POWER_SETTINGS:
          itemSize = sizeof(nvContents->tables.pwrOptimum);
          memcpy(&nvContents->tables.pwrOptimum,
-                &nvDefaultsV2.tables.pwrOptimum,
+                &nvDefaults.tables.pwrOptimum,
                 itemSize);
          break;
 
       case NV_TABLE_REGULATORY_DOMAINS:
          itemSize = sizeof(nvContents->tables.regDomains);
          memcpy(&nvContents->tables.regDomains,
-                &nvDefaultsV2.tables.regDomains,
+                &nvDefaults.tables.regDomains,
                 itemSize);
          break;
 
       case NV_TABLE_DEFAULT_COUNTRY:
          itemSize = sizeof(nvContents->tables.defaultCountryTable);
          memcpy(&nvContents->tables.defaultCountryTable,
-                &nvDefaultsV2.tables.defaultCountryTable,
+                &nvDefaults.tables.defaultCountryTable,
                 itemSize);
          break;
 
       case NV_TABLE_TPC_POWER_TABLE:
          itemSize = sizeof(nvContents->tables.plutCharacterized);
          memcpy(&nvContents->tables.plutCharacterized[0],
-                &nvDefaultsV2.tables.plutCharacterized[0],
+                &nvDefaults.tables.plutCharacterized[0],
                 itemSize);
          break;
 
       case NV_TABLE_TPC_PDADC_OFFSETS:
          itemSize = sizeof(nvContents->tables.plutPdadcOffset);
          memcpy(&nvContents->tables.plutPdadcOffset[0],
-                &nvDefaultsV2.tables.plutPdadcOffset[0],
+                &nvDefaults.tables.plutPdadcOffset[0],
                 itemSize);
          break;
 
       case NV_TABLE_VIRTUAL_RATE:
          itemSize = sizeof(nvContents->tables.pwrOptimum_virtualRate);
          memcpy(&nvContents->tables.pwrOptimum_virtualRate[0],
-                &nvDefaultsV2.tables.pwrOptimum_virtualRate[0],
+                &nvDefaults.tables.pwrOptimum_virtualRate[0],
                 itemSize);
          break;
 
       case NV_TABLE_RSSI_CHANNEL_OFFSETS:
          itemSize = sizeof(nvContents->tables.rssiChanOffsets);
          memcpy(&nvContents->tables.rssiChanOffsets[0],
-                &nvDefaultsV2.tables.rssiChanOffsets[0],
+                &nvDefaults.tables.rssiChanOffsets[0],
                 itemSize);
          break;
 
       case NV_TABLE_HW_CAL_VALUES:
          itemSize = sizeof(nvContents->tables.hwCalValues);
          memcpy(&nvContents->tables.hwCalValues,
-                &nvDefaultsV2.tables.hwCalValues,
+                &nvDefaults.tables.hwCalValues,
                 itemSize);
          break;
 
       case NV_TABLE_FW_CONFIG:
          itemSize = sizeof(nvContents->tables.fwConfig);
          memcpy(&nvContents->tables.fwConfig,
-                &nvDefaultsV2.tables.fwConfig,
+                &nvDefaults.tables.fwConfig,
                 itemSize);
          break;
 
       case NV_TABLE_ANTENNA_PATH_LOSS:
          itemSize = sizeof(nvContents->tables.antennaPathLoss);
          memcpy(&nvContents->tables.antennaPathLoss[0],
-                &nvDefaultsV2.tables.antennaPathLoss[0],
+                &nvDefaults.tables.antennaPathLoss[0],
                 itemSize);
          break;
 
       case NV_TABLE_PACKET_TYPE_POWER_LIMITS:
          itemSize = sizeof(nvContents->tables.pktTypePwrLimits);
          memcpy(&nvContents->tables.pktTypePwrLimits[0][0],
-                &nvDefaultsV2.tables.pktTypePwrLimits[0][0],
+                &nvDefaults.tables.pktTypePwrLimits[0][0],
                 itemSize);
          break;
 
@@ -2295,7 +2256,6 @@ int wlan_hdd_ftm_set_nv_field
 
   \brief wlan_hdd_ftm_store_nv_table() -
             Store Cached NV information into Flash Memory, file
-            NV V2 dedicated API
 
   \param  - ftmCmd - Pointer FTM Commad Buffer
 
@@ -2311,25 +2271,16 @@ int wlan_hdd_ftm_store_nv_table
 {
    VOS_STATUS           nvStatus = VOS_STATUS_SUCCESS;
    v_SIZE_t             nvSize;
+   sHalNv              *nvContents = NULL;
    tMsgPttStoreNvTable *nvTable = (tMsgPttStoreNvTable *)&ftmCmd->msgBody.StoreNvTable;
    void                *tablePtr = NULL;
    unsigned int         tableSize = 0;
    VNV_TYPE             tableVNVType = VNV_FIELD_IMAGE;
-   sHalNvV2            *nvContents = NULL;
-   eNvVersionType       nvVersion;
 
    nvStatus = vos_nv_getNVBuffer((void **)&nvContents, &nvSize);
    if((VOS_STATUS_SUCCESS != nvStatus) || (NULL == nvContents))
    {
       return -EIO;
-   }
-
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V2 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
-      return -EINVAL;
    }
 
    /* Set Platform type as PRIMA */
@@ -2451,15 +2402,7 @@ static int wlan_hdd_ftm_get_nv_bin
    v_SIZE_t            nvSize;
    v_U8_t             *nvContents;
    v_U16_t offset = 0;
-   eNvVersionType      nvVersion;
 
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V3 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
-      return -EINVAL;
-   }
 
    if ((NV_MAX_TABLE == pHddCtx->ftm.processingNVTable) ||
       (0 == pHddCtx->ftm.processedNVTableSize))
@@ -2583,16 +2526,6 @@ static int wlan_hdd_ftm_set_nv_bin
 {
    VOS_STATUS          nvStatus = VOS_STATUS_SUCCESS;
    pttSetNvTable      *nvTable = (pttSetNvTable *)&ftmCmd->msgBody.SetNvBin;
-   eNvVersionType      nvVersion;
-
-   nvVersion = vos_nv_getNvVersion();
-   if (E_NV_V3 != nvVersion)
-   {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
-                "%s : Not valid NV Version %d", __func__, nvVersion);
-      return -EINVAL;
-   }
-
 
    /* Test first chunk of NV table */
    if ((NV_MAX_TABLE == pHddCtx->ftm.processingNVTable) ||
@@ -3113,41 +3046,6 @@ static VOS_STATUS validate_channel(unsigned int channel,unsigned int cb)
 }
 
 
-static unsigned int get_primary_channel(unsigned int center_channel,unsigned int cb)
-{
-    unsigned int primary_channel = center_channel;
-
-        if (center_channel <= 14)
-                return primary_channel ;
-
-    switch (cb)
-    {
-        case PHY_DOUBLE_CHANNEL_LOW_PRIMARY:
-                case PHY_QUADRUPLE_CHANNEL_20MHZ_LOW_40MHZ_CENTERED:
-                case PHY_QUADRUPLE_CHANNEL_20MHZ_HIGH_40MHZ_LOW:
-            primary_channel -= 2;
-            break;
-
-
-        case PHY_DOUBLE_CHANNEL_HIGH_PRIMARY:
-                case PHY_QUADRUPLE_CHANNEL_20MHZ_HIGH_40MHZ_CENTERED:
-                case PHY_QUADRUPLE_CHANNEL_20MHZ_LOW_40MHZ_HIGH:
-                        primary_channel += 2;
-                        break;
-
-                case PHY_QUADRUPLE_CHANNEL_20MHZ_LOW_40MHZ_LOW:
-                        primary_channel -= 6;
-                        break;
-
-                case PHY_QUADRUPLE_CHANNEL_20MHZ_HIGH_40MHZ_HIGH:
-                        primary_channel += 6;
-                        break;
-        }
-
-        return primary_channel;
-
-}
-
 /**---------------------------------------------------------------------------
 
   \brief wlan_ftm_priv_set_channel() -
@@ -3188,7 +3086,7 @@ static VOS_STATUS wlan_ftm_priv_set_channel(hdd_adapter_t *pAdapter,v_U16_t chan
 
     pMsgBody = &pMsgBuf->msgBody;
 
-    pMsgBody->SetChannel.chId = get_primary_channel(channel, ftm_status.cbmode);
+    pMsgBody->SetChannel.chId = channel;
 
     VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Channel =%d\n",pMsgBody->SetChannel.chId);
     pMsgBody->SetChannel.cbState = ftm_status.cbmode ;
@@ -4301,8 +4199,7 @@ static VOS_STATUS wlan_ftm_priv_set_mac_address(hdd_adapter_t *pAdapter,char *bu
        return VOS_STATUS_E_FAILURE;
     }
 
-    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-              "MacAddress = " MAC_ADDRESS_STR, MAC_ADDR_ARRAY(macAddr));
+    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "MacAddress = %02x:%02x:%02x:%02x:%02x:%02x",MAC_ADDR_ARRAY(macAddr));
 
 
     pMacAddress = &pMsgBody->SetNvField.fieldData.macAddr.macAddr1[0];
@@ -4311,8 +4208,7 @@ static VOS_STATUS wlan_ftm_priv_set_mac_address(hdd_adapter_t *pAdapter,char *bu
        pMacAddress[ii] = (v_U8_t)macAddr[ii];
 
 
-    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-              "pMacAddress = " MAC_ADDRESS_STR, MAC_ADDR_ARRAY(pMacAddress));
+    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "pMacAddress = %02x:%02x:%02x:%02x:%02x:%02x",MAC_ADDR_ARRAY(pMacAddress));
     status = wlan_ftm_postmsg((v_U8_t*)pMsgBuf,pMsgBuf->msgBodyLength);
 
     if (status != VOS_STATUS_SUCCESS)
