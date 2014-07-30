@@ -88,25 +88,6 @@ static void cbNotifySetImmediateRoamRssiDiff(hdd_context_t *pHddCtx, unsigned lo
 
 static void cbNotifySetRoamRssiDiff(hdd_context_t *pHddCtx, unsigned long NotifyId)
 {
-    if (pHddCtx->cfg_ini->nSelect5GHzMargin)
-    {
-        /*
-           LFR2.0 firmware posts roam candidates whose RSSI is above the
-           look down threshold and RoamRssiDiff better than current AP Rssi.
-           if gSelect5GHzMargin is non-zero; then the expectation is firmware
-           should post all the roam candidates whose RSSI is above lookdown
-           threshold and don't ignore the APs in RoamRssiDiff zone.
-
-           For ex: RoamRssiDiff=5, Lookdown threshold=-78 and
-           gSelect5GHzMargin=30 then firmware selects APs
-           with Rssi -73 or better as roam candidates.
-           if the 5G AP Rssi is -75 it will be ignored.
-           if 2.4G AP Rssi is -45 and 5G AP with -75 is available,
-           STA should connect to 5G AP, hence RoamRssiDiff is set to 0.
-        */
-        pHddCtx->cfg_ini->RoamRssiDiff = 0;
-    }
-
     sme_UpdateRoamRssiDiff((tHalHandle)(pHddCtx->hHal),
                                     pHddCtx->cfg_ini->RoamRssiDiff);
 }
@@ -2802,14 +2783,6 @@ REG_VARIABLE( CFG_TDLS_PUAPSD_RX_FRAME_THRESHOLD, WLAN_PARAM_Integer,
                 CFG_BTC_SAP_ACTIVE_BT_LEN_DEFAULT,
                 CFG_BTC_SAP_ACTIVE_BT_LEN_MIN,
                 CFG_BTC_SAP_ACTIVE_BT_LEN_MAX ),
-
-   REG_VARIABLE( CFG_STRICT_5GHZ_PREF_BY_MARGIN , WLAN_PARAM_Integer,
-                 hdd_config_t, nSelect5GHzMargin,
-                 VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                 CFG_STRICT_5GHZ_PREF_BY_MARGIN_DEFAULT,
-                 CFG_STRICT_5GHZ_PREF_BY_MARGIN_MIN,
-                 CFG_STRICT_5GHZ_PREF_BY_MARGIN_MAX ),
-
 };
 
 /*
@@ -3015,25 +2988,48 @@ static void print_hdd_cfg(hdd_context_t *pHddCtx)
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [AutoBmpsTimerEnabled] Value = [%u]",pHddCtx->cfg_ini->fIsAutoBmpsTimerEnabled);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [nAutoBmpsTimerValue] Value = [%lu]",pHddCtx->cfg_ini->nAutoBmpsTimerValue);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [nVccRssiTrigger] Value = [%u]",pHddCtx->cfg_ini->nVccRssiTrigger);
-  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-            "Name = [gIbssBssid] Value =["MAC_ADDRESS_STR"]",
-            MAC_ADDR_ARRAY(pHddCtx->cfg_ini->IbssBssid.bytes));
+  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gIbssBssid] Value =[0x%x 0x%x 0x%x 0x%x 0x%x 0x%x]",
+      pHddCtx->cfg_ini->IbssBssid.bytes[0],pHddCtx->cfg_ini->IbssBssid.bytes[1],
+      pHddCtx->cfg_ini->IbssBssid.bytes[2],pHddCtx->cfg_ini->IbssBssid.bytes[3],
+      pHddCtx->cfg_ini->IbssBssid.bytes[4],pHddCtx->cfg_ini->IbssBssid.bytes[5]);
 
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-            "Name = [Intf0MacAddress] Value =["MAC_ADDRESS_STR"]",
-            MAC_ADDR_ARRAY(pHddCtx->cfg_ini->intfMacAddr[0].bytes));
+          "Name = [Intf0MacAddress] Value =[0x%x 0x%x 0x%x 0x%x 0x%x 0x%x]",
+                                  pHddCtx->cfg_ini->intfMacAddr[0].bytes[0],
+                                  pHddCtx->cfg_ini->intfMacAddr[0].bytes[1],
+                                  pHddCtx->cfg_ini->intfMacAddr[0].bytes[2],
+                                  pHddCtx->cfg_ini->intfMacAddr[0].bytes[3],
+                                  pHddCtx->cfg_ini->intfMacAddr[0].bytes[4],
+                                  pHddCtx->cfg_ini->intfMacAddr[0].bytes[5]);
+
 
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-            "Name = [Intf1MacAddress] Value =["MAC_ADDRESS_STR"]",
-            MAC_ADDR_ARRAY(pHddCtx->cfg_ini->intfMacAddr[1].bytes));
+          "Name = [Intf1MacAddress] Value =[0x%x 0x%x 0x%x 0x%x 0x%x 0x%x]",
+                                  pHddCtx->cfg_ini->intfMacAddr[1].bytes[0],
+                                  pHddCtx->cfg_ini->intfMacAddr[1].bytes[1],
+                                  pHddCtx->cfg_ini->intfMacAddr[1].bytes[2],
+                                  pHddCtx->cfg_ini->intfMacAddr[1].bytes[3],
+                                  pHddCtx->cfg_ini->intfMacAddr[1].bytes[4],
+                                  pHddCtx->cfg_ini->intfMacAddr[1].bytes[5]);
 
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-            "Name = [Intf2MacAddress] Value =["MAC_ADDRESS_STR"]",
-            MAC_ADDR_ARRAY(pHddCtx->cfg_ini->intfMacAddr[2].bytes));
+          "Name = [Intf2MacAddress] Value =[0x%x 0x%x 0x%x 0x%x 0x%x 0x%x]",
+                                  pHddCtx->cfg_ini->intfMacAddr[2].bytes[0],
+                                  pHddCtx->cfg_ini->intfMacAddr[2].bytes[1],
+                                  pHddCtx->cfg_ini->intfMacAddr[2].bytes[2],
+                                  pHddCtx->cfg_ini->intfMacAddr[2].bytes[3],
+                                  pHddCtx->cfg_ini->intfMacAddr[2].bytes[4],
+                                  pHddCtx->cfg_ini->intfMacAddr[2].bytes[5]);
 
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
-            "Name = [Intf3MacAddress] Value =["MAC_ADDRESS_STR"]",
-            MAC_ADDR_ARRAY(pHddCtx->cfg_ini->intfMacAddr[3].bytes));
+          "Name = [Intf3MacAddress] Value =[0x%x 0x%x 0x%x 0x%x 0x%x 0x%x]",
+                                  pHddCtx->cfg_ini->intfMacAddr[3].bytes[0],
+                                  pHddCtx->cfg_ini->intfMacAddr[3].bytes[1],
+                                  pHddCtx->cfg_ini->intfMacAddr[3].bytes[2],
+                                  pHddCtx->cfg_ini->intfMacAddr[3].bytes[3],
+                                  pHddCtx->cfg_ini->intfMacAddr[3].bytes[4],
+                                  pHddCtx->cfg_ini->intfMacAddr[3].bytes[5]);
+
 
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gApEnableUapsd] value = [%u]\n",pHddCtx->cfg_ini->apUapsdEnabled);
 
@@ -3174,7 +3170,6 @@ static void print_hdd_cfg(hdd_context_t *pHddCtx)
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gEnableIbssHeartBeatOffload] Value = [%u] ", pHddCtx->cfg_ini->enableIbssHeartBeatOffload);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gAntennaDiversity] Value = [%u] ", pHddCtx->cfg_ini->antennaDiversity);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gAmsduSupportInAMPDU] Value = [%lu] ",pHddCtx->cfg_ini->isAmsduSupportInAMPDU);
-  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [nSelect5GHzMargin] Value = [%lu] ",pHddCtx->cfg_ini->nSelect5GHzMargin);
 
 }
 
@@ -3853,8 +3848,9 @@ v_BOOL_t hdd_update_config_dat( hdd_context_t *pHddCtx )
       if ( VOS_FALSE == vos_is_macaddr_group( &pConfig->IbssBssid ))
       {
          VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_MED,
-                    "MAC Addr (IBSS BSSID) read from Registry is: " MAC_ADDRESS_STR,
-                    MAC_ADDR_ARRAY(pConfig->IbssBssid.bytes));
+                    "MAC Addr (IBSS BSSID) read from Registry is: %02x-%02x-%02x-%02x-%02x-%02x",
+                    pConfig->IbssBssid.bytes[0], pConfig->IbssBssid.bytes[1], pConfig->IbssBssid.bytes[2],
+                    pConfig->IbssBssid.bytes[3], pConfig->IbssBssid.bytes[4], pConfig->IbssBssid.bytes[5]);
          if (ccmCfgSetStr(pHddCtx->hHal, WNI_CFG_BSSID, pConfig->IbssBssid.bytes,
             sizeof(v_BYTE_t) * VOS_MAC_ADDR_SIZE, NULL, eANI_BOOLEAN_FALSE)==eHAL_STATUS_FAILURE)
          {
@@ -3867,24 +3863,6 @@ v_BOOL_t hdd_update_config_dat( hdd_context_t *pHddCtx )
          fStatus = FALSE;
          hddLog(LOGE,"Could not pass on WNI_CFG_BSSID to CCM\n");
       }
-   }
-
-   if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_PASSIVE_MINIMUM_CHANNEL_TIME,
-        pConfig->nPassiveMinChnTime, NULL,
-        eANI_BOOLEAN_FALSE)==eHAL_STATUS_FAILURE)
-   {
-      fStatus = FALSE;
-      hddLog(LOGE, "Could not pass on WNI_CFG_PASSIVE_MINIMUM_CHANNEL_TIME"
-                     " to CCM\n");
-   }
-
-   if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_PASSIVE_MAXIMUM_CHANNEL_TIME,
-        pConfig->nPassiveMaxChnTime, NULL,
-        eANI_BOOLEAN_FALSE)==eHAL_STATUS_FAILURE)
-   {
-      fStatus = FALSE;
-      hddLog(LOGE, "Could not pass on WNI_CFG_PASSIVE_MAXIMUM_CHANNEL_TIME"
-                     " to CCM\n");
    }
 
    if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_BEACON_INTERVAL, pConfig->nBeaconInterval,
@@ -4574,10 +4552,6 @@ VOS_STATUS hdd_set_sme_config( hdd_context_t *pHddCtx )
 #endif
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
    smeConfig.csrConfig.isFastTransitionEnabled = pConfig->isFastTransitionEnabled;
-   if (pConfig->nSelect5GHzMargin)
-   {
-       pConfig->RoamRssiDiff = 0;
-   }
    smeConfig.csrConfig.RoamRssiDiff = pConfig->RoamRssiDiff;
    smeConfig.csrConfig.nImmediateRoamRssiDiff = pConfig->nImmediateRoamRssiDiff;
    smeConfig.csrConfig.isWESModeEnabled = pConfig->isWESModeEnabled;
@@ -4623,7 +4597,6 @@ VOS_STATUS hdd_set_sme_config( hdd_context_t *pHddCtx )
    smeConfig.csrConfig.enableOxygenNwk = pConfig->enableOxygenNwk;
 
    smeConfig.csrConfig.isAmsduSupportInAMPDU = pConfig->isAmsduSupportInAMPDU;
-   smeConfig.csrConfig.nSelect5GHzMargin = pConfig->nSelect5GHzMargin;
 
    /* update SSR config */
    sme_UpdateEnableSSR((tHalHandle)(pHddCtx->hHal), pHddCtx->cfg_ini->enableSSR);

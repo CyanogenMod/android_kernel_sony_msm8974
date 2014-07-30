@@ -2216,7 +2216,6 @@ typedef struct sAniChangeCountryCodeReq
     tANI_U16                msgLen;     // length of the entire request
     tANI_U8                 countryCode[WNI_CFG_COUNTRY_CODE_LEN];   //3 char country code
     tAniBool                countryFromUserSpace;
-    tAniBool                sendRegHint;  //TRUE if we want to send hint to NL80211
     void                    *changeCCCallback;
     void                    *pDevContext; //device context
     void                    *pVosContext; //voss context
@@ -4578,20 +4577,5 @@ typedef PACKED_PRE struct PACKED_POST
 
 #endif // FEATURE_WLAN_BATCH_SCAN
 
-#ifdef FEATURE_WLAN_CH_AVOID
-#define SIR_CH_AVOID_MAX_RANGE   4
-
-typedef struct sSirChAvoidFreqType
-{
-   tANI_U32 startFreq;
-   tANI_U32 endFreq;
-} tSirChAvoidFreqType;
-
-typedef struct sSirChAvoidIndType
-{
-   tANI_U32            avoidRangeCount;
-   tSirChAvoidFreqType avoidFreqRange[SIR_CH_AVOID_MAX_RANGE];
-} tSirChAvoidIndType;
-#endif /* FEATURE_WLAN_CH_AVOID */
 
 #endif /* __SIR_API_H */

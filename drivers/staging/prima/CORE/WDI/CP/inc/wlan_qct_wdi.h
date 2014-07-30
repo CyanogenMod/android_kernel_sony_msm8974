@@ -411,10 +411,6 @@ typedef enum
   WDI_BATCH_SCAN_RESULT_IND,
 #endif
 
-#ifdef FEATURE_WLAN_CH_AVOID
-  WDI_CH_AVOID_IND,
-#endif /* FEATURE_WLAN_CH_AVOID */
-
   WDI_MAX_IND
 }WDI_LowLevelIndEnumType;
 
@@ -735,22 +731,6 @@ typedef struct
    wpt_macAddr staMacAddr;
 }WDI_IbssPeerInactivityIndType;
 
-#ifdef FEATURE_WLAN_CH_AVOID
-#define WDI_CH_AVOID_MAX_RANGE   4
-
-typedef struct
-{
-   wpt_uint32 startFreq;
-   wpt_uint32 endFreq;
-} WDI_ChAvoidFreqType;
-
-typedef struct
-{
-   wpt_uint32          avoidRangeCount;
-   WDI_ChAvoidFreqType avoidFreqRange[WDI_CH_AVOID_MAX_RANGE];
-} WDI_ChAvoidIndType;
-#endif /* FEATURE_WLAN_CH_AVOID */
-
 /*---------------------------------------------------------------------------
   WDI_LowLevelIndType
     Inidcation type and information about the indication being carried
@@ -816,9 +796,6 @@ typedef struct
     void *pBatchScanResult;
 #endif
 
-#ifdef FEATURE_WLAN_CH_AVOID
-    WDI_ChAvoidIndType          wdiChAvoidInd;
-#endif /* FEATURE_WLAN_CH_AVOID */
   }  wdiIndicationData;
 }WDI_LowLevelIndType;
 
