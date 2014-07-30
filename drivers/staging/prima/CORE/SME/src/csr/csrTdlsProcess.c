@@ -534,8 +534,7 @@ eHalStatus csrTdlsProcessSendMgmt( tpAniSirGlobal pMac, tSmeCmd *cmd )
     if(tdlsSendMgmtCmdInfo->len && tdlsSendMgmtCmdInfo->buf)
     {
         //Done with the buf. Free it.
-        vos_mem_free( tdlsSendMgmtCmdInfo->buf );
-        tdlsSendMgmtCmdInfo->buf = NULL;
+        palFreeMemory( pMac->hHdd, tdlsSendMgmtCmdInfo->buf );
         tdlsSendMgmtCmdInfo->len = 0;
     }
 
@@ -641,8 +640,9 @@ eHalStatus csrTdlsProcessDelSta( tpAniSirGlobal pMac, tSmeCmd *cmd )
 #else
     smsLog( pMac, LOG1,
 #endif
-        "sending TDLS Del Sta "MAC_ADDRESS_STR" req to PE",
-         MAC_ADDR_ARRAY(tdlsDelStaCmdInfo->peerMac));
+        "sending TDLS Del Sta %02x:%02x:%02x:%02x:%02x:%02x req to PE",
+        tdlsDelStaCmdInfo->peerMac[0], tdlsDelStaCmdInfo->peerMac[1], tdlsDelStaCmdInfo->peerMac[2],
+        tdlsDelStaCmdInfo->peerMac[3], tdlsDelStaCmdInfo->peerMac[4], tdlsDelStaCmdInfo->peerMac[5]);
     status = tdlsSendMessage(pMac, eWNI_SME_TDLS_DEL_STA_REQ, 
             (void *)tdlsDelStaReq , sizeof(tSirTdlsDelStaReq)) ;
     if(!HAL_STATUS_SUCCESS( status ) )
@@ -1134,8 +1134,15 @@ eHalStatus tdlsMsgProcessor(tpAniSirGlobal pMac,  v_U16_t msgType,
                 {
                     tSirTdlsPeerInfo *peerInfo = &disRsp->tdlsDisPeerInfo[i] ;
                     VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO, 
-                              ("SME, peer MAC: "MAC_ADDRESS_STR),
-                               MAC_ADDR_ARRAY(peerInfo->peerMac));
+                                                   ("SME, peer MAC:")) ;
+                    VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO, 
+                                    (" %02x,%02x,%02x,%02x,%02x,%02x"), 
+                                          peerInfo->peerMac[0], 
+                                          peerInfo->peerMac[1], 
+                                          peerInfo->peerMac[2], 
+                                          peerInfo->peerMac[3], 
+                                          peerInfo->peerMac[4], 
+                                          peerInfo->peerMac[5]) ;
 
                     peerLinkInfo = findTdlsPeer(pMac,
                                    &disInfo->tdlsPotentialPeerList,
@@ -1181,8 +1188,13 @@ eHalStatus tdlsMsgProcessor(tpAniSirGlobal pMac,  v_U16_t msgType,
             if(eSIR_SME_SUCCESS == linkSetupRsp->statusCode)
             {
                 VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO, 
-                      ("Link setup for Peer "MAC_ADDRESS_STR),
-                                 MAC_ADDR_ARRAY(linkSetupRsp->peerMac));
+                      ("Link setup for Peer %02x,%02x,%02x,%02x,%02x,%02x"),
+                                 linkSetupRsp->peerMac[0],       
+                                 linkSetupRsp->peerMac[1],       
+                                 linkSetupRsp->peerMac[2],       
+                                 linkSetupRsp->peerMac[3],       
+                                 linkSetupRsp->peerMac[4],       
+                                 linkSetupRsp->peerMac[5]) ;
        
                 tdlsUpdateTdlsPeerState(pMac, linkSetupRsp->peerMac, 
                                                   TDLS_LINK_SETUP_STATE) ;
@@ -1210,8 +1222,13 @@ eHalStatus tdlsMsgProcessor(tpAniSirGlobal pMac,  v_U16_t msgType,
             {
             
                 VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO, 
-                 ("Teardown peer MAC = "MAC_ADDRESS_STR),
-                            MAC_ADDR_ARRAY(linkTearRsp->peerMac));
+                 ("Teardown peer MAC = %02x,%02x,%02x,%02x,%02x,%02x"),
+                            linkTearRsp->peerMac[0],  
+                            linkTearRsp->peerMac[1],  
+                            linkTearRsp->peerMac[2],  
+                            linkTearRsp->peerMac[3],  
+                            linkTearRsp->peerMac[4],  
+                            linkTearRsp->peerMac[5]) ;  
                 tdlsDeleteTdlsPeerInfo(pMac, linkTearRsp->peerMac) ;
             }
             else
