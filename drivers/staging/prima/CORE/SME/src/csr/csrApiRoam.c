@@ -6926,14 +6926,7 @@ eHalStatus csrRoamSaveConnectedInfomation(tpAniSirGlobal pMac, tANI_U32 sessionI
 #ifdef FEATURE_WLAN_CCX
     if ((csrIsProfileCCX(pProfile) || 
          ((pIesTemp->CCXVersion.present) 
-          && ((pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_OPEN_SYSTEM) 
-              || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_WPA) 
-              || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_WPA_PSK) 
-              || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN) 
-#ifdef WLAN_FEATURE_11W
-              || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN_PSK_SHA256)
-#endif
-              || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN_PSK))))
+          && ((pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_OPEN_SYSTEM))))
         && (pMac->roam.configParam.isCcxIniFeatureEnabled))
     {
         pConnectProfile->isCCXAssoc = 1;
@@ -8311,6 +8304,12 @@ eHalStatus csrRoamProcessSetKeyCommand( tpAniSirGlobal pMac, tSmeCmd *pCommand )
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_CSR
     tCsrRoamSession *pSession = CSR_GET_SESSION( pMac, sessionId );
     WLAN_VOS_DIAG_EVENT_DEF(setKeyEvent, vos_event_wlan_security_payload_type);
+
+    if(NULL == pSession){
+       smsLog(pMac, LOGE, FL("  session %d not found "), sessionId);
+       return eHAL_STATUS_FAILURE;
+    }
+
     if(eSIR_ED_NONE != edType)
     {
         palZeroMemory(pMac->hHdd, &setKeyEvent, sizeof(vos_event_wlan_security_payload_type));
@@ -8392,6 +8391,10 @@ eHalStatus csrRoamProcessRemoveKeyCommand( tpAniSirGlobal pMac, tSmeCmd *pComman
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_CSR
     tCsrRoamSession *pSession = CSR_GET_SESSION( pMac, sessionId );
     WLAN_VOS_DIAG_EVENT_DEF(removeKeyEvent, vos_event_wlan_security_payload_type);
+    if(NULL == pSession){
+       smsLog(pMac, LOGE, FL("  session %d not found "), sessionId);
+       return eHAL_STATUS_FAILURE;
+    }
     palZeroMemory(pMac->hHdd, &removeKeyEvent, sizeof(vos_event_wlan_security_payload_type));
     removeKeyEvent.eventId = WLAN_SECURITY_EVENT_REMOVE_KEY_REQ;
     removeKeyEvent.encryptionModeMulticast = (v_U8_t)diagEncTypeFromCSRType(pSession->connectedProfile.mcEncryptionType);
@@ -9543,10 +9546,15 @@ void csrRoamCheckForLinkStatusChange( tpAniSirGlobal pMac, tSirSmeRsp *pSirMsg )
                 }
 #endif //FEATURE_WLAN_DIAG_SUPPORT_CSR
                 smsLog(pMac, LOGW, "CSR: Peer departed notification from LIM");
-                roamInfo.staId = (tANI_U8)pIbssPeerInd->staId;
-                roamInfo.ucastSig = (tANI_U8)pIbssPeerInd->ucastSig;
-                roamInfo.bcastSig = (tANI_U8)pIbssPeerInd->bcastSig;
-                palCopyMemory(pMac->hHdd, &roamInfo.peerMac, pIbssPeerInd->peerAddr, sizeof(tCsrBssid));
+                if(pIbssPeerInd)
+                {
+                   roamInfo.staId = (tANI_U8)pIbssPeerInd->staId;
+                   roamInfo.ucastSig = (tANI_U8)pIbssPeerInd->ucastSig;
+                   roamInfo.bcastSig = (tANI_U8)pIbssPeerInd->bcastSig;
+                   palCopyMemory(pMac->hHdd, &roamInfo.peerMac, pIbssPeerInd->peerAddr, sizeof(tCsrBssid));
+                }else
+                   smsLog(pMac, LOGE, "CSR: departed peer info is NULL");
+
                 csrRoamCallCallback(pMac, sessionId, &roamInfo, 0, 
                         eCSR_ROAM_CONNECT_STATUS_UPDATE, eCSR_ROAM_RESULT_IBSS_PEER_DEPARTED);
             }
@@ -11008,9 +11016,9 @@ tANI_U8 csrRoamGetIbssStartChannelNumber50( tpAniSirGlobal pMac )
         {
             for ( idxValidChannels = 0; idxValidChannels < len ; idxValidChannels++ )
             {
-                if ( CSR_IS_CHANNEL_5GHZ(pMac->roam.validChannelList[ idx ]) )   // the max channel# in 11g is 14
+                if ( CSR_IS_CHANNEL_5GHZ(pMac->roam.validChannelList[ idxValidChannels ]) )   // the max channel# in 11g is 14
                 {
-                    channel = csrStartIbssChannels50[ idx ];
+                    channel = csrStartIbssChannels50[ idxValidChannels ];
                     break;
                 }
             }
@@ -12503,14 +12511,7 @@ eHalStatus csrSendJoinReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSirBssDe
          */
         if ((csrIsProfileCCX(pProfile) ||
                   ((pIes->CCXVersion.present)
-                   && ((pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_OPEN_SYSTEM)
-                       || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_WPA)
-                       || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_WPA_PSK)
-                       || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN)
-#ifdef WLAN_FEATURE_11W
-                       || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN_PSK_SHA256)
-#endif
-                       || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN_PSK))))
+                   && ((pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_OPEN_SYSTEM))))
                  && (pMac->roam.configParam.isCcxIniFeatureEnabled))
         {
             // isCCXconnection;
@@ -12539,14 +12540,7 @@ eHalStatus csrSendJoinReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSirBssDe
         {
         if ((csrIsProfileCCX(pProfile) ||
              ((pIes->CCXVersion.present)
-              && ((pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_OPEN_SYSTEM)
-                  || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_WPA)
-                  || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_WPA_PSK)
-                  || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN)
-#ifdef WLAN_FEATURE_11W
-                  || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN_PSK_SHA256)
-#endif
-                  || (pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_RSN_PSK))))
+              && ((pProfile->negotiatedAuthType == eCSR_AUTH_TYPE_OPEN_SYSTEM))))
             && (pMac->roam.configParam.isCcxIniFeatureEnabled))
         {
            tCCXTspecInfo ccxTspec;
