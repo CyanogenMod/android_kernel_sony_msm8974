@@ -151,7 +151,7 @@ static struct afe_clk_cfg lpass_mi2s_disable = {
 
 static void *adsp_state_notifier;
 
-#define ADSP_STATE_READY_TIMEOUT_MS 3000
+#define ADSP_STATE_READY_TIMEOUT_MS 50
 
 static inline int param_is_mask(int p)
 {
