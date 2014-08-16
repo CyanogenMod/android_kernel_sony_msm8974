@@ -1,5 +1,5 @@
 /* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
+ * Copyright (C) 2013-2014 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -146,6 +146,9 @@ struct qpnp_somc_params {
 	int		output_batt_log;
 	int		clamp_soc_count;
 	int		clamp_soc_max_count;
+	bool		soc_update_request;
+	bool		soc_update_request_once;
+	bool		done_adjust_soc_params;
 };
 
 struct qpnp_bms_chip {
@@ -298,6 +301,19 @@ struct qpnp_bms_chip {
 	struct qpnp_somc_params		somc_params;
 };
 
+static int qpnp_bms_property_is_writeable(struct power_supply *psy,
+					enum power_supply_property psp)
+{
+	int ret = 0;
+
+	if (psp == POWER_SUPPLY_PROP_SOC_UPDATE_REQUEST)
+		ret = 1;
+	else
+		ret = 0;
+
+	return ret;
+}
+
 static struct of_device_id qpnp_bms_match_table[] = {
 	{ .compatible = QPNP_BMS_DEV_NAME },
 	{}
@@ -317,6 +333,7 @@ static enum power_supply_property msm_bms_power_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
+	POWER_SUPPLY_PROP_SOC_UPDATE_REQUEST,
 };
 
 static int discard_backup_fcc_data(struct qpnp_bms_chip *chip);
@@ -1851,6 +1868,11 @@ static int report_cc_based_soc(struct qpnp_bms_chip *chip)
 			soc = chip->last_soc + soc_change;
 	}
 
+	if (chip->somc_params.done_adjust_soc_params) {
+		soc = chip->calculated_soc;
+		chip->somc_params.done_adjust_soc_params = false;
+	}
+
 	if (chip->last_soc != soc && !chip->last_soc_unbound)
 		chip->last_soc_change_sec = last_change_sec;
 
@@ -1887,6 +1909,11 @@ static int charging_adjustments(struct qpnp_bms_chip *chip,
 	int chg_soc, soc_ibat, batt_terminal_uv, weight_ibat, weight_cc;
 
 	batt_terminal_uv = vbat_uv + (ibat_ua * chip->r_conn_mohm) / 1000;
+
+	if (chip->somc_params.soc_update_request) {
+		chip->soc_at_cv = -EINVAL;
+		chip->prev_chg_soc = -EINVAL;
+	}
 
 	if (chip->soc_at_cv == -EINVAL) {
 		if (batt_terminal_uv >= chip->max_voltage_uv - VDD_MAX_ERR) {
@@ -2406,8 +2433,9 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	mutex_lock(&chip->soc_invalidation_mutex);
 	shutdown_soc = chip->shutdown_soc;
 
-	if (chip->first_time_calc_soc && soc != shutdown_soc
-			&& !chip->shutdown_soc_invalid) {
+	if ((chip->first_time_calc_soc && soc != shutdown_soc
+			&& !chip->shutdown_soc_invalid) ||
+			chip->somc_params.soc_update_request) {
 		/*
 		 * soc for the first time - use shutdown soc
 		 * to adjust pon ocv since it is a small percent away from
@@ -2460,6 +2488,10 @@ done_calculating:
 	mutex_lock(&chip->last_soc_mutex);
 	previous_soc = chip->calculated_soc;
 	chip->calculated_soc = new_calculated_soc;
+	if (chip->somc_params.soc_update_request) {
+		chip->somc_params.soc_update_request = false;
+		chip->somc_params.done_adjust_soc_params = true;
+	}
 	pr_debug("CC based calculated SOC = %d\n", chip->calculated_soc);
 	if (chip->last_soc_invalid) {
 		chip->last_soc_invalid = false;
@@ -3417,9 +3449,46 @@ static int qpnp_bms_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		val->intval = chip->charge_cycles;
 		break;
+	case POWER_SUPPLY_PROP_SOC_UPDATE_REQUEST:
+		val->intval = chip->somc_params.soc_update_request_once;
+		break;
 	default:
 		return -EINVAL;
 	}
+	return 0;
+}
+
+#define SOC_MAX 100
+static int qpnp_bms_power_set_property(struct power_supply *psy,
+					enum power_supply_property psp,
+					const union power_supply_propval *val)
+{
+	struct qpnp_bms_chip *chip = container_of(psy, struct qpnp_bms_chip,
+							bms_psy);
+
+	if (psp == POWER_SUPPLY_PROP_SOC_UPDATE_REQUEST) {
+		pr_debug("soc update request\n");
+		if (chip->somc_params.soc_update_request_once)
+			goto out;
+		chip->somc_params.soc_update_request_once = true;
+
+		if (val->intval == 1 &&
+			!chip->shutdown_soc_invalid &&
+			chip->shutdown_soc << 1 <= SOC_MAX) {
+			chip->shutdown_soc =
+				bound_soc(chip->shutdown_soc << 1);
+			pr_debug("update shutdown_soc to %d\n",
+						chip->shutdown_soc);
+
+			cancel_delayed_work_sync(
+				&chip->calculate_soc_delayed_work);
+			chip->somc_params.soc_update_request = true;
+			schedule_delayed_work(
+				&chip->calculate_soc_delayed_work, 0);
+		}
+	}
+
+out:
 	return 0;
 }
 
@@ -4567,6 +4636,9 @@ static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 	chip->bms_psy.properties = msm_bms_power_props;
 	chip->bms_psy.num_properties = ARRAY_SIZE(msm_bms_power_props);
 	chip->bms_psy.get_property = qpnp_bms_power_get_property;
+	chip->bms_psy.set_property = qpnp_bms_power_set_property;
+	chip->bms_psy.property_is_writeable =
+			qpnp_bms_property_is_writeable;
 	chip->bms_psy.external_power_changed =
 		qpnp_bms_external_power_changed;
 	chip->bms_psy.supplied_to = qpnp_bms_supplicants;
