@@ -2,7 +2,7 @@
  * Core MDSS framebuffer driver.
  *
  * Copyright (C) 2007 Google Incorporated
- * Copyright (c) 2008-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This software is licensed under the terms of the GNU General Public
@@ -164,6 +164,15 @@ static const struct input_device_id mdss_ids[] = {
 	},
 	{ },
 };
+
+static void mdss_ensure_kworker_done(struct workqueue_struct *wq)
+{
+	if (wq) {
+		pr_debug("wait for unblank work");
+		flush_workqueue(wq);
+		pr_debug("done waiting for unblank work");
+	}
+}
 
 static struct input_handler mds_input_handler = {
 	.event		= mdss_input_event,
@@ -344,10 +353,14 @@ static ssize_t mdss_fb_get_type(struct device *dev,
 	return ret;
 }
 
-static void mdss_fb_parse_dt_split(struct msm_fb_data_type *mfd)
+static void mdss_fb_parse_dt(struct msm_fb_data_type *mfd)
 {
 	u32 data[2];
 	struct platform_device *pdev = mfd->pdev;
+
+	mfd->splash_logo_enabled = of_property_read_bool(pdev->dev.of_node,
+				"qcom,mdss-fb-splash-logo-enabled");
+
 	if (of_property_read_u32_array(pdev->dev.of_node, "qcom,mdss-fb-split",
 				       data, 2))
 		return;
@@ -578,7 +591,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		}
 	}
 #else
-	if (mfd->index == 0) {
+	if (mfd->splash_logo_enabled) {
 		mfd->splash_thread = kthread_run(mdss_fb_splash_thread, mfd,
 				"mdss_fb_splash");
 		if (IS_ERR(mfd->splash_thread)) {
@@ -649,12 +662,7 @@ static int mdss_fb_suspend_sub(struct msm_fb_data_type *mfd)
 		return 0;
 
 	pr_debug("mdss_fb suspend index=%d\n", mfd->index);
-
-	if (mfd->unblank_kworker) {
-		pr_debug("ensure kworker is done");
-		flush_workqueue(mfd->unblank_kworker);
-		pr_debug("done flushing left over kworker");
-	}
+	mdss_ensure_kworker_done(mfd->unblank_kworker);
 
 	mdss_fb_pan_idle(mfd);
 	ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_SUSPEND, NULL);
@@ -906,15 +914,10 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
-		if (mfd->unblank_kworker) {
-			pr_debug("wait for unblank work");
-			flush_workqueue(mfd->unblank_kworker);
-			pr_debug("done waiting for unblank work");
-
-			/* if kworker was successful we are done...
-			 * but let's check and retry if not.
-			 */
-		}
+		mdss_ensure_kworker_done(mfd->unblank_kworker);
+		/* if kworker was successful we are done...
+		 * but let's check and retry if not.
+		 */
 
 		if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
 			ret = mfd->mdp.on_fnc(mfd);
@@ -974,8 +977,10 @@ static void mdss_background_unblank(struct work_struct *ws)
 
 	if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
 		ret = mfd->mdp.on_fnc(mfd);
-		if (ret == 0)
+		if (ret == 0) {
 			mfd->panel_power_on = true;
+			mfd->panel_info->panel_dead = false;
+		}
 		mutex_lock(&mfd->update.lock);
 		mfd->update.type = NOTIFY_TYPE_UPDATE;
 		mutex_unlock(&mfd->update.lock);
@@ -1054,7 +1059,6 @@ static int mdss_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 		vma->vm_page_prot = pgprot_writebackwacache(vma->vm_page_prot);
 	else
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-
 	/* Remap the frame buffer I/O range */
 	if (io_remap_pfn_range(vma, vma->vm_start, off >> PAGE_SHIFT,
 			       vma->vm_end - vma->vm_start,
@@ -1337,7 +1341,6 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 	var->right_margin = panel_info->lcdc.h_front_porch;
 	var->hsync_len = panel_info->lcdc.h_pulse_width;
 	var->pixclock = panel_info->clk_rate / 1000;
-
 	/* id field for fb app  */
 
 	id = (int *)&mfd->panel;
@@ -1352,7 +1355,7 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 	mfd->panel_power_on = false;
 	mfd->dcm_state = DCM_UNINIT;
 
-	mdss_fb_parse_dt_split(mfd);
+	mdss_fb_parse_dt(mfd);
 
 	if (mdss_fb_alloc_fbmem(mfd)) {
 		pr_err("unable to allocate framebuffer memory\n");
@@ -1561,6 +1564,8 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 			kthread_stop(mfd->disp_thread);
 			mfd->disp_thread = NULL;
 		}
+
+		mdss_ensure_kworker_done(mfd->unblank_kworker);
 
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 			mfd->op_enable);

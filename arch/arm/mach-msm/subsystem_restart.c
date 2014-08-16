@@ -1,4 +1,5 @@
 /* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -219,6 +220,14 @@ int subsys_get_restart_level(struct subsys_device *dev)
 	return dev->restart_level;
 }
 EXPORT_SYMBOL(subsys_get_restart_level);
+
+void subsys_set_restart_level(struct subsys_device *dev, int new_level)
+{
+	if (new_level == RESET_SOC || new_level == RESET_SUBSYS_COUPLED)
+		dev->restart_level = new_level;
+	else
+		pr_err("Incorrect restart level %d\n", new_level);
+}
 
 static void subsys_set_state(struct subsys_device *subsys,
 			     enum subsys_state state)
@@ -471,8 +480,14 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 
 	pr_info("[%p]: Powering up %s\n", current, name);
 	init_completion(&dev->err_ready);
-	if (dev->desc->powerup(dev->desc) < 0)
-		panic("[%p]: Powerup error: %s!", current, name);
+	if (dev->desc->powerup(dev->desc) < 0) {
+		/* If a system shutdown is underway, ignore errors. */
+		if (system_state == SYSTEM_POWER_OFF) {
+			pr_err("[%p]: Powerup error: %s!", current, name);
+			return;
+		} else
+			panic("[%p]: Powerup error: %s!", current, name);
+	}
 
 	ret = wait_for_err_ready(dev);
 	if (ret)
