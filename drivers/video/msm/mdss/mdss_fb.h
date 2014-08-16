@@ -216,6 +216,7 @@ struct msm_fb_data_type {
 	bool shutdown_pending;
 
 	struct task_struct *splash_thread;
+	bool splash_logo_enabled;
 
 	struct msm_fb_backup_type msm_fb_backup;
 	struct completion power_set_comp;

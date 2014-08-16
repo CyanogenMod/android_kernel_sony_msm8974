@@ -30,7 +30,7 @@
 #include "q6voice.h"
 
 
-#define TIMEOUT_MS 200
+#define TIMEOUT_MS 300
 
 
 #define CMD_STATUS_SUCCESS 0
@@ -3408,6 +3408,10 @@ static int voice_destroy_vocproc(struct voice_data *v)
 	}
 	mvm_handle = voice_get_mvm_handle(v);
 	cvp_handle = voice_get_cvp_handle(v);
+
+	/* disable slowtalk if st_enable is set */
+	if (v->st_enable)
+		voice_send_set_pp_enable_cmd(v, MODULE_ID_VOICE_MODULE_ST, 0);
 
 	/* stop playback or recording */
 	v->music_info.force = 1;
