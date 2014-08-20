@@ -1285,10 +1285,28 @@ static int _pwm_config_lut(struct pwm_device *pwm,
 
 	ramp_step_ms = pwm_lut->ramp_step_ms;
 
-	lut_config->lut_pause_lo_cnt = pwm_lut->lut_pause_lo;
-	lut_config->lut_pause_hi_cnt = pwm_lut->lut_pause_hi;
+	if (ramp_step_ms > PM_PWM_LUT_RAMP_STEP_TIME_MAX)
+		ramp_step_ms = PM_PWM_LUT_RAMP_STEP_TIME_MAX;
 
-	lut_config->ramp_step_ms = ramp_step_ms;
+	QPNP_SET_PAUSE_CNT(lut_config->lut_pause_lo_cnt,
+			pwm_lut->lut_pause_lo, ramp_step_ms);
+	if (lut_config->lut_pause_lo_cnt > PM_PWM_MAX_PAUSE_CNT)
+		lut_config->lut_pause_lo_cnt = PM_PWM_MAX_PAUSE_CNT;
+
+	QPNP_SET_PAUSE_CNT(lut_config->lut_pause_hi_cnt,
+			pwm_lut->lut_pause_hi, ramp_step_ms);
+	if (lut_config->lut_pause_hi_cnt > PM_PWM_MAX_PAUSE_CNT)
+			lut_config->lut_pause_hi_cnt = PM_PWM_MAX_PAUSE_CNT;
+
+	lut_config->ramp_step_ms = QPNP_GET_RAMP_STEP_DURATION(ramp_step_ms);
+
+	dev_info(&pwm->chip->spmi_dev->dev, "%s, hi_cnt = %d, lo_cnt = %d", __func__,
+		lut_config->lut_pause_hi_cnt,
+		lut_config->lut_pause_lo_cnt);
+
+	dev_info(&pwm->chip->spmi_dev->dev, "%s, ramp: raw = %d, QPNP_GET... = %d", __func__,
+		ramp_step_ms,
+		lut_config->ramp_step_ms);
 
 	lut_config->ramp_direction  = !!(flags & PM_PWM_LUT_RAMP_UP);
 	lut_config->pattern_repeat  = !!(flags & PM_PWM_LUT_LOOP);
