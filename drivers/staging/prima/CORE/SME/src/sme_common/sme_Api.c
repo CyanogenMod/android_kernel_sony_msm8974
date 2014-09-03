@@ -2147,20 +2147,6 @@ eHalStatus sme_ProcessMsg(tHalHandle hHal, vos_msg_t* pMsg)
                 break;
 #endif /* FEATURE_WLAN_LPHB */
 
-#ifdef FEATURE_WLAN_CH_AVOID
-          /* LPHB timeout indication arrived, send IND to client */
-          case eWNI_SME_CH_AVOID_IND:
-                if (pMac->sme.pChAvoidNotificationCb)
-                {
-                   VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
-                             "%s: CH avoid notification", __func__);
-                   pMac->sme.pChAvoidNotificationCb(pMac->pAdapter, pMsg->bodyptr);
-                }
-                vos_mem_free(pMsg->bodyptr);
-
-                break;
-#endif /* FEATURE_WLAN_CH_AVOID */
-
           default:
 
              if ( ( pMsg->type >= eWNI_SME_MSG_TYPES_BEGIN )
@@ -4821,8 +4807,6 @@ eHalStatus sme_ScanGetBaseChannels( tHalHandle hHal, tCsrChannelInfo * pChannelI
 
     \param pCountry New Country Code String
 
-    \param sendRegHint If we want to send reg hint to nl80211
-
     \return eHalStatus  SUCCESS.
 
                          FAILURE or RESOURCES  The API finished and failed.
@@ -4833,8 +4817,7 @@ eHalStatus sme_ChangeCountryCode( tHalHandle hHal,
                                           tANI_U8 *pCountry,
                                           void *pContext,
                                           void* pVosContext,
-                                          tAniBool countryFromUserSpace,
-                                          tAniBool sendRegHint )
+                                          tAniBool countryFromUserSpace )
 {
    eHalStatus                status = eHAL_STATUS_FAILURE;
    tpAniSirGlobal            pMac = PMAC_STRUCT( hHal );
@@ -4871,7 +4854,6 @@ eHalStatus sme_ChangeCountryCode( tHalHandle hHal,
       pMsg->msgLen = (tANI_U16)sizeof(tAniChangeCountryCodeReq);
       palCopyMemory(pMac->hHdd, pMsg->countryCode, pCountry, 3);
       pMsg->countryFromUserSpace = countryFromUserSpace;
-      pMsg->sendRegHint = sendRegHint;
       pMsg->changeCCCallback = callback;
       pMsg->pDevContext = pContext;
       pMsg->pVosContext = pVosContext;
@@ -6124,8 +6106,10 @@ eHalStatus smeIssueFastRoamNeighborAPEvent (tHalHandle hHal,
             pNeighborRoamInfo->cfgRoamEn = eSME_ROAM_TRIGGER_SCAN;
             vos_mem_copy((void *)(&pNeighborRoamInfo->cfgRoambssId),
                        (void *)bssid, sizeof(tSirMacAddr));
-            smsLog(pMac, LOG1, "Calling Roam Look Up down Event BSSID "
-                   MAC_ADDRESS_STR, MAC_ADDR_ARRAY(pNeighborRoamInfo->cfgRoambssId));
+            smsLog(pMac, LOG1, "Calling Roam Look Up down Event BSSID %x %x %x %x %x %x",
+                   pNeighborRoamInfo->cfgRoambssId[0], pNeighborRoamInfo->cfgRoambssId[1],
+                   pNeighborRoamInfo->cfgRoambssId[2], pNeighborRoamInfo->cfgRoambssId[3],
+                   pNeighborRoamInfo->cfgRoambssId[4], pNeighborRoamInfo->cfgRoambssId[5]);
 
             vosStatus = csrNeighborRoamTransitToCFGChanScan(pMac);
             if (VOS_STATUS_SUCCESS != vosStatus)
@@ -6140,8 +6124,10 @@ eHalStatus smeIssueFastRoamNeighborAPEvent (tHalHandle hHal,
              vos_mem_copy((void *)(&pNeighborRoamInfo->cfgRoambssId),
                        (void *)bssid, sizeof(tSirMacAddr));
              pNeighborRoamInfo->cfgRoamEn = eSME_ROAM_TRIGGER_FAST_ROAM;
-             smsLog(pMac, LOG1, "Roam to BSSID "MAC_ADDRESS_STR,
-                    MAC_ADDR_ARRAY(pNeighborRoamInfo->cfgRoambssId));
+             smsLog(pMac, LOG1, "Roam to BSSID %x-%x-%x-%x-%x-%x",
+                 pNeighborRoamInfo->cfgRoambssId[0], pNeighborRoamInfo->cfgRoambssId[1],
+                 pNeighborRoamInfo->cfgRoambssId[2], pNeighborRoamInfo->cfgRoambssId[3],
+                 pNeighborRoamInfo->cfgRoambssId[4], pNeighborRoamInfo->cfgRoambssId[5]);
 
              vosStatus = csrNeighborRoamReassocIndCallback(pMac->roam.gVosContext,
                                                            0,
@@ -7150,7 +7136,7 @@ eHalStatus sme_HandleChangeCountryCode(tpAniSirGlobal pMac,  void *pMsgBuf)
    }
 
 
-   status = WDA_SetRegDomain(pMac, domainIdIoctl, pMsg->sendRegHint);
+   status = WDA_SetRegDomain(pMac, domainIdIoctl);
 
    if ( status != eHAL_STATUS_SUCCESS )
    {
@@ -7250,7 +7236,7 @@ eHalStatus sme_HandleChangeCountryCodeByUser(tpAniSirGlobal pMac,
     palCopyMemory(pMac->hHdd, pMac->scan.countryCodeCurrent, pMsg->countryCode,
                   WNI_CFG_COUNTRY_CODE_LEN);
 
-    status = WDA_SetRegDomain(pMac, reg_domain_id, eSIR_TRUE);
+    status = WDA_SetRegDomain(pMac, reg_domain_id);
 
     if (VOS_FALSE == is11dCountry )
     {
@@ -7337,7 +7323,7 @@ eHalStatus sme_HandleChangeCountryCodeByCore(tpAniSirGlobal pMac, tAniGenericCha
                       WNI_CFG_COUNTRY_CODE_LEN);
     }
 
-    status = WDA_SetRegDomain(pMac, REGDOMAIN_WORLD, eSIR_TRUE);
+    status = WDA_SetRegDomain(pMac, REGDOMAIN_WORLD);
 
     if ( status != eHAL_STATUS_SUCCESS )
     {
@@ -9638,7 +9624,7 @@ VOS_STATUS sme_SelectCBMode(tHalHandle hHal, eCsrPhyMode eCsrPhyMode, tANI_U8 ch
             PHY_QUADRUPLE_CHANNEL_20MHZ_LOW_40MHZ_HIGH -1;
       }
       else if ( channel == 48 || channel == 64 || channel == 112 ||
-            channel == 128 || channel == 144 || channel == 161 )
+            channel == 128 || channel == 161 )
       {
          smeConfig.csrConfig.channelBondingMode5GHz =
             PHY_QUADRUPLE_CHANNEL_20MHZ_HIGH_40MHZ_HIGH - 1;
@@ -10019,40 +10005,3 @@ eHalStatus sme_StopBatchScanInd
 }
 
 #endif
-
-#ifdef FEATURE_WLAN_CH_AVOID
-/* ---------------------------------------------------------------------------
-    \fn sme_AddChAvoidCallback
-    \brief  Used to plug in callback function
-            Which notify channel may not be used with SAP or P2PGO mode.
-            Notification come from FW.
-    \param  hHal
-    \param  pCallbackfn : callback function pointer should be plugged in
-    \- return eHalStatus
-    -------------------------------------------------------------------------*/
-eHalStatus sme_AddChAvoidCallback
-(
-   tHalHandle hHal,
-   void (*pCallbackfn)(void *pAdapter, void *indParam)
-)
-{
-    eHalStatus          status    = eHAL_STATUS_SUCCESS;
-    tpAniSirGlobal      pMac      = PMAC_STRUCT(hHal);
-
-    VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
-              "%s: Plug in CH AVOID CB", __func__);
-
-    status = sme_AcquireGlobalLock(&pMac->sme);
-    if (eHAL_STATUS_SUCCESS == status)
-    {
-        if (NULL != pCallbackfn)
-        {
-           pMac->sme.pChAvoidNotificationCb = pCallbackfn;
-        }
-        sme_ReleaseGlobalLock(&pMac->sme);
-    }
-
-    return(status);
-}
-#endif /* FEATURE_WLAN_CH_AVOID */
-

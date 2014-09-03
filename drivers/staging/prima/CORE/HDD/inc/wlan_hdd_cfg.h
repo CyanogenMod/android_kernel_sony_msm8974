@@ -1405,7 +1405,7 @@ typedef enum
 #define CFG_P2P_DEVICE_ADDRESS_ADMINISTRATED_NAME                "isP2pDeviceAddrAdministrated"
 #define CFG_P2P_DEVICE_ADDRESS_ADMINISTRATED_MIN                 ( 0 )
 #define CFG_P2P_DEVICE_ADDRESS_ADMINISTRATED_MAX                 ( 1 )
-#define CFG_P2P_DEVICE_ADDRESS_ADMINISTRATED_DEFAULT             ( 1 )
+#define CFG_P2P_DEVICE_ADDRESS_ADMINISTRATED_DEFAULT             ( 0 )
 
 
 #define CFG_ENABLE_SSR                      "gEnableSSR"
@@ -1952,14 +1952,6 @@ typedef enum
 #define CFG_BTC_SAP_ACTIVE_BT_LEN_MAX          ( 250000 )
 #define CFG_BTC_SAP_ACTIVE_BT_LEN_DEFAULT      ( 90000 )
 
-/* Prefer connecting to 5G AP even if its RSSI is lower by
- gSelect5GHzMargin dBm than 2.4G AP.
-This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
-#define CFG_STRICT_5GHZ_PREF_BY_MARGIN                 "gSelect5GHzMargin"
-#define CFG_STRICT_5GHZ_PREF_BY_MARGIN_MIN             (0)
-#define CFG_STRICT_5GHZ_PREF_BY_MARGIN_MAX             (60)
-#define CFG_STRICT_5GHZ_PREF_BY_MARGIN_DEFAULT         (0) //set 0 to disable
-
 /*--------------------------------------------------------------------------- 
   Type declarations
   -------------------------------------------------------------------------*/ 
@@ -2367,7 +2359,6 @@ typedef struct
    v_U32_t                     cfgBtcActiveBtLen;
    v_U32_t                     cfgBtcSapActiveWlanLen;
    v_U32_t                     cfgBtcSapActiveBtLen;
-   v_U8_t                      nSelect5GHzMargin;
 } hdd_config_t;
 /*--------------------------------------------------------------------------- 
   Function declarations and documenation

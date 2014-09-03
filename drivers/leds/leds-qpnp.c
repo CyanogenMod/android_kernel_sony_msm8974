@@ -134,11 +134,11 @@
 #define	FLASH_SELFCHECK_ENABLE		0x80
 #define FLASH_RAMP_STEP_27US		0xBF
 
-#define FLASH_STROBE_SW			0xC0
-#define FLASH_STROBE_HW			0x04
+#define FLASH_HW_SW_STROBE_SEL_MASK	0x04
 #define FLASH_STROBE_MASK		0xC7
 #define FLASH_LED_0_OUTPUT		0x80
 #define FLASH_LED_1_OUTPUT		0x40
+#define FLASH_TORCH_OUTPUT		0xC0
 
 #define FLASH_CURRENT_PRGM_MIN		1
 #define FLASH_CURRENT_PRGM_SHIFT	1
@@ -219,6 +219,8 @@
 #define KPDBL_MODULE_EN			0x80
 #define KPDBL_MODULE_DIS		0x00
 #define KPDBL_MODULE_EN_MASK		0x80
+
+#define MAX_DUTY_PACKETS_LEN		16
 
 /**
  * enum qpnp_leds - QPNP supported led ids
@@ -936,6 +938,13 @@ static int qpnp_flash_set(struct qpnp_led_data *led)
 				goto error_reg_write;
 			}
 
+			if (!led->flash_cfg->strobe_type)
+				led->flash_cfg->trigger_flash &=
+						~FLASH_HW_SW_STROBE_SEL_MASK;
+			else
+				led->flash_cfg->trigger_flash |=
+						FLASH_HW_SW_STROBE_SEL_MASK;
+
 			rc = qpnp_led_masked_write(led,
 				FLASH_LED_STROBE_CTRL(led->base),
 				led->flash_cfg->trigger_flash,
@@ -1015,30 +1024,22 @@ static int qpnp_flash_set(struct qpnp_led_data *led)
 			 */
 			usleep(FLASH_RAMP_UP_DELAY_US);
 
-			if (!led->flash_cfg->strobe_type) {
-				rc = qpnp_led_masked_write(led,
-					FLASH_LED_STROBE_CTRL(led->base),
-					led->flash_cfg->trigger_flash,
-					led->flash_cfg->trigger_flash);
-				if (rc) {
-					dev_err(&led->spmi_dev->dev,
-					"LED %d strobe reg write failed(%d)\n",
-					led->id, rc);
-					goto error_flash_set;
-				}
-			} else {
-				rc = qpnp_led_masked_write(led,
-					FLASH_LED_STROBE_CTRL(led->base),
-					(led->flash_cfg->trigger_flash |
-					FLASH_STROBE_HW),
-					(led->flash_cfg->trigger_flash |
-					FLASH_STROBE_HW));
-				if (rc) {
-					dev_err(&led->spmi_dev->dev,
-					"LED %d strobe reg write failed(%d)\n",
-					led->id, rc);
-					goto error_flash_set;
-				}
+			if (!led->flash_cfg->strobe_type)
+				led->flash_cfg->trigger_flash &=
+						~FLASH_HW_SW_STROBE_SEL_MASK;
+			else
+				led->flash_cfg->trigger_flash |=
+						FLASH_HW_SW_STROBE_SEL_MASK;
+
+			rc = qpnp_led_masked_write(led,
+				FLASH_LED_STROBE_CTRL(led->base),
+				led->flash_cfg->trigger_flash,
+				led->flash_cfg->trigger_flash);
+			if (rc) {
+				dev_err(&led->spmi_dev->dev,
+				"LED %d strobe reg write failed(%d)\n",
+				led->id, rc);
+				goto error_flash_set;
 			}
 		}
 	} else {
@@ -2635,8 +2636,12 @@ static ssize_t rgbled_lut_pwm_show(struct device *dev,
 	led = container_of(led_cdev, struct qpnp_led_data, cdev);
 	lut = led->rgb_cfg->pwm_cfg->duty_cycles->duty_pcts;
 
-	return scnprintf(buf, PAGE_SIZE, "len:%u,[0]:%d,[1]:%d\n",
-		led->rgb_cfg->pwm_cfg->lut_params.idx_len, lut[0], lut[1]);
+	return scnprintf(buf, PAGE_SIZE, "len:%u,[0]:%d,[1]:%d,[2]:%d,[3]:%d,\
+		[4]:%d,[5]:%d,[6]:%d,[7]:%d,[8]:%d,[9]:%d,[10]:%d,[11]:%d,[12]:%d,\
+		[13]:%d,[14]:%d,[15]:%d\n",
+		led->rgb_cfg->pwm_cfg->lut_params.idx_len, lut[0], lut[1], lut[2],
+		lut[3], lut[4], lut[5], lut[6], lut[7], lut[8], lut[9], lut[10],
+		lut[11], lut[12], lut[13], lut[14], lut[15]);
 }
 
 static ssize_t rgbled_step_duration_store(struct device *dev,
@@ -2864,6 +2869,14 @@ static ssize_t rgbcommon_start_blink_store(struct device *dev,
 	struct qpnp_led_data *led = NULL;
 	int rc;
 	int ramp_control = 0;
+	int interpolate_interval;
+	int interpolate_index;
+	int interpolate_current_value;
+	int interpolate_delta;
+	int interpolated_pkts[MAX_DUTY_PACKETS_LEN];
+	int duty_pkt_len;
+	int *duty_pkt_ptr;
+	int j, k;
 
 	rgb_sync = container_of(led_cdev, struct rgb_sync, cdev);
 	if (!rgb_sync) {
@@ -2884,6 +2897,89 @@ static ssize_t rgbcommon_start_blink_store(struct device *dev,
 			continue;
 		led = rgb_sync->led_data[i];
 		if (led->rgb_cfg->pwm_cfg->lut_params.idx_len) {
+
+			/* interpolate the duty packets */
+			duty_pkt_len =
+				led->rgb_cfg->pwm_cfg->lut_params.idx_len;
+			duty_pkt_ptr =
+				led->rgb_cfg->pwm_cfg->duty_cycles->duty_pcts;
+
+			if (duty_pkt_ptr[0] != 0) {
+				for (j = duty_pkt_len - 1; j >= 0; --j) {
+					duty_pkt_ptr[j+1] = duty_pkt_ptr[j];
+				}
+				duty_pkt_ptr[0] = 0;
+				++duty_pkt_len;
+			}
+
+			if (duty_pkt_len > 1) {
+				interpolate_interval = MAX_DUTY_PACKETS_LEN /
+					(duty_pkt_len-1);
+				interpolate_index = 0;
+
+				for (j = 0; j < duty_pkt_len - 1; ++j) {
+					interpolate_current_value =
+						duty_pkt_ptr[j];
+					interpolate_delta = (duty_pkt_ptr[j+1] -
+							duty_pkt_ptr[j]) / interpolate_interval;
+					for (k = 0; k < interpolate_interval && interpolate_index <
+							MAX_DUTY_PACKETS_LEN; ++k) {
+						interpolated_pkts[interpolate_index++] =
+							interpolate_current_value;
+						interpolate_current_value += interpolate_delta;
+						if (interpolate_current_value < 0)
+							interpolate_current_value = 0;
+					}
+				}
+
+				/* seal the tail with zeros */
+				for (j = interpolate_index; j < MAX_DUTY_PACKETS_LEN; ++j)
+					interpolated_pkts[j] = 0;
+
+				/* shift the array so that the first value is not
+				 * 0. That would be a waste.
+				 * Also, we should set the last value to 0, otherwise
+				 * it will hang in lighted state.
+				 */
+				for (j = 0; j < MAX_DUTY_PACKETS_LEN - 1; ++j)
+					interpolated_pkts[j] = interpolated_pkts[j+1];
+				interpolated_pkts[MAX_DUTY_PACKETS_LEN - 1] = 0;
+
+				memcpy(duty_pkt_ptr, interpolated_pkts, sizeof(interpolated_pkts));
+
+				led->rgb_cfg->pwm_cfg->lut_params.idx_len =
+					MAX_DUTY_PACKETS_LEN;
+				led->rgb_cfg->pwm_cfg->duty_cycles->num_duty_pcts =
+					MAX_DUTY_PACKETS_LEN;
+
+				/* pause_lo happens at index 0
+				 * pause_hi happens at last
+				 * it will be converted to ramp step cycles by the
+				 * driver (In Sony original code it won't....)
+				 *
+				 * Now, since we interpolate the array,
+				 * we don't want LPG to pause at the first value.
+				 * Thus, to reflect the purpose, we should set
+				 * the time to go thourgh all the ramp steps to be the
+				 * same as pause_lo
+				 */
+
+				/* pause_lo compensation */
+				led->rgb_cfg->pwm_cfg->lut_params.ramp_step_ms =
+					led->rgb_cfg->pwm_cfg->lut_params.lut_pause_lo /
+					MAX_DUTY_PACKETS_LEN;
+				if (led->rgb_cfg->pwm_cfg->lut_params.ramp_step_ms < 2) {
+					/* that's a rapid one. We usually get this when we
+					 receive a phone call. */
+					led->rgb_cfg->pwm_cfg->lut_params.ramp_step_ms = 2;
+				} else if (led->rgb_cfg->pwm_cfg->lut_params.lut_pause_lo < 500) {
+					/* do not blink too fast */
+					led->rgb_cfg->pwm_cfg->lut_params.ramp_step_ms *= 2;
+				}
+				/* now, reduce pause_lo */
+				led->rgb_cfg->pwm_cfg->lut_params.lut_pause_lo = 1;
+			}
+
 			rgbled_set_lut_to_register(led);
 			ramp_control |= (1 << i);
 			rc = qpnp_led_masked_write(led,
@@ -3279,7 +3375,7 @@ static int __devinit qpnp_get_config_flash(struct qpnp_led_data *led,
 			led->flash_cfg->enable_module = FLASH_ENABLE_MODULE;
 		} else
 			led->flash_cfg->enable_module = FLASH_ENABLE_ALL;
-		led->flash_cfg->trigger_flash = FLASH_STROBE_SW;
+		led->flash_cfg->trigger_flash = FLASH_TORCH_OUTPUT;
 	}
 
 	rc = of_property_read_u32(node, "qcom,current", &val);
