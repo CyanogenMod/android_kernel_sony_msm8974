@@ -28,7 +28,8 @@
 #include <mach/socinfo.h>
 #include <mach/subsystem_notif.h>
 #include "qdsp6v2/msm-pcm-routing-v2.h"
-#include "qdsp6v2/q6core.h"
+#include <sound/q6core.h>
+
 #include "../codecs/wcd9xxx-common.h"
 #include "../codecs/wcd9306.h"
 
