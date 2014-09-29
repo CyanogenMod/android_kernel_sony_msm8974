@@ -906,7 +906,6 @@ adreno_get_rptr(struct adreno_ringbuffer *rb)
 	adreno_readreg(adreno_dev, ADRENO_REG_CP_RB_RPTR, &result);
 	return result;
 }
-
 /*
  * adreno_set_protected_registers() - Protect the specified range of registers
  * from being accessed by the GPU
@@ -944,11 +943,5 @@ static inline void adreno_set_protected_registers(struct kgsl_device *device,
 	kgsl_regwrite(device, A3XX_CP_PROTECT_REG_0 + *index, val);
 	*index = *index + 1;
 }
-
-#ifdef CONFIG_DEBUG_FS
-void adreno_debugfs_init(struct kgsl_device *device);
-#else
-static inline void adreno_debugfs_init(struct kgsl_device *device) { }
-#endif
 
 #endif /*__ADRENO_H */
