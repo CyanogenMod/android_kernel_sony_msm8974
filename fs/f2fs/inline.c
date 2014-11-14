@@ -24,6 +24,9 @@ bool f2fs_may_inline(struct inode *inode)
 	if (!S_ISREG(inode->i_mode))
 		return false;
 
+	if (i_size_read(inode) > MAX_INLINE_DATA)
+		return false;
+
 	return true;
 }
 
@@ -116,8 +119,8 @@ no_update:
 	/* clear inline data and flag after data writeback */
 	truncate_inline_data(dn->inode_page, 0);
 clear_out:
-	f2fs_clear_inline_inode(dn->inode);
 	stat_dec_inline_inode(dn->inode);
+	f2fs_clear_inline_inode(dn->inode);
 	sync_inode_page(dn);
 	f2fs_put_dnode(dn);
 	return 0;

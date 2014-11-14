@@ -335,7 +335,8 @@ void f2fs_balance_fs_bg(struct f2fs_sb_info *sbi)
 {
 	/* check the # of cached NAT entries and prefree segments */
 	if (try_to_free_nats(sbi, NAT_ENTRY_PER_BLOCK) ||
-				excess_prefree_segs(sbi))
+			excess_prefree_segs(sbi) ||
+			available_free_memory(sbi, INO_ENTRIES))
 		f2fs_sync_fs(sbi->sb, true);
 }
 
@@ -1176,8 +1177,8 @@ static int __get_segment_type_4(struct page *page, enum page_type p_type)
 		else
 			return CURSEG_COLD_DATA;
 	} else {
-		if (IS_DNODE(page) && !is_cold_node(page))
-			return CURSEG_HOT_NODE;
+		if (IS_DNODE(page) && is_cold_node(page))
+			return CURSEG_WARM_NODE;
 		else
 			return CURSEG_COLD_NODE;
 	}

@@ -31,22 +31,38 @@ bool available_free_memory(struct f2fs_sb_info *sbi, int type)
 {
 	struct f2fs_nm_info *nm_i = NM_I(sbi);
 	struct sysinfo val;
+	unsigned long avail_ram;
 	unsigned long mem_size = 0;
 	bool res = false;
 
 	si_meminfo(&val);
-	/* give 25%, 25%, 50% memory for each components respectively */
+
+	/* only uses low memory */
+	avail_ram = val.totalram - val.totalhigh;
+
+	/* give 25%, 25%, 50%, 50% memory for each components respectively */
 	if (type == FREE_NIDS) {
-		mem_size = (nm_i->fcnt * sizeof(struct free_nid)) >> 12;
-		res = mem_size < ((val.totalram * nm_i->ram_thresh / 100) >> 2);
+		mem_size = (nm_i->fcnt * sizeof(struct free_nid)) >>
+							PAGE_CACHE_SHIFT;
+		res = mem_size < ((avail_ram * nm_i->ram_thresh / 100) >> 2);
 	} else if (type == NAT_ENTRIES) {
-		mem_size = (nm_i->nat_cnt * sizeof(struct nat_entry)) >> 12;
-		res = mem_size < ((val.totalram * nm_i->ram_thresh / 100) >> 2);
+		mem_size = (nm_i->nat_cnt * sizeof(struct nat_entry)) >>
+							PAGE_CACHE_SHIFT;
+		res = mem_size < ((avail_ram * nm_i->ram_thresh / 100) >> 2);
 	} else if (type == DIRTY_DENTS) {
 		if (sbi->sb->s_bdi->dirty_exceeded)
 			return false;
 		mem_size = get_pages(sbi, F2FS_DIRTY_DENTS);
-		res = mem_size < ((val.totalram * nm_i->ram_thresh / 100) >> 1);
+		res = mem_size < ((avail_ram * nm_i->ram_thresh / 100) >> 1);
+	} else if (type == INO_ENTRIES) {
+		int i;
+
+		if (sbi->sb->s_bdi->dirty_exceeded)
+			return false;
+		for (i = 0; i <= UPDATE_INO; i++)
+			mem_size += (sbi->ino_num[i] * sizeof(struct ino_entry))
+							>> PAGE_CACHE_SHIFT;
+		res = mem_size < ((avail_ram * nm_i->ram_thresh / 100) >> 1);
 	}
 	return res;
 }
@@ -1300,10 +1316,12 @@ static int f2fs_write_node_page(struct page *page,
 		return 0;
 	}
 
-	if (wbc->for_reclaim)
-		goto redirty_out;
-
-	down_read(&sbi->node_write);
+	if (wbc->for_reclaim) {
+		if (!down_read_trylock(&sbi->node_write))
+			goto redirty_out;
+	} else {
+		down_read(&sbi->node_write);
+	}
 	set_page_writeback(page);
 	write_node_page(sbi, page, &fio, nid, ni.blk_addr, &new_addr);
 	set_node_addr(sbi, &ni, new_addr, is_fsync_dnode(page));
