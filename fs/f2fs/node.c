@@ -60,8 +60,8 @@ bool available_free_memory(struct f2fs_sb_info *sbi, int type)
 		if (sbi->sb->s_bdi->dirty_exceeded)
 			return false;
 		for (i = 0; i <= UPDATE_INO; i++)
-			mem_size += (sbi->ino_num[i] * sizeof(struct ino_entry))
-							>> PAGE_CACHE_SHIFT;
+			mem_size += (sbi->im[i].ino_num *
+				sizeof(struct ino_entry)) >> PAGE_CACHE_SHIFT;
 		res = mem_size < ((avail_ram * nm_i->ram_thresh / 100) >> 1);
 	}
 	return res;
@@ -1328,6 +1328,10 @@ static int f2fs_write_node_page(struct page *page,
 	dec_page_count(sbi, F2FS_DIRTY_NODES);
 	up_read(&sbi->node_write);
 	unlock_page(page);
+
+	if (wbc->for_reclaim)
+		f2fs_submit_merged_bio(sbi, NODE, WRITE);
+
 	return 0;
 
 redirty_out:

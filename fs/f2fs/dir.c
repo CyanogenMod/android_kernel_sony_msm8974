@@ -287,8 +287,10 @@ void f2fs_set_link(struct inode *dir, struct f2fs_dir_entry *de,
 	f2fs_wait_on_page_writeback(page, type);
 	de->ino = cpu_to_le32(inode->i_ino);
 	set_de_type(de, inode);
-	if (!f2fs_has_inline_dentry(dir))
+	if (!f2fs_has_inline_dentry(dir)) {
 		kunmap(page);
+		flush_dcache_page(page);
+	}
 	set_page_dirty(page);
 	dir->i_mtime = dir->i_ctime = CURRENT_TIME;
 	mark_inode_dirty(dir);
@@ -366,6 +368,7 @@ static int make_empty_dir(struct inode *inode,
 	do_make_empty_dir(inode, parent, &d);
 
 	kunmap_atomic(dentry_blk);
+	flush_dcache_page(dentry_page);
 
 	set_page_dirty(dentry_page);
 	f2fs_put_page(dentry_page, 1);
@@ -579,6 +582,7 @@ fail:
 		clear_inode_flag(F2FS_I(dir), FI_UPDATE_DIR);
 	}
 	kunmap(dentry_page);
+	flush_dcache_page(dentry_page);
 	f2fs_put_page(dentry_page, 1);
 	return err;
 }
@@ -661,6 +665,7 @@ void f2fs_delete_entry(struct f2fs_dir_entry *dentry, struct page *page,
 			NR_DENTRY_IN_BLOCK,
 			0);
 	kunmap(page); /* kunmap - pair of f2fs_find_entry */
+	flush_dcache_page(page);
 	set_page_dirty(page);
 
 	dir->i_ctime = dir->i_mtime = CURRENT_TIME;
