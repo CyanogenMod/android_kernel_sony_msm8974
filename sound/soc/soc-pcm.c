@@ -32,7 +32,10 @@
 #include <sound/soc.h>
 #include <sound/soc-dpcm.h>
 #include <sound/initval.h>
+
+#ifdef CONFIG_SND_SOC_TFA98XX
 #include "codecs/tfa98xx_if.h"
+#endif
 
 #define MAX_BE_USERS	8	/* adjust if too low for everday use */
 
@@ -1720,7 +1723,7 @@ int soc_dpcm_fe_dai_prepare(struct snd_pcm_substream *substream)
 
 	/* run the stream event for each BE */
 	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
-#ifdef CONFIG_MACH_SONY_SHINANO
+#ifdef CONFIG_SND_SOC_TFA98XX
 		tfa98xx_speaker_amp_enable();
 #endif
 		dpcm_dapm_stream_event(fe, stream,
@@ -1912,7 +1915,7 @@ static int dpcm_run_update_startup(struct snd_soc_pcm_runtime *fe, int stream)
 
 	/* run the stream event for each BE */
 	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
-#ifdef CONFIG_MACH_SONY_SHINANO
+#ifdef CONFIG_SND_SOC_TFA98XX
 		tfa98xx_speaker_amp_enable();
 #endif
 		dpcm_dapm_stream_event(fe, stream,
