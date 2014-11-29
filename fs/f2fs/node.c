@@ -171,7 +171,7 @@ retry:
 static void __clear_nat_cache_dirty(struct f2fs_nm_info *nm_i,
 						struct nat_entry *ne)
 {
-	nid_t set = ne->ni.nid / NAT_ENTRY_PER_BLOCK;
+	nid_t set = NAT_BLOCK_OFFSET(ne->ni.nid);
 	struct nat_entry_set *head;
 
 	head = radix_tree_lookup(&nm_i->nat_set_root, set);
@@ -1926,10 +1926,10 @@ static void __flush_nat_entry_set(struct f2fs_sb_info *sbi,
 	else
 		f2fs_put_page(page, 1);
 
-	if (!set->entry_cnt) {
-		radix_tree_delete(&NM_I(sbi)->nat_set_root, set->set);
-		kmem_cache_free(nat_entry_set_slab, set);
-	}
+	f2fs_bug_on(sbi, set->entry_cnt);
+
+	radix_tree_delete(&NM_I(sbi)->nat_set_root, set->set);
+	kmem_cache_free(nat_entry_set_slab, set);
 }
 
 /*
@@ -1946,6 +1946,8 @@ void flush_nat_entries(struct f2fs_sb_info *sbi)
 	nid_t set_idx = 0;
 	LIST_HEAD(sets);
 
+	if (!nm_i->dirty_nat_cnt)
+		return;
 	/*
 	 * if there are no enough space in journal to store dirty nat
 	 * entries, remove all entries from journal and merge them
@@ -1953,9 +1955,6 @@ void flush_nat_entries(struct f2fs_sb_info *sbi)
 	 */
 	if (!__has_cursum_space(sum, nm_i->dirty_nat_cnt, NAT_JOURNAL))
 		remove_nats_in_journal(sbi);
-
-	if (!nm_i->dirty_nat_cnt)
-		return;
 
 	while ((found = __gang_lookup_nat_set(nm_i,
 					set_idx, NATVEC_SIZE, setvec))) {
@@ -2084,17 +2083,17 @@ int __init create_node_manager_caches(void)
 	free_nid_slab = f2fs_kmem_cache_create("free_nid",
 			sizeof(struct free_nid));
 	if (!free_nid_slab)
-		goto destory_nat_entry;
+		goto destroy_nat_entry;
 
 	nat_entry_set_slab = f2fs_kmem_cache_create("nat_entry_set",
 			sizeof(struct nat_entry_set));
 	if (!nat_entry_set_slab)
-		goto destory_free_nid;
+		goto destroy_free_nid;
 	return 0;
 
-destory_free_nid:
+destroy_free_nid:
 	kmem_cache_destroy(free_nid_slab);
-destory_nat_entry:
+destroy_nat_entry:
 	kmem_cache_destroy(nat_entry_slab);
 fail:
 	return -ENOMEM;
