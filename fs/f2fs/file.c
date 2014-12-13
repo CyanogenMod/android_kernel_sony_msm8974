@@ -135,6 +135,37 @@ static inline bool need_do_checkpoint(struct inode *inode)
 	return need_cp;
 }
 
+static bool need_inode_page_update(struct f2fs_sb_info *sbi, nid_t ino)
+{
+	struct page *i = find_get_page(NODE_MAPPING(sbi), ino);
+	bool ret = false;
+	/* But we need to avoid that there are some inode updates */
+	if ((i && PageDirty(i)) || need_inode_block_update(sbi, ino))
+		ret = true;
+	f2fs_put_page(i, 0);
+	return ret;
+}
+
+static void try_to_fix_pino(struct inode *inode)
+{
+	struct f2fs_inode_info *fi = F2FS_I(inode);
+	nid_t pino;
+
+	down_write(&fi->i_sem);
+	fi->xattr_ver = 0;
+	if (file_wrong_pino(inode) && inode->i_nlink == 1 &&
+			get_parent_ino(inode, &pino)) {
+		fi->i_pino = pino;
+		file_got_pino(inode);
+		up_write(&fi->i_sem);
+
+		mark_inode_dirty_sync(inode);
+		f2fs_write_inode(inode, NULL);
+	} else {
+		up_write(&fi->i_sem);
+	}
+}
+
 int f2fs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 {
 	struct inode *inode = file->f_mapping->host;
@@ -165,19 +196,21 @@ int f2fs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 		return ret;
 	}
 
+	/* if the inode is dirty, let's recover all the time */
+	if (!datasync && is_inode_flag_set(fi, FI_DIRTY_INODE)) {
+		update_inode_page(inode);
+		goto go_write;
+	}
+
 	/*
 	 * if there is no written data, don't waste time to write recovery info.
 	 */
 	if (!is_inode_flag_set(fi, FI_APPEND_WRITE) &&
 			!exist_written_data(sbi, ino, APPEND_INO)) {
-		struct page *i = find_get_page(NODE_MAPPING(sbi), ino);
 
-		/* But we need to avoid that there are some inode updates */
-		if ((i && PageDirty(i)) || need_inode_block_update(sbi, ino)) {
-			f2fs_put_page(i, 0);
+		/* it may call write_inode just prior to fsync */
+		if (need_inode_page_update(sbi, ino))
 			goto go_write;
-		}
-		f2fs_put_page(i, 0);
 
 		if (is_inode_flag_set(fi, FI_UPDATE_WRITE) ||
 				exist_written_data(sbi, ino, UPDATE_INO))
@@ -197,49 +230,36 @@ go_write:
 	up_read(&fi->i_sem);
 
 	if (need_cp) {
-		nid_t pino;
-
 		/* all the dirty node pages should be flushed for POR */
 		ret = f2fs_sync_fs(inode->i_sb, 1);
 
-		down_write(&fi->i_sem);
-		F2FS_I(inode)->xattr_ver = 0;
-		if (file_wrong_pino(inode) && inode->i_nlink == 1 &&
-					get_parent_ino(inode, &pino)) {
-			F2FS_I(inode)->i_pino = pino;
-			file_got_pino(inode);
-			up_write(&fi->i_sem);
-			mark_inode_dirty_sync(inode);
-			ret = f2fs_write_inode(inode, NULL);
-			if (ret)
-				goto out;
-		} else {
-			up_write(&fi->i_sem);
-		}
-	} else {
-sync_nodes:
-		sync_node_pages(sbi, ino, &wbc);
-
-		if (need_inode_block_update(sbi, ino)) {
-			mark_inode_dirty_sync(inode);
-			ret = f2fs_write_inode(inode, NULL);
-			if (ret)
-				goto out;
-			goto sync_nodes;
-		}
-
-		ret = wait_on_node_pages_writeback(sbi, ino);
-		if (ret)
-			goto out;
-
-		/* once recovery info is written, don't need to tack this */
-		remove_dirty_inode(sbi, ino, APPEND_INO);
-		clear_inode_flag(fi, FI_APPEND_WRITE);
-flush_out:
-		remove_dirty_inode(sbi, ino, UPDATE_INO);
-		clear_inode_flag(fi, FI_UPDATE_WRITE);
-		ret = f2fs_issue_flush(F2FS_I_SB(inode));
+		/*
+		 * We've secured consistency through sync_fs. Following pino
+		 * will be used only for fsynced inodes after checkpoint.
+		 */
+		try_to_fix_pino(inode);
+		goto out;
 	}
+sync_nodes:
+	sync_node_pages(sbi, ino, &wbc);
+
+	if (need_inode_block_update(sbi, ino)) {
+		mark_inode_dirty_sync(inode);
+		f2fs_write_inode(inode, NULL);
+		goto sync_nodes;
+	}
+
+	ret = wait_on_node_pages_writeback(sbi, ino);
+	if (ret)
+		goto out;
+
+	/* once recovery info is written, don't need to tack this */
+	remove_dirty_inode(sbi, ino, APPEND_INO);
+	clear_inode_flag(fi, FI_APPEND_WRITE);
+flush_out:
+	remove_dirty_inode(sbi, ino, UPDATE_INO);
+	clear_inode_flag(fi, FI_UPDATE_WRITE);
+	ret = f2fs_issue_flush(sbi);
 out:
 	trace_f2fs_sync_file_exit(inode, need_cp, datasync, ret);
 	return ret;
@@ -916,6 +936,14 @@ static int f2fs_ioc_start_atomic_write(struct file *filp)
 	return f2fs_convert_inline_inode(inode);
 }
 
+static int f2fs_release_file(struct inode *inode, struct file *filp)
+{
+	/* some remained atomic pages should discarded */
+	if (f2fs_is_atomic_file(inode) || f2fs_is_volatile_file(inode))
+		commit_inmem_pages(inode, true);
+	return 0;
+}
+
 static int f2fs_ioc_commit_atomic_write(struct file *filp)
 {
 	struct inode *inode = file_inode(filp);
@@ -1025,6 +1053,7 @@ const struct file_operations f2fs_file_operations = {
 	.aio_read	= generic_file_aio_read,
 	.aio_write	= generic_file_aio_write,
 	.open		= generic_file_open,
+	.release	= f2fs_release_file,
 	.mmap		= f2fs_file_mmap,
 	.fsync		= f2fs_sync_file,
 	.fallocate	= f2fs_fallocate,

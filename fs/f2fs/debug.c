@@ -39,14 +39,15 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 	si->ndirty_dent = get_pages(sbi, F2FS_DIRTY_DENTS);
 	si->ndirty_dirs = sbi->n_dirty_dirs;
 	si->ndirty_meta = get_pages(sbi, F2FS_DIRTY_META);
+	si->inmem_pages = get_pages(sbi, F2FS_INMEM_PAGES);
 	si->total_count = (int)sbi->user_block_count / sbi->blocks_per_seg;
 	si->rsvd_segs = reserved_segments(sbi);
 	si->overp_segs = overprovision_segments(sbi);
 	si->valid_count = valid_user_blocks(sbi);
 	si->valid_node_count = valid_node_count(sbi);
 	si->valid_inode_count = valid_inode_count(sbi);
-	si->inline_inode = sbi->inline_inode;
-	si->inline_dir = sbi->inline_dir;
+	si->inline_inode = atomic_read(&sbi->inline_inode);
+	si->inline_dir = atomic_read(&sbi->inline_dir);
 	si->utilization = utilization(sbi);
 
 	si->free_segs = free_segments(sbi);
@@ -249,6 +250,8 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "\nExtent Hit Ratio: %d / %d\n",
 			   si->hit_ext, si->total_ext);
 		seq_puts(s, "\nBalancing F2FS Async:\n");
+		seq_printf(s, "  - inmem: %4d\n",
+			   si->inmem_pages);
 		seq_printf(s, "  - nodes: %4d in %4d\n",
 			   si->ndirty_node, si->node_pages);
 		seq_printf(s, "  - dents: %4d in dirs:%4d\n",
@@ -325,6 +328,9 @@ int f2fs_build_stats(struct f2fs_sb_info *sbi)
 				le32_to_cpu(raw_super->secs_per_zone);
 	si->sbi = sbi;
 	sbi->stat_info = si;
+
+	atomic_set(&sbi->inline_inode, 0);
+	atomic_set(&sbi->inline_dir, 0);
 
 	mutex_lock(&f2fs_stat_mutex);
 	list_add_tail(&si->stat_list, &f2fs_stat_list);

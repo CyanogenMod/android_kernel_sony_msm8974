@@ -238,13 +238,15 @@ void register_inmem_page(struct inode *inode, struct page *page)
 	struct f2fs_inode_info *fi = F2FS_I(inode);
 	struct inmem_pages *new;
 	int err;
-retry:
+
+	SetPagePrivate(page);
+
 	new = f2fs_kmem_cache_alloc(inmem_entry_slab, GFP_NOFS);
 
 	/* add atomic page indices to the list */
 	new->page = page;
 	INIT_LIST_HEAD(&new->list);
-
+retry:
 	/* increase reference count with clean state */
 	mutex_lock(&fi->inmem_lock);
 	err = radix_tree_insert(&fi->inmem_root, page->index, new);
@@ -254,11 +256,11 @@ retry:
 		return;
 	} else if (err) {
 		mutex_unlock(&fi->inmem_lock);
-		kmem_cache_free(inmem_entry_slab, new);
 		goto retry;
 	}
 	get_page(page);
 	list_add_tail(&new->list, &fi->inmem_pages);
+	inc_page_count(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
 	mutex_unlock(&fi->inmem_lock);
 }
 
@@ -274,6 +276,7 @@ void invalidate_inmem_page(struct inode *inode, struct page *page)
 		f2fs_put_page(cur->page, 0);
 		list_del(&cur->list);
 		kmem_cache_free(inmem_entry_slab, cur);
+		dec_page_count(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
 	}
 	mutex_unlock(&fi->inmem_lock);
 }
@@ -315,6 +318,7 @@ void commit_inmem_pages(struct inode *inode, bool abort)
 		f2fs_put_page(cur->page, 1);
 		list_del(&cur->list);
 		kmem_cache_free(inmem_entry_slab, cur);
+		dec_page_count(F2FS_I_SB(inode), F2FS_INMEM_PAGES);
 	}
 	if (submit_bio)
 		f2fs_submit_merged_bio(sbi, DATA, WRITE);
