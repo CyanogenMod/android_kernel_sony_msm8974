@@ -1128,42 +1128,6 @@ free_input_dev:
 	return rc;
 }
 
-static ssize_t ponkey_emu_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "Usage: <ms>\n");
-}
-
-static ssize_t ponkey_emu_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int ms;
-
-	if (sscanf(buf, "%d", &ms)) {
-		qpnp_ponkey_emulate(1);
-
-		if (ms > 10) {
-			msleep(ms);
-		} else {
-			msleep(10);
-		}
-
-		qpnp_ponkey_emulate(0);
-	}
-
-	return count;
-}
-static struct kobj_attribute ponkey_emu_interface = __ATTR(ponkey_emu, 0644, ponkey_emu_show, ponkey_emu_store);
-
-static struct attribute *pon_attrs[] = {
-	&ponkey_emu_interface.attr, 
-	NULL,
-};
-
-static struct attribute_group pon_interface_group = {
-	.attrs = pon_attrs,
-};
-
-static struct kobject *pon_kobject;
-
 static int __devinit qpnp_pon_probe(struct spmi_device *spmi)
 {
 	struct qpnp_pon *pon;
@@ -1338,15 +1302,6 @@ static int __devinit qpnp_pon_probe(struct spmi_device *spmi)
 #ifdef CONFIG_POWERKEY_FORCECRASH
 	qpnp_powerkey_forcecrash_init(spmi, pon->base);
 #endif
-
-	pon_kobject = kobject_create_and_add("ponkey", kernel_kobj);
-	if (!pon_kobject) {
-		pr_err("[POnKey] Failed to create kobject interface\n");
-	}
-	rc = sysfs_create_group(pon_kobject, &pon_interface_group);
-	if (rc) {
-		kobject_put(pon_kobject);
-	}
 
 	/* register the PON configurations */
 	rc = qpnp_pon_config_init(pon);
