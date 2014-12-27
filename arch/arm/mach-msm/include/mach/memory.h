@@ -22,7 +22,7 @@
 
 #if defined(CONFIG_KEXEC_HARDBOOT)
 #if defined(CONFIG_MACH_SONY_SIRIUS)
-#define KEXEC_HB_PAGE_ADDR		UL(0x00000000)
+#define KEXEC_HB_PAGE_ADDR		UL(0xD400000)
 #else
 #error "Adress for kexec hardboot page not defined"
 #endif
