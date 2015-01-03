@@ -76,7 +76,6 @@ static bool adc_det;
 static bool display_on_in_boot;
 static bool display_onoff_state;
 static unsigned char panel_id[1];
-static int lcm_first_boot = -1;
 bool alt_panelid_cmd;
 static bool mdss_panel_flip_ud = false;
 static int mdss_dsi_panel_detect(struct mdss_panel_data *pdata);
@@ -328,9 +327,6 @@ static int mdss_dsi_panel_reset_seq(struct mdss_panel_data *pdata, int enable)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 	spec_pdata = ctrl_pdata->spec_pdata;
-
-	if (lcm_first_boot)
-		return 0;
 
 	if (!ctrl_pdata->disp_en_gpio)
 		pr_debug("%s:%d, disp_en line not configured\n",
@@ -1094,8 +1090,6 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		return 0;
 
 	mipi = &pdata->panel_info.mipi;
-
-	lcm_first_boot = 0;
 
 	if (spec_pdata->pcc_data.pcc_sts & PCC_STS_UD) {
 		mdss_dsi_panel_pcc_setup(pdata);
@@ -2208,11 +2202,6 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			pinfo->panel_id_name = panel_name;
 			pr_info("%s: Panel Name = %s\n", __func__, panel_name);
 		}
-
-		tmp = (int) of_property_read_bool(next,
-			"somc,first-boot-aware");
-		if (tmp)
-			lcm_first_boot = tmp;
 
 		mdss_panel_flip_ud = of_property_read_bool(next,
 					"qcom,mdss-pan-flip-ud");
