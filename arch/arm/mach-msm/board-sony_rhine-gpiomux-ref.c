@@ -21,6 +21,9 @@
 #include <mach/socinfo.h>
 #include "sony_gpiomux.h"
 
+#define INT_MAX			((int)(~0U>>1))
+#define GPIOMUX_FOLLOW_QCT	INT_MAX
+
 static struct gpiomux_setting __initdata **qct_sets;
 
 static void __init gpiomux_set_qct_configs(struct msm_gpiomux_config *configs,
@@ -1270,14 +1273,14 @@ static void msm_gpiomux_sdc4_install(void) {}
 static struct msm_gpiomux_config apq8074_dragonboard_ts_config[] __initdata = {
 	{
 		/* BLSP1 QUP I2C_DATA */
-		.gpio      = 2,
+		.gpio = 2,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
 	{
 		/* BLSP1 QUP I2C_CLK */
-		.gpio      = 3,
+		.gpio = 3,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
