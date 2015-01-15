@@ -53,6 +53,10 @@
 #include <linux/persistent_ram.h>
 #include "board-8974-console.h"
 
+#ifdef CONFIG_KEXEC_HARDBOOT
+#include <linux/memblock.h>
+#endif
+
 static struct memtype_reserve msm8974_reserve_table[] __initdata = {
 	[MEMTYPE_SMI] = {
 	},
@@ -113,6 +117,17 @@ static struct platform_device ram_console_device = {
 
 void __init msm_8974_reserve(void)
 {
+#ifdef CONFIG_KEXEC_HARDBOOT
+	// Reserve space for hardboot page - just after ram_console
+	struct membank *mb = &meminfo.bank[meminfo.nr_banks - 1];
+	phys_addr_t start = mb->start + mb->size + MSM_PERSISTENT_RAM_SIZE;
+	int ret = memblock_remove(start, SZ_1M);
+	if(!ret)
+		pr_info("Hardboot page reserved at 0x%X\n", start);
+	else
+		pr_err("Failed to reserve space for hardboot page at 0x%X!\n", start);
+#endif
+
 #ifdef CONFIG_ANDROID_PERSISTENT_RAM
 	reserve_persistent_ram();
 #endif
