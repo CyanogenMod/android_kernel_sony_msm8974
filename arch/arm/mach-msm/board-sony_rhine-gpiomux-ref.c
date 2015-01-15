@@ -21,6 +21,9 @@
 #include <mach/socinfo.h>
 #include "sony_gpiomux.h"
 
+#define INT_MAX			((int)(~0U>>1))
+#define GPIOMUX_FOLLOW_QCT	INT_MAX
+
 static struct gpiomux_setting __initdata **qct_sets;
 
 static void __init gpiomux_set_qct_configs(struct msm_gpiomux_config *configs,
@@ -154,6 +157,46 @@ static struct gpiomux_setting slimbus = {
 	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_KEEPER,
 };
+
+#if defined(CONFIG_KS8851) || defined(CONFIG_KS8851_MODULE)
+static struct gpiomux_setting gpio_eth_config = {
+	.pull = GPIOMUX_PULL_UP,
+	.drv = GPIOMUX_DRV_2MA,
+	.func = GPIOMUX_FUNC_GPIO,
+};
+
+static struct gpiomux_setting gpio_spi_cs2_config = {
+	.func = GPIOMUX_FUNC_4,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting gpio_spi_config = {
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_12MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+static struct gpiomux_setting gpio_spi_susp_config = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting gpio_spi_cs1_config = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct msm_gpiomux_config msm_eth_configs[] = {
+	{
+		.gpio = KS8851_IRQ_GPIO,
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gpio_eth_config,
+		}
+	},
+};
+#endif
 
 static struct gpiomux_setting gpio_suspend_config[] = {
 	{
@@ -555,6 +598,43 @@ static struct msm_gpiomux_config msm_epm_configs[] __initdata = {
 };
 
 static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
+#if defined(CONFIG_KS8851) || defined(CONFIG_KS8851_MODULE)
+	{
+		.gpio      = 0,		/* BLSP1 QUP SPI_DATA_MOSI */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_spi_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+		},
+	},
+	{
+		.gpio      = 1,		/* BLSP1 QUP SPI_DATA_MISO */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_spi_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+		},
+	},
+	{
+		.gpio      = 3,		/* BLSP1 QUP SPI_CLK */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_spi_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+		},
+	},
+	{
+		.gpio      = 9,		/* BLSP1 QUP SPI_CS2A_N */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_spi_cs2_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+		},
+	},
+	{
+		.gpio      = 8,		/* BLSP1 QUP SPI_CS1_N */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_spi_cs1_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+		},
+	},
+#endif
 	{
 		.gpio      = 6,		/* BLSP1 QUP2 I2C_DAT */
 		.settings = {
@@ -1270,14 +1350,14 @@ static void msm_gpiomux_sdc4_install(void) {}
 static struct msm_gpiomux_config apq8074_dragonboard_ts_config[] __initdata = {
 	{
 		/* BLSP1 QUP I2C_DATA */
-		.gpio      = 2,
+		.gpio = 2,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
 	{
 		/* BLSP1 QUP I2C_CLK */
-		.gpio      = 3,
+		.gpio = 3,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
