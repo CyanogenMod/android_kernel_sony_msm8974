@@ -1957,6 +1957,8 @@ limSendSmeRemoveKeyRsp(tpAniSirGlobal pMac,
     {
         pBuf = pSirSmeRemoveKeyRsp->peerMacAddr;
         vos_mem_copy( pBuf, (tANI_U8 *) peerMacAddr, sizeof(tSirMacAddr));
+        pBuf += sizeof(tSirMacAddr);
+        limCopyU32(pBuf, resultCode);
     }
     
     pSirSmeRemoveKeyRsp->messageType = eWNI_SME_REMOVEKEY_RSP;
@@ -2482,62 +2484,6 @@ limSendSmePEGetRoamRssiRsp(tpAniSirGlobal pMac, tANI_U16 msgType, void* stats)
 } /*** end limSendSmePEGetRoamRssiRsp() ***/
 
 #endif
-
-
-#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
-/**
- * limSendSmePECcxTsmRsp()
- *
- *FUNCTION:
- * This function is called to send tsm stats response to HDD.
- * This function posts the result back to HDD. This is a response to
- * HDD's request to get tsm stats.
- *
- *PARAMS:
- * @param pMac   - Pointer to global pMac structure
- * @param pStats - Pointer to TSM Stats
- *
- * @return none
- */
-
-void
-limSendSmePECcxTsmRsp(tpAniSirGlobal pMac, tAniGetTsmStatsRsp *pStats)
-{
-    tSirMsgQ            mmhMsg;
-    tANI_U8             sessionId;
-    tAniGetTsmStatsRsp *pPeStats = (tAniGetTsmStatsRsp *) pStats;
-    tpPESession         pPeSessionEntry = NULL;
-
-    //Get the Session Id based on Sta Id
-    pPeSessionEntry = peFindSessionByStaId(pMac, pPeStats->staId, &sessionId);
-
-    //Fill the Session Id
-    if(NULL != pPeSessionEntry)
-    {
-      //Fill the Session Id
-      pPeStats->sessionId = pPeSessionEntry->smeSessionId;
-    }
-    else
-    {
-        PELOGE(limLog(pMac, LOGE, FL("Session not found for the Sta id(%d)"),
-            pPeStats->staId);)
-        return;
-    }
-
-    pPeStats->msgType = eWNI_SME_GET_TSM_STATS_RSP;
-    pPeStats->tsmMetrics.RoamingCount = pPeSessionEntry->ccxContext.tsm.tsmMetrics.RoamingCount;
-    pPeStats->tsmMetrics.RoamingDly = pPeSessionEntry->ccxContext.tsm.tsmMetrics.RoamingDly;
-
-    mmhMsg.type = eWNI_SME_GET_TSM_STATS_RSP;
-    mmhMsg.bodyptr = pStats;
-    mmhMsg.bodyval = 0;
-    MTRACE(macTraceMsgTx(pMac, sessionId, mmhMsg.type));
-    limSysProcessMmhMsgApi(pMac, &mmhMsg, ePROT);
-
-    return;
-} /*** end limSendSmePECcxTsmRsp() ***/
-
-#endif /* FEATURE_WLAN_CCX) && FEATURE_WLAN_CCX_UPLOAD */
 
 
 void

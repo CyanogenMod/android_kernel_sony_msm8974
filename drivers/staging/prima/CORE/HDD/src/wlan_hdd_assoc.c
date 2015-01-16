@@ -125,16 +125,6 @@ void hdd_indicateUnprotMgmtFrame(hdd_adapter_t *pAdapter,
                             tANI_U8 frameType );
 #endif
 
-#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
-static void hdd_indicateTsmIe(hdd_adapter_t *pAdapter, tANI_U8 tid,
-                            tANI_U8  state,
-                            tANI_U16 measInterval );
-static void hdd_indicateCckmPreAuth(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo);
-static void hdd_indicateCcxAdjApRepInd(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo);
-static void hdd_indicateCcxBcnReportInd(const hdd_adapter_t *pAdapter, const tCsrRoamInfo *pRoamInfo);
-
-#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
-
 static eHalStatus hdd_RoamSetKeyCompleteHandler( hdd_adapter_t *pAdapter,
                                                 tCsrRoamInfo *pRoamInfo,
                                                 tANI_U32 roamId,
@@ -1586,8 +1576,6 @@ static void hdd_RoamIbssIndicationHandler( hdd_adapter_t *pAdapter,
                              bss);
          }
 
-         netif_carrier_on(pAdapter->dev);
-         netif_tx_start_all_queues(pAdapter->dev);
          break;
       }
 
@@ -1649,6 +1637,7 @@ static int roamRemoveIbssStation( hdd_station_ctx_t *pHddStaCtx, v_U8_t staId )
    int idx = 0;
    v_U8_t  valid_idx   = 0;
    v_U8_t  del_idx   = 0;
+   v_U8_t  empty_slots = 0;
 
    for ( idx = 0; idx < HDD_MAX_NUM_IBSS_STA; idx++ )
    {
@@ -1659,8 +1648,11 @@ static int roamRemoveIbssStation( hdd_station_ctx_t *pHddStaCtx, v_U8_t staId )
          vos_zero_macaddr( &pHddStaCtx->conn_info.peerMacAddress[ idx ] );
 
          fSuccess = TRUE;
+
          // Note the deleted Index, if its 0 we need special handling
          del_idx = idx;
+
+         empty_slots++;
       }
       else
       {
@@ -1668,7 +1660,20 @@ static int roamRemoveIbssStation( hdd_station_ctx_t *pHddStaCtx, v_U8_t staId )
          {
             valid_idx = idx;
          }
+         else
+         {
+            // Found an empty slot
+            empty_slots++;
+         }
       }
+   }
+
+   if (HDD_MAX_NUM_IBSS_STA == empty_slots)
+   {
+      // Last peer departed, set the IBSS state appropriately
+      pHddStaCtx->conn_info.connState = eConnectionState_IbssDisconnected;
+      VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+                 "Last IBSS Peer Departed!!!" );
    }
 
    // Find next active staId, to have a valid sta trigger for TL.
@@ -2146,9 +2151,6 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
                                                   eCsrRoamResult roamResult)
 {
     hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
-#ifdef FEATURE_WLAN_TDLS_OXYGEN_DISAPPEAR_AP
-    tdlsCtx_t *pHddTdlsCtx = WLAN_HDD_GET_TDLS_CTX_PTR(pAdapter);
-#endif
     eHalStatus status = eHAL_STATUS_FAILURE ;
     tANI_U8 staIdx;
 
@@ -2161,9 +2163,6 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
       roamResult == eCSR_ROAM_RESULT_DELETE_ALL_TDLS_PEER_IND? "DEL_ALL_TDLS_PEER_IND" :
       roamResult == eCSR_ROAM_RESULT_UPDATE_TDLS_PEER? "UPDATE_TDLS_PEER" :
       roamResult == eCSR_ROAM_RESULT_LINK_ESTABLISH_REQ_RSP? "LINK_ESTABLISH_REQ_RSP" :
-#ifdef FEATURE_WLAN_TDLS_OXYGEN_DISAPPEAR_AP
-      roamResult == eCSR_ROAM_RESULT_TDLS_DISAPPEAR_AP_IND? "DISAPPEAR_AP_DEREG_STA" :
-#endif
       "UNKNOWN",
        pRoamInfo->staId,
        pRoamInfo->peerMac[0],
@@ -2295,18 +2294,6 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
             complete(&pAdapter->tdls_del_station_comp);
         }
         break ;
-#ifdef FEATURE_WLAN_TDLS_OXYGEN_DISAPPEAR_AP
-        case eCSR_ROAM_RESULT_TDLS_DISAPPEAR_AP_IND:
-        {
-            if (NULL == pHddTdlsCtx)
-                return status;
-
-            pHddTdlsCtx->defer_link_lost_indication = TRUE;
-            VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
-                ("HDD: DISAPPEAR_AP_IND sta id %d"), pRoamInfo->staId) ;
-        }
-        break;
-#endif
         case eCSR_ROAM_RESULT_TEARDOWN_TDLS_PEER_IND:
         {
             hddTdlsPeer_t *curr_peer;
@@ -2363,35 +2350,6 @@ eHalStatus hdd_RoamTdlsStatusUpdateHandler(hdd_adapter_t *pAdapter,
     return status ;
 }
 #endif
-
-static void iw_full_power_cbfn (void *pContext, eHalStatus status)
-{
-    hdd_adapter_t *pAdapter = (hdd_adapter_t *)pContext;
-    hdd_context_t *pHddCtx = NULL;
-    int ret;
-
-    if ((NULL == pAdapter) || (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic))
-    {
-        hddLog(VOS_TRACE_LEVEL_ERROR,
-             "%s: Bad param, pAdapter [%p]",
-               __func__, pAdapter);
-        return;
-    }
-
-    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
-    ret = wlan_hdd_validate_context(pHddCtx);
-    if (0 != ret)
-    {
-        hddLog(VOS_TRACE_LEVEL_ERROR,
-               "%s: HDD context is not valid (%d)", __func__, ret);
-        return;
-    }
-
-    if (pHddCtx->cfg_ini->fIsBmpsEnabled)
-    {
-        sme_RequestBmps(WLAN_HDD_GET_HAL_CTX(pAdapter), NULL, NULL);
-    }
-}
 
 eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U32 roamId,
                                 eRoamCmdStatus roamStatus, eCsrRoamResult roamResult )
@@ -2530,12 +2488,9 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
                 if (pHddCtx->hdd_mcastbcast_filter_set == TRUE)
                 {
                     hdd_conf_mcastbcast_filter(pHddCtx, FALSE);
-
-                    if (VOS_TRUE == pHddCtx->sus_res_mcastbcast_filter_valid) {
-                        pHddCtx->configuredMcastBcastFilter =
-                            pHddCtx->sus_res_mcastbcast_filter;
-                        pHddCtx->sus_res_mcastbcast_filter_valid = VOS_FALSE;
-                    }
+                    pHddCtx->configuredMcastBcastFilter =
+                        pHddCtx->sus_res_mcastbcast_filter;
+                    pHddCtx->sus_res_mcastbcast_filter_valid = VOS_FALSE;
 
                     hddLog(VOS_TRACE_LEVEL_INFO,
                            "offload: disassociation happening, restoring configuredMcastBcastFilter");
@@ -2627,9 +2582,11 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
                     {
                         hddLog( LOGE, FL("Not expected: device is already in BMPS mode, Exit & Enter BMPS again!"));
 
-                        sme_RequestFullPower(WLAN_HDD_GET_HAL_CTX(pAdapter),
-                                         iw_full_power_cbfn, pAdapter,
-                                         eSME_FULL_PWR_NEEDED_BY_HDD);
+                        /* put the device into full power */
+                        wlan_hdd_enter_bmps(pAdapter, DRIVER_POWER_MODE_ACTIVE);
+
+                        /* put the device back into BMPS */
+                        wlan_hdd_enter_bmps(pAdapter, DRIVER_POWER_MODE_AUTO);
                     }
                 }
                 halStatus = hdd_RoamSetKeyCompleteHandler( pAdapter, pRoamInfo, roamId, roamStatus, roamResult );
@@ -2681,34 +2638,6 @@ eHalStatus hdd_smeRoamCallback( void *pContext, tCsrRoamInfo *pRoamInfo, tANI_U3
                                          pRoamInfo->frameType);
             break;
 #endif
-#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
-       case eCSR_ROAM_TSM_IE_IND:
-            hdd_indicateTsmIe(pAdapter, pRoamInfo->tsmIe.tsid,
-                pRoamInfo->tsmIe.state, pRoamInfo->tsmIe.msmt_interval);
-           break;
-
-       case eCSR_ROAM_CCKM_PREAUTH_NOTIFY:
-          {
-              if (eCSR_AUTH_TYPE_CCKM_WPA == pHddStaCtx->conn_info.authType ||
-                  eCSR_AUTH_TYPE_CCKM_RSN == pHddStaCtx->conn_info.authType)
-              {
-                  hdd_indicateCckmPreAuth(pAdapter, pRoamInfo);
-              }
-              break;
-          }
-
-       case eCSR_ROAM_CCX_ADJ_AP_REPORT_IND:
-         {
-             hdd_indicateCcxAdjApRepInd(pAdapter, pRoamInfo);
-             break;
-         }
-
-       case eCSR_ROAM_CCX_BCN_REPORT_IND:
-         {
-            hdd_indicateCcxBcnReportInd(pAdapter, pRoamInfo);
-            break;
-         }
-#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
         default:
             break;
     }
@@ -3877,237 +3806,3 @@ void hdd_indicateUnprotMgmtFrame( hdd_adapter_t *pAdapter,
     }
 }
 #endif
-
-#if defined (FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
-void hdd_indicateTsmIe(hdd_adapter_t *pAdapter, tANI_U8 tid,
-                                  tANI_U8 state,
-                                  tANI_U16 measInterval )
-{
-    union iwreq_data wrqu;
-    char buf[IW_CUSTOM_MAX + 1];
-    int nBytes = 0;
-
-    if (NULL == pAdapter)
-        return;
-
-    // create the event
-    memset(&wrqu, '\0', sizeof(wrqu));
-    memset(buf, '\0', sizeof(buf));
-
-    hddLog(VOS_TRACE_LEVEL_INFO, "TSM Ind tid(%d) state(%d) MeasInt(%d)",
-                        tid, state, measInterval);
-
-    nBytes = snprintf(buf, IW_CUSTOM_MAX, "TSMIE=%d:%d:%d",tid,state,measInterval);
-
-    wrqu.data.pointer = buf;
-    wrqu.data.length = nBytes;
-    // send the event
-    wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
-}
-
-void hdd_indicateCckmPreAuth(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo)
-{
-    union iwreq_data wrqu;
-    char buf[IW_CUSTOM_MAX + 1];
-    char *pos = buf;
-    int nBytes = 0, freeBytes = IW_CUSTOM_MAX;
-
-    if ((NULL == pAdapter) || (NULL == pRoamInfo))
-        return;
-
-    // create the event
-    memset(&wrqu, '\0', sizeof(wrqu));
-    memset(buf, '\0', sizeof(buf));
-
-    /* Timestamp0 is lower 32 bits and Timestamp1 is upper 32 bits */
-    hddLog(VOS_TRACE_LEVEL_INFO, "CCXPREAUTHNOTIFY=%02x:%02x:%02x:%02x:%02x:%02x %lu:%lu",
-        pRoamInfo->bssid[0], pRoamInfo->bssid[1], pRoamInfo->bssid[2],
-        pRoamInfo->bssid[3], pRoamInfo->bssid[4], pRoamInfo->bssid[5],
-        pRoamInfo->timestamp[0], pRoamInfo->timestamp[1]);
-
-    nBytes = snprintf(pos, freeBytes, "CCXPREAUTHNOTIFY=");
-    pos += nBytes;
-    freeBytes -= nBytes;
-
-    vos_mem_copy(pos, pRoamInfo->bssid, WNI_CFG_BSSID_LEN);
-    pos += WNI_CFG_BSSID_LEN;
-    freeBytes -= WNI_CFG_BSSID_LEN;
-
-    nBytes = snprintf(pos, freeBytes, " %lu:%lu", pRoamInfo->timestamp[0], pRoamInfo->timestamp[1]);
-    freeBytes -= nBytes;
-
-    wrqu.data.pointer = buf;
-    wrqu.data.length = (IW_CUSTOM_MAX - freeBytes);
-
-    // send the event
-    wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
-}
-
-void hdd_indicateCcxAdjApRepInd(hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo)
-{
-    union iwreq_data wrqu;
-    char buf[IW_CUSTOM_MAX + 1];
-    int nBytes = 0;
-
-    if ((NULL == pAdapter) || (NULL == pRoamInfo))
-        return;
-
-    // create the event
-    memset(&wrqu, '\0', sizeof(wrqu));
-    memset(buf, '\0', sizeof(buf));
-
-    hddLog(VOS_TRACE_LEVEL_INFO, "CCXADJAPREP=%u", pRoamInfo->tsmRoamDelay);
-
-    nBytes = snprintf(buf, IW_CUSTOM_MAX, "CCXADJAPREP=%u", pRoamInfo->tsmRoamDelay);
-
-    wrqu.data.pointer = buf;
-    wrqu.data.length = nBytes;
-
-    // send the event
-    wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
-}
-
-void hdd_indicateCcxBcnReportInd(const hdd_adapter_t *pAdapter,
-                                 const tCsrRoamInfo *pRoamInfo)
-{
-    union iwreq_data wrqu;
-    char buf[IW_CUSTOM_MAX];
-    char *pos = buf;
-    int nBytes = 0, freeBytes = IW_CUSTOM_MAX;
-    tANI_U8 i = 0, len = 0;
-    tANI_U8 tot_bcn_ieLen = 0;  /* total size of the beacon report data */
-    tANI_U8 lastSent = 0, sendBss = 0;
-    int bcnRepFieldSize = sizeof(pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[0].bcnReportFields);
-    tANI_U8 ieLenByte = 1;
-    /* CCXBCNREP=meas_tok<sp>flag<sp>no_of_bss<sp>tot_bcn_ie_len = 18 bytes */
-#define CCXBCNREPHEADER_LEN  (18)
-
-    if ((NULL == pAdapter) || (NULL == pRoamInfo))
-        return;
-
-    /* Custom event can pass maximum of 256 bytes of data,
-       based on the IE len we need to identify how many BSS info can
-       be filled in to custom event data */
-    /*
-       meas_tok<sp>flag<sp>no_of_bss<sp>tot_bcn_ie_len bcn_rep_data
-         bcn_rep_data will have bcn_rep_fields,ie_len,ie without any spaces
-         CCXBCNREP=meas_tok<sp>flag<sp>no_of_bss<sp>tot_bcn_ie_len = 18 bytes
-    */
-
-    if ((pRoamInfo->pCcxBcnReportRsp->flag >> 1) && (!pRoamInfo->pCcxBcnReportRsp->numBss))
-    {
-        hddLog(VOS_TRACE_LEVEL_INFO, "Measurement Done but no scan results");
-        /* If the measurement is none and no scan results found,
-            indicate the supplicant about measurement done */
-        memset(&wrqu, '\0', sizeof(wrqu));
-        memset(buf, '\0', sizeof(buf));
-
-        hddLog(VOS_TRACE_LEVEL_INFO, "CCXBCNREP=%d %d %d %d",
-            pRoamInfo->pCcxBcnReportRsp->measurementToken, pRoamInfo->pCcxBcnReportRsp->flag,
-            pRoamInfo->pCcxBcnReportRsp->numBss, tot_bcn_ieLen);
-
-        nBytes = snprintf(pos, freeBytes, "CCXBCNREP=%d %d %d",
-            pRoamInfo->pCcxBcnReportRsp->measurementToken, pRoamInfo->pCcxBcnReportRsp->flag,
-            pRoamInfo->pCcxBcnReportRsp->numBss);
-
-        wrqu.data.pointer = buf;
-        wrqu.data.length = nBytes;
-        // send the event
-        wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
-    }
-    else
-    {
-        while (lastSent < pRoamInfo->pCcxBcnReportRsp->numBss)
-        {
-            memset(&wrqu, '\0', sizeof(wrqu));
-            memset(buf, '\0', sizeof(buf));
-            tot_bcn_ieLen = 0;
-            sendBss = 0;
-            pos = buf;
-            freeBytes = IW_CUSTOM_MAX;
-
-            for (i = lastSent; i < pRoamInfo->pCcxBcnReportRsp->numBss; i++)
-            {
-                len = bcnRepFieldSize + ieLenByte + pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i].ieLen;
-                if ((len + tot_bcn_ieLen) > (IW_CUSTOM_MAX - CCXBCNREPHEADER_LEN))
-                {
-                    break;
-                }
-                tot_bcn_ieLen += len;
-                sendBss++;
-                hddLog(VOS_TRACE_LEVEL_INFO, "i(%d) sizeof bcnReportFields(%d)"
-                             "IeLength(%d) Length of Ie(%d) totLen(%d)",
-                              i, bcnRepFieldSize, 1,
-                              pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i].ieLen,
-                              tot_bcn_ieLen);
-            }
-
-            hddLog(VOS_TRACE_LEVEL_INFO, "Sending %d BSS Info", sendBss);
-            hddLog(VOS_TRACE_LEVEL_INFO, "CCXBCNREP=%d %d %d %d",
-                pRoamInfo->pCcxBcnReportRsp->measurementToken, pRoamInfo->pCcxBcnReportRsp->flag,
-                sendBss, tot_bcn_ieLen);
-
-            nBytes = snprintf(pos, freeBytes, "CCXBCNREP=%d %d %d ",
-                pRoamInfo->pCcxBcnReportRsp->measurementToken, pRoamInfo->pCcxBcnReportRsp->flag,
-                sendBss);
-            pos += nBytes;
-            freeBytes -= nBytes;
-
-            /* Copy total Beacon report data length */
-            vos_mem_copy(pos, (char*)&tot_bcn_ieLen, sizeof(tot_bcn_ieLen));
-            pos += sizeof(tot_bcn_ieLen);
-            freeBytes -= sizeof(tot_bcn_ieLen);
-
-            for (i = 0; i < sendBss; i++)
-            {
-                hddLog(VOS_TRACE_LEVEL_INFO, "ChanNum(%d) Spare(%d) MeasDuration(%d)"
-                       " PhyType(%d) RecvSigPower(%d) ParentTSF(%lu)"
-                       " TargetTSF[0](%lu) TargetTSF[1](%lu) BeaconInterval(%u)"
-                       " CapabilityInfo(%d) BSSID(%02X:%02X:%02X:%02X:%02X:%02X)",
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.ChanNum,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Spare,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.MeasDuration,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.PhyType,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.RecvSigPower,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.ParentTsf,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.TargetTsf[0],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.TargetTsf[1],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.BcnInterval,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.CapabilityInfo,
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Bssid[0],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Bssid[1],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Bssid[2],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Bssid[3],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Bssid[4],
-                        pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields.Bssid[5]);
-
-                /* bcn report fields are copied */
-                len = sizeof(pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields);
-                vos_mem_copy(pos, (char*)&pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].bcnReportFields, len);
-                pos += len;
-                freeBytes -= len;
-
-                /* Add 1 byte of ie len */
-                len = pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].ieLen;
-                vos_mem_copy(pos, (char*)&len, sizeof(len));
-                pos += sizeof(len);
-                freeBytes -= sizeof(len);
-
-                /* copy IE from scan results */
-                vos_mem_copy(pos, (char*)pRoamInfo->pCcxBcnReportRsp->bcnRepBssInfo[i+lastSent].pBuf, len);
-                pos += len;
-                freeBytes -= len;
-            }
-
-            wrqu.data.pointer = buf;
-            wrqu.data.length = IW_CUSTOM_MAX - freeBytes;
-
-            // send the event
-            wireless_send_event(pAdapter->dev, IWEVCUSTOM, &wrqu, buf);
-            lastSent += sendBss;
-        }
-    }
-}
-
-#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
-

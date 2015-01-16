@@ -185,7 +185,7 @@ limSearchAndDeleteDialogueToken(tpAniSirGlobal pMac, tANI_U8 token, tANI_U16 ass
         //if the node being deleted is the last one then we also need to move the tail pointer to the prevNode.
         if(NULL == pCurrNode->next)
               pMac->lim.pDialogueTokenTail = pPrevNode;
-        vos_mem_free(pCurrNode);
+        palFreeMemory(pMac->hHdd, (void *) pCurrNode);
         return eSIR_SUCCESS;
     }
 
@@ -690,12 +690,6 @@ char *limMsgStr(tANI_U32 msgType)
             return "eWNI_PMC_EXIT_BMPS_IND";
         case eWNI_SME_SET_BCN_FILTER_REQ:
             return "eWNI_SME_SET_BCN_FILTER_REQ";
-#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
-        case eWNI_SME_GET_TSM_STATS_REQ:
-            return "eWNI_SME_GET_TSM_STATS_REQ";
-        case eWNI_SME_GET_TSM_STATS_RSP:
-            return "eWNI_SME_GET_TSM_STATS_RSP";
-#endif /* FEATURE_WLAN_CCX && FEATURE_WLAN_CCX_UPLOAD */
         default:
             return "INVALID SME message";
     }
@@ -1092,11 +1086,11 @@ limCleanupMlm(tpAniSirGlobal pMac)
         tx_timer_deactivate(&pMac->lim.limTimers.gLimRemainOnChannelTimer);
         tx_timer_delete(&pMac->lim.limTimers.gLimRemainOnChannelTimer);
 
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
         // Deactivate and delete TSM
         tx_timer_deactivate(&pMac->lim.limTimers.gLimCcxTsmTimer);
         tx_timer_delete(&pMac->lim.limTimers.gLimCcxTsmTimer);
-#endif /* FEATURE_WLAN_CCX && !FEATURE_WLAN_CCX_UPLOAD */
+#endif
 
         tx_timer_deactivate(&pMac->lim.limTimers.gLimDisassocAckTimer);
         tx_timer_delete(&pMac->lim.limTimers.gLimDisassocAckTimer);
@@ -5474,12 +5468,7 @@ limValidateDeltsReq(tpAniSirGlobal pMac, tpSirDeltsReq pDeltsReq, tSirMacAddr pe
            psessionEntry->gLimEdcaParams[upToAc(tsinfo->traffic.userPrio)].aci.acm)
       {
         //send message to HAL to delete TS
-        if(eSIR_SUCCESS != limSendHalMsgDelTs(pMac,
-                                              pSta->staIndex,
-                                              tspecIdx,
-                                              pDeltsReq->req,
-                                              psessionEntry->peSessionId,
-                                              psessionEntry->bssId))
+        if(eSIR_SUCCESS != limSendHalMsgDelTs(pMac, pSta->staIndex, tspecIdx, pDeltsReq->req, psessionEntry->peSessionId))
         {
           limLog(pMac, LOGW, FL("DelTs with UP %d failed in limSendHalMsgDelTs - ignoring request"),
                            tsinfo->traffic.userPrio);
@@ -5739,17 +5728,22 @@ void limDelAllBASessions(tpAniSirGlobal pMac)
 \return None
 -------------------------------------------------------------*/
 
-void limDelPerBssBASessionsBtc(tpAniSirGlobal pMac)
+void limDelAllBASessionsBtc(tpAniSirGlobal pMac)
 {
-    tANI_U8 sessionId;
+    tANI_U32 i;
     tpPESession pSessionEntry;
-    pSessionEntry = peFindSessionByBssid(pMac,pMac->btc.btcBssfordisableaggr,
-                                                                &sessionId);
-    if (pSessionEntry)
+
+    for (i = 0; i < pMac->lim.maxBssId; i++)
     {
-        PELOGW(limLog(pMac, LOGW,
-        "Deleting the BA for session %d as host got BTC event", sessionId);)
-        limDeleteBASessions(pMac, pSessionEntry, BA_RECIPIENT);
+        pSessionEntry = peFindSessionBySessionId(pMac, i);
+        if (pSessionEntry)
+        {
+            if (SIR_BAND_2_4_GHZ ==
+                limGetRFBand(pSessionEntry->currentOperChannel))
+            {
+                limDeleteBASessions(pMac, pSessionEntry, BA_RECIPIENT);
+            }
+        }
     }
 }
 

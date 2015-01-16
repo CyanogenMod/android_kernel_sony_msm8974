@@ -452,11 +452,6 @@ typedef enum
   /* WLAN FW LPHB config request */
   WDI_LPHB_CFG_REQ                              = 85,
 
-#ifdef FEATURE_WLAN_BATCH_SCAN
-  /* WLAN FW set batch scan request */
-  WDI_SET_BATCH_SCAN_REQ                        = 86,
-#endif
-
   WDI_MAX_REQ,
 
   /*Send a suspend Indication down to HAL*/
@@ -482,13 +477,6 @@ typedef enum
 
   /*Keep adding the indications to the max request
     such that we keep them sepparate */
-
-#ifdef FEATURE_WLAN_BATCH_SCAN
-  /*Send stop batch scan indication to FW*/
-  WDI_STOP_BATCH_SCAN_IND,
-  /*Send stop batch scan indication to FW*/
-  WDI_TRIGGER_BATCH_SCAN_RESULT_IND,
-#endif
 
   WDI_MAX_UMAC_IND
 }WDI_RequestEnumType; 
@@ -748,10 +736,6 @@ typedef enum
   /* WLAN FW LPHB Config response */
   WDI_LPHB_CFG_RESP                             = 84,
 
-#ifdef FEATURE_WLAN_BATCH_SCAN
-  WDI_SET_BATCH_SCAN_RESP                        = 85,
-#endif
-
   /*-------------------------------------------------------------------------
     Indications
      !! Keep these last in the enum if possible
@@ -803,19 +787,13 @@ typedef enum
   WDI_HAL_TDLS_IND                     = WDI_HAL_IND_MIN + 13,
 
   /* LPHB timeout indication */
-  WDI_HAL_LPHB_WAIT_TIMEOUT_IND        = WDI_HAL_IND_MIN + 14,
+  WDI_HAL_LPHB_IND                     = WDI_HAL_IND_MIN + 14,
 
   /* IBSS Peer Inactivity Indication from FW to Host */
   WDI_HAL_IBSS_PEER_INACTIVITY_IND     = WDI_HAL_IND_MIN + 15,
 
   /* Periodic Tx Pattern Indication from FW to Host */
   WDI_HAL_PERIODIC_TX_PTRN_FW_IND     = WDI_HAL_IND_MIN + 16,
-
-
-#ifdef FEATURE_WLAN_BATCH_SCAN
-  WDI_BATCHSCAN_RESULT_IND           =  WDI_HAL_IND_MIN + 17,
-#endif
-
 
   WDI_MAX_RESP
 }WDI_ResponseEnumType; 
@@ -2790,41 +2768,6 @@ WDI_Status WDI_ProcessLPHBConfReq
 );
 #endif /* FEATURE_WLAN_LPHB */
 
-#ifdef FEATURE_WLAN_BATCH_SCAN
-/**
- @brief WDI_ProcessSetBatchScanReq -
-    Send set batch scan configuration request to FW
-
- @param  pWDICtx : wdi context
-         pEventData : indication data
-
- @see
- @return success or failure
-*/
-WDI_Status WDI_ProcessSetBatchScanReq
-(
-  WDI_ControlBlockType*  pWDICtx,
-  WDI_EventInfoType*     pEventData
-);
-
-/**
- @brief WDI_ProcessGetBatchScanReq -
-    Send get batch scan request to FW
-
- @param  pWDICtx : wdi context
-         pEventData : indication data
-
- @see
- @return success or failure
-*/
-WDI_Status WDI_ProcessGetBatchScanReq
-(
-  WDI_ControlBlockType*  pWDICtx,
-  WDI_EventInfoType*     pEventData
-);
-#endif /* FEATURE_WLAN_BATCH_SCAN */
-
-
 /*=========================================================================
                              Indications
 =========================================================================*/
@@ -2946,43 +2889,6 @@ WDI_ProcessDelPeriodicTxPtrnInd
   WDI_ControlBlockType*  pWDICtx,
   WDI_EventInfoType*     pEventData
 );
-
-#ifdef FEATURE_WLAN_BATCH_SCAN
-/**
-  @brief Process stop batch scan indications function
-         It is called when Main FSM allows it
-
-  @param  pWDICtx:         pointer to the WLAN DAL context
-          pEventData:      pointer to the event information structure
-
-  @see
-  @return Result of the function call
- */
- WDI_Status
- WDI_ProcessStopBatchScanInd
- (
-   WDI_ControlBlockType*  pWDICtx,
-   WDI_EventInfoType*     pEventData
- );
-
-/**
-  @brief This API is called to trigger batch scan results from FW
-         It is called when Main FSM allows it
-
-  @param  pWDICtx:         pointer to the WLAN DAL context
-          pEventData:      pointer to the event information structure
-
-  @see
-  @return Result of the function call
- */
- WDI_Status
- WDI_ProcessTriggerBatchScanResultInd
- (
-   WDI_ControlBlockType*  pWDICtx,
-   WDI_EventInfoType*     pEventData
- );
-
-#endif
 
 /*========================================================================
           Main DAL Control Path Response Processing API 
@@ -4391,7 +4297,7 @@ WDI_ProcessTxPerHitInd
 
 #ifdef FEATURE_WLAN_LPHB
 /**
- @brief WDI_ProcessLphbWaitTimeoutInd -
+ @brief WDI_ProcessLphbInd -
     This function will be invoked when FW detects low power
     heart beat failure
 
@@ -4402,7 +4308,7 @@ WDI_ProcessTxPerHitInd
  @return Result of the function call
 */
 WDI_Status
-WDI_ProcessLphbWaitTimeoutInd
+WDI_ProcessLphbInd
 (
   WDI_ControlBlockType*  pWDICtx,
   WDI_EventInfoType*     pEventData
@@ -5522,41 +5428,6 @@ WDI_Status WDI_ProcessLphbCfgRsp
   WDI_EventInfoType*     pEventData
 );
 #endif /* FEATURE_WLAN_LPHB */
-
-#ifdef FEATURE_WLAN_BATCH_SCAN
-/**
- @brief WDI_ProcessSetBatchScanRsp -
-     Process set batch scan response from FW
-
- @param  pWDICtx : wdi context
-         pEventData : indication data
-
- @see
- @return Result of the function call
-*/
-WDI_Status WDI_ProcessSetBatchScanRsp
-(
-  WDI_ControlBlockType*  pWDICtx,
-  WDI_EventInfoType*     pEventData
-);
-
-/**
- @brief Process batch scan response from FW
-
- @param  pWDICtx:        pointer to the WLAN DAL context
-         pEventData:     pointer to the event information structure
-
- @see
- @return Result of the function call
-*/
-WDI_Status
-WDI_ProcessBatchScanResultInd
-(
-  WDI_ControlBlockType*  pWDICtx,
-  WDI_EventInfoType*     pEventData
-);
-
-#endif /* FEATURE_WLAN_BATCH_SCAN */
 
 #endif /*WLAN_QCT_WDI_I_H*/
 

@@ -64,10 +64,10 @@
 #include "smeQosInternal.h"
 #include "wlan_qct_wda.h"
 
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
 #include "vos_utils.h"
 #include "csrCcx.h"
-#endif /* FEATURE_WLAN_CCX && !FEATURE_WLAN_CCX_UPLOAD*/
+#endif /* FEATURE_WLAN_CCX */
 
 tANI_U8 csrWpaOui[][ CSR_WPA_OUI_SIZE ] = {
     { 0x00, 0x50, 0xf2, 0x00 },
@@ -6106,13 +6106,7 @@ v_REGDOMAIN_t csrGetCurrentRegulatoryDomain(tpAniSirGlobal pMac)
 }
 
 
-eHalStatus csrGetRegulatoryDomainForCountry
-(
-tpAniSirGlobal pMac,
-tANI_U8 *pCountry,
-v_REGDOMAIN_t *pDomainId,
-v_CountryInfoSource_t source
-)
+eHalStatus csrGetRegulatoryDomainForCountry(tpAniSirGlobal pMac, tANI_U8 *pCountry, v_REGDOMAIN_t *pDomainId)
 {
     eHalStatus status = eHAL_STATUS_INVALID_PARAMETER;
     VOS_STATUS vosStatus;
@@ -6123,10 +6117,7 @@ v_CountryInfoSource_t source
     {
         countryCode[0] = pCountry[0];
         countryCode[1] = pCountry[1];
-        vosStatus = vos_nv_getRegDomainFromCountryCode(&domainId,
-                                                       countryCode,
-                                                       source);
-
+        vosStatus = vos_nv_getRegDomainFromCountryCode( &domainId, countryCode );
         if( VOS_IS_STATUS_SUCCESS(vosStatus) )
         {
             if( pDomainId )
@@ -6174,15 +6165,10 @@ tANI_BOOLEAN csrMatchCountryCode( tpAniSirGlobal pMac, tANI_U8 *pCountry, tDot11
             //Make sure this country is recognizable
             if( pIes->Country.present )
             {
-                status = csrGetRegulatoryDomainForCountry(pMac,
-                                           pIes->Country.country,
-                                           &domainId, COUNTRY_QUERY);
+                status = csrGetRegulatoryDomainForCountry( pMac, pIes->Country.country, &domainId );
                 if( !HAL_STATUS_SUCCESS( status ) )
                 {
-                     status = csrGetRegulatoryDomainForCountry(pMac,
-                                                 pMac->scan.countryCode11d,
-                                                 (v_REGDOMAIN_t *) &domainId,
-                                                 COUNTRY_QUERY);
+                     status = csrGetRegulatoryDomainForCountry( pMac, pMac->scan.countryCode11d,(v_REGDOMAIN_t *) &domainId );
                      if( !HAL_STATUS_SUCCESS( status ) )
                      {
                            fRet = eANI_BOOLEAN_FALSE;

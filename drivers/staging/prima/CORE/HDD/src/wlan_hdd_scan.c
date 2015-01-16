@@ -949,7 +949,8 @@ int iw_set_cscan(struct net_device *dev, struct iw_request_info *info,
         int i, j, ssid_start;
         hdd_scan_pending_option_e scanPendingOption = WEXT_SCAN_PENDING_GIVEUP;
 
-        str_ptr = extra;
+        /* save the original buffer */
+        str_ptr = wrqu->data.pointer;
 
         i = WEXT_CSCAN_HEADER_SIZE;
 
@@ -1172,8 +1173,8 @@ exit_point:
 }
 
 /* Abort any MAC scan if in progress */
-void hdd_abort_mac_scan(hdd_context_t* pHddCtx)
+void hdd_abort_mac_scan(hdd_context_t* pHddCtx, tANI_U8 sessionId)
 {
-    sme_AbortMacScan(pHddCtx->hHal);
+    sme_AbortMacScan(pHddCtx->hHal, sessionId);
 }
 

@@ -61,8 +61,6 @@
 #include "aniGlobal.h"
 
 
-#ifdef TRACE_RECORD
-
 #define CASE_RETURN_STRING( str )           \
     case ( ( str ) ): return( (tANI_U8*)(#str) ); break \
 
@@ -107,7 +105,7 @@ typedef struct sTraceData
 }tTraceData;
 
 
-
+#ifdef TRACE_RECORD
 void macTraceInit(tpAniSirGlobal pMac);
 void macTraceReset(tpAniSirGlobal pMac);
 void macTrace(tpAniSirGlobal pMac,  tANI_U8 code, tANI_U8 session, tANI_U32 data);
@@ -137,6 +135,34 @@ tANI_U8* macTraceGetLimSmeState(tANI_U16 limState);
 tANI_U8* macTraceGetLimMlmState(tANI_U16 mlmState);
 tANI_U8* macTraceGetTLState(tANI_U16 tlState);
 
+#else /* TRACE_RECORD */
+
+static inline void macTraceInit(tpAniSirGlobal pMac) {}
+static inline void macTraceReset(tpAniSirGlobal pMac) {}
+static inline void macTrace(tpAniSirGlobal pMac,  tANI_U8 code, tANI_U8 session, tANI_U32 data) {}
+static inline void macTraceNew(tpAniSirGlobal pMac,  tANI_U8 module, tANI_U8 code, tANI_U8 session, tANI_U32 data) {}
+static inline void macTraceDumpAll(tpAniSirGlobal pMac, tANI_U8 code, tANI_U8 session, tANI_U32 count) {}
+static inline void macTraceCfg(tpAniSirGlobal pMac, tANI_U32 enable, tANI_U32 dumpWhenFull, tANI_U32 code, tANI_U32 session) {}
+static inline void macTraceRegister( tpAniSirGlobal pMac, VOS_MODULE_ID moduleId,    tpTraceCb traceCb) {}
+static inline tANI_U8* macTraceGetCfgMsgString( tANI_U16 cfgMsg ) { return NULL; }
+static inline tANI_U8* macTraceGetLimMsgString( tANI_U16 limMsg ) { return NULL; }
+static inline tANI_U8* macTraceGetWdaMsgString( tANI_U16 wdaMsg ) { return NULL; }
+static inline tANI_U8* macTraceGetSmeMsgString( tANI_U16 smeMsg ) { return NULL; }
+static inline tANI_U8* macTraceGetModuleString( tANI_U8 moduleId) { return NULL; }
+static inline tANI_U8* macTraceGetInfoLogString( tANI_U16 infoLog ) { return NULL; }
+
+static inline tANI_U8* macTraceGetHDDWlanConnState(tANI_U16 connState) { return NULL; }
+
+#ifdef WLAN_FEATURE_P2P_DEBUG
+static inline tANI_U8* macTraceGetP2PConnState(tANI_U16 connState) { return NULL; }
+#endif
+
+static inline tANI_U8* macTraceGetNeighbourRoamState(tANI_U16 neighbourRoamState) { return NULL; }
+static inline tANI_U8* macTraceGetcsrRoamState(tANI_U16 csrRoamState) { return NULL; }
+static inline tANI_U8* macTraceGetcsrRoamSubState(tANI_U16 csrRoamSubState) { return NULL; }
+static inline tANI_U8* macTraceGetLimSmeState(tANI_U16 limState) { return NULL; }
+static inline tANI_U8* macTraceGetLimMlmState(tANI_U16 mlmState) { return NULL; }
+static inline tANI_U8* macTraceGetTLState(tANI_U16 tlState) { return NULL; }
 #endif
 
 #endif

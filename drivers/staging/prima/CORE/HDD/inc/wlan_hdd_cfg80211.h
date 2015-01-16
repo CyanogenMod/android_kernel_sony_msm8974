@@ -161,12 +161,6 @@ void wlan_hdd_linux_reg_notifier(struct wiphy *wiphy, struct regulatory_request 
 #else
 int wlan_hdd_linux_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
 #endif
-#else
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
-void wlan_hdd_crda_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
-#else
-int wlan_hdd_crda_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
-#endif
 #endif
 
 extern v_VOID_t hdd_connSetConnectionState( hdd_station_ctx_t *pHddStaCtx,
@@ -180,7 +174,7 @@ int wlan_hdd_cfg80211_send_tdls_discover_req(struct wiphy *wiphy,
 extern void wlan_hdd_cfg80211_update_replayCounterCallback(void *callbackContext,
                             tpSirGtkOffloadGetInfoRspParams pGtkOffloadGetInfoRsp);
 #endif
-void* wlan_hdd_change_country_code_cb(void *pAdapter);
+
 void hdd_select_cbmode( hdd_adapter_t *pAdapter,v_U8_t operationChannel);
 
 

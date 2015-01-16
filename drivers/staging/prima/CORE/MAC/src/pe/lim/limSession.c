@@ -61,7 +61,7 @@
 #include "limDebug.h"
 #include "limSession.h"
 #include "limUtils.h"
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
 #include "ccxApi.h"
 #endif
 
@@ -470,7 +470,7 @@ void peDeleteSession(tpAniSirGlobal pMac, tpPESession psessionEntry)
         psessionEntry->pLimMlmReassocReq = NULL;
     }
 
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
     limCleanupCcxCtxt(pMac, psessionEntry); 
 #endif
 

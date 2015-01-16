@@ -217,22 +217,10 @@ int sapSetPreferredChannel(tANI_U8* ptr)
     }
 
     /*getting the first argument ie the number of channels*/
-    if (sscanf(param, "%d ", &tempInt) != 1)
-    {
-        VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
-                   "Cannot get number of channels from input", __func__);
-        return -EINVAL;
-    }
+    sscanf(param, "%d ", &tempInt);
 
     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_HIGH, 
                "Number of channel added are: %d", tempInt);
-
-    if (tempInt <= 0 || tempInt > 255)
-    {
-        VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
-                   "Invalid Number of channel received", __func__);
-        return -EINVAL;
-    }
 
     /*allocating space for the desired number of channels*/
     pSapCtx->SapChnlList.channelList = (v_U8_t *)vos_mem_malloc(tempInt);
@@ -269,21 +257,7 @@ int sapSetPreferredChannel(tANI_U8* ptr)
             return -EINVAL;
         }
 
-        if (sscanf(param, "%d ", &tempInt) != 1)
-        {
-            VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
-                       "Cannot read channel number", __func__);
-            sapCleanupChannelList();
-            return -EINVAL;
-        }
-        if (tempInt < 0 || tempInt > 255)
-        {
-            VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
-                       "Invalid channel number received", __func__);
-            sapCleanupChannelList();
-            return -EINVAL;
-        }
-
+        sscanf(param, "%d ", &tempInt);
         pSapCtx->SapChnlList.channelList[j] = tempInt;
 
         VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_HIGH, 

@@ -333,24 +333,7 @@ limResumeLink(tpAniSirGlobal pMac, SUSPEND_RESUME_LINK_CALLBACK callback, tANI_U
 
    pMac->lim.gpLimResumeCallback = callback;
    pMac->lim.gpLimResumeData = data;
-
-   /* eLIM_HAL_IDLE_SCAN_STATE state indicate limSendHalInitScanReq failed.
-    * In case limSendHalInitScanReq is success, Scanstate would be
-    * eLIM_HAL_SUSPEND_LINK_STATE
-    */
-   if( eLIM_HAL_IDLE_SCAN_STATE != pMac->lim.gLimHalScanState )
-   {
-      limSendHalFinishScanReq(pMac, eLIM_HAL_RESUME_LINK_WAIT_STATE );
-   }
-   else
-   {
-      limLog(pMac, LOGW, FL("Init Scan failed, we will not call finish scan."
-                   " calling the callback with failure status"));
-      pMac->lim.gpLimResumeCallback( pMac, eSIR_FAILURE, pMac->lim.gpLimResumeData);
-      pMac->lim.gpLimResumeCallback = NULL;
-      pMac->lim.gpLimResumeData = NULL;
-      pMac->lim.gLimSystemInScanLearnMode = 0;
-   }
+   limSendHalFinishScanReq(pMac, eLIM_HAL_RESUME_LINK_WAIT_STATE );
 
    if(limIsInMCC(pMac))
    {
@@ -1044,9 +1027,7 @@ void limSendHalEndScanReq(tpAniSirGlobal pMac, tANI_U8 channelNum, tLimLimHalSca
      */
     if((pMac->lim.gLimHalScanState != eLIM_HAL_END_SCAN_WAIT_STATE)  &&
        (pMac->lim.gLimHalScanState != eLIM_HAL_IDLE_SCAN_STATE)  &&
-       (pMac->lim.gLimHalScanState == eLIM_HAL_SCANNING_STATE)  &&
-       (pMac->lim.gLimHalScanState != eLIM_HAL_FINISH_SCAN_WAIT_STATE)  &&
-       (pMac->lim.gLimHalScanState != eLIM_HAL_START_SCAN_WAIT_STATE))
+            (pMac->lim.gLimHalScanState != eLIM_HAL_START_SCAN_WAIT_STATE))
     {
         pEndScanParam = vos_mem_malloc(sizeof(*pEndScanParam));
         if ( NULL == pEndScanParam )
@@ -2902,27 +2883,10 @@ limProcessMlmDisassocReqNtf(tpAniSirGlobal pMac, eHalStatus suspendStatus, tANI_
          */
         pStaDs->mlmStaContext.mlmState   = eLIM_MLM_WT_DEL_STA_RSP_STATE;
 
-        /* If the reason for disassociation is inactivity of STA, then
-           dont wait for acknowledgement */
-        if ((pMlmDisassocReq->reasonCode == eSIR_MAC_DISASSOC_DUE_TO_INACTIVITY_REASON) &&
-            (psessionEntry->limSystemRole == eLIM_AP_ROLE))
-        {
-
-             limSendDisassocMgmtFrame(pMac,
-                                 pMlmDisassocReq->reasonCode,
-                                 pMlmDisassocReq->peerMacAddr,
-                                 psessionEntry, FALSE);
-
-             /* Send Disassoc CNF and receive path cleanup */
-             limSendDisassocCnf(pMac);
-        }
-        else
-        {
-             limSendDisassocMgmtFrame(pMac,
+        limSendDisassocMgmtFrame(pMac,
                                  pMlmDisassocReq->reasonCode,
                                  pMlmDisassocReq->peerMacAddr,
                                  psessionEntry, TRUE);
-        }
     }
     else
     {
@@ -3740,10 +3704,8 @@ limProcessMinChannelTimeout(tpAniSirGlobal pMac)
     }
 #endif
 
-    /*do not process if we are in finish scan wait state i.e.
-    scan is aborted or finished*/
-    if (pMac->lim.gLimMlmState == eLIM_MLM_WT_PROBE_RESP_STATE &&
-        pMac->lim.gLimHalScanState != eLIM_HAL_FINISH_SCAN_WAIT_STATE)
+    
+    if (pMac->lim.gLimMlmState == eLIM_MLM_WT_PROBE_RESP_STATE)
     {
         PELOG1(limLog(pMac, LOG1, FL("Scanning : min channel timeout occurred"));)
 
@@ -3770,9 +3732,6 @@ limProcessMinChannelTimeout(tpAniSirGlobal pMac)
             }
         }
 
-        limLog(pMac, LOGW,
-           FL("Sending End Scan req from MIN_CH_TIMEOUT in state %X ch-%d"),
-           pMac->lim.gLimMlmState,channelNum);
         limSendHalEndScanReq(pMac, channelNum, eLIM_HAL_END_SCAN_WAIT_STATE);
     }
     else
@@ -3783,8 +3742,8 @@ limProcessMinChannelTimeout(tpAniSirGlobal pMac)
          * Log error.
          */
         limLog(pMac, LOGW,
-           FL("received unexpected MIN channel timeout in mlme state %X and hal scan State %X"),
-           pMac->lim.gLimMlmState,pMac->lim.gLimHalScanState);
+           FL("received unexpected MIN channel timeout in state %X"),
+           pMac->lim.gLimMlmState);
         limPrintMlmState(pMac, LOGE, pMac->lim.gLimMlmState);
     }
 } /*** limProcessMinChannelTimeout() ***/
@@ -3813,11 +3772,9 @@ limProcessMaxChannelTimeout(tpAniSirGlobal pMac)
 {
     tANI_U8 channelNum;
 
-    /*do not process if we are in finish scan wait state i.e.
-     scan is aborted or finished*/
-    if ((pMac->lim.gLimMlmState == eLIM_MLM_WT_PROBE_RESP_STATE ||
-        pMac->lim.gLimMlmState == eLIM_MLM_PASSIVE_SCAN_STATE) &&
-        pMac->lim.gLimHalScanState != eLIM_HAL_FINISH_SCAN_WAIT_STATE)
+    
+    if (pMac->lim.gLimMlmState == eLIM_MLM_WT_PROBE_RESP_STATE ||
+        pMac->lim.gLimMlmState == eLIM_MLM_PASSIVE_SCAN_STATE)
     {
         PELOG1(limLog(pMac, LOG1, FL("Scanning : Max channel timed out"));)
         /**
@@ -3843,9 +3800,6 @@ limProcessMaxChannelTimeout(tpAniSirGlobal pMac)
                channelNum = 1;
             }
         }
-        limLog(pMac, LOGW,
-           FL("Sending End Scan req from MAX_CH_TIMEOUT in state %X on ch-%d"),
-           pMac->lim.gLimMlmState,channelNum);
         limSendHalEndScanReq(pMac, channelNum, eLIM_HAL_END_SCAN_WAIT_STATE);
     }
     else
@@ -3856,8 +3810,8 @@ limProcessMaxChannelTimeout(tpAniSirGlobal pMac)
          * Log error.
          */
         limLog(pMac, LOGW,
-           FL("received unexpected MAX channel timeout in mlme state %X and hal scan state %X"),
-           pMac->lim.gLimMlmState, pMac->lim.gLimHalScanState);
+           FL("received unexpected MAX channel timeout in state %X"),
+           pMac->lim.gLimMlmState);
         limPrintMlmState(pMac, LOGW, pMac->lim.gLimMlmState);
     }
 } /*** limProcessMaxChannelTimeout() ***/
@@ -4020,10 +3974,7 @@ limProcessJoinFailureTimeout(tpAniSirGlobal pMac)
         /**
          * Issue MLM join confirm with timeout reason code
          */
-        PELOGE(limLog(pMac, LOGE,  FL(" In state eLIM_MLM_WT_JOIN_BEACON_STATE."));)
-        PELOGE(limLog(pMac, LOGE,  FL(" Join Failure Timeout occurred for session %d with BSS "),
-                                        psessionEntry->peSessionId);
-                                        limPrintMacAddr(pMac, psessionEntry->bssId, LOGE);)
+        PELOGE(limLog(pMac, LOGE,  FL(" Join Failure Timeout occurred."));)
 
         mlmJoinCnf.resultCode = eSIR_SME_JOIN_TIMEOUT_RESULT_CODE;
         mlmJoinCnf.protStatusCode = eSIR_MAC_UNSPEC_FAILURE_STATUS;
@@ -4088,8 +4039,7 @@ static void limProcessPeriodicJoinProbeReqTimer(tpAniSirGlobal pMac)
 
     if((psessionEntry = peFindSessionBySessionId(pMac, pMac->lim.limTimers.gLimPeriodicJoinProbeReqTimer.sessionId))== NULL)
     {
-        limLog(pMac, LOGE,FL("session does not exist for given SessionId : %d"),
-                              pMac->lim.limTimers.gLimPeriodicJoinProbeReqTimer.sessionId);
+        limLog(pMac, LOGE,FL("session does not exist for given SessionId"));
         return;
     }
 

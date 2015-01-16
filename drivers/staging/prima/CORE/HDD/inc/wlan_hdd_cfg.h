@@ -282,12 +282,6 @@
 #define CFG_ENABLE_ADAPT_RX_DRAIN_MAX       WNI_CFG_ENABLE_ADAPT_RX_DRAIN_STAMAX
 #define CFG_ENABLE_ADAPT_RX_DRAIN_DEFAULT   WNI_CFG_ENABLE_ADAPT_RX_DRAIN_STADEF
 
-//Enable Prop IE
-#define CFG_ENABLE_OXYNWK_NAME                   "gEnableOxygenNwk"
-#define CFG_ENABLE_OXYNWK_MIN                    ( 0 )
-#define CFG_ENABLE_OXYNWK_MAX                    ( 1 )
-#define CFG_ENABLE_OXYNWK_DEFAULT                ( 0 )
-
 typedef enum
 {
     eHDD_DOT11_MODE_AUTO = 0, //covers all things we support
@@ -458,7 +452,7 @@ typedef enum
 #define CFG_AP_OBSS_PROTECTION_MODE_NAME       "gEnableApOBSSProt" 
 #define CFG_AP_OBSS_PROTECTION_MODE_MIN        ( 0 )
 #define CFG_AP_OBSS_PROTECTION_MODE_MAX        ( 1 ) 
-#define CFG_AP_OBSS_PROTECTION_MODE_DEFAULT    ( 1 )
+#define CFG_AP_OBSS_PROTECTION_MODE_DEFAULT    ( 0 )   
 
 #define CFG_AP_STA_SECURITY_SEPERATION_NAME    "gDisableIntraBssFwd"
 #define CFG_AP_STA_SECURITY_SEPERATION_MIN     ( 0 )
@@ -506,19 +500,28 @@ typedef enum
 #define CFG_ENABLE_LTE_COEX_DEFAULT           ( 0 )
 
 #define CFG_AP_KEEP_ALIVE_PERIOD_NAME          "gApKeepAlivePeriod"
-#define CFG_AP_KEEP_ALIVE_PERIOD_MIN           ( 0 )
-#define CFG_AP_KEEP_ALIVE_PERIOD_MAX           ( 255)
-#define CFG_AP_KEEP_ALIVE_PERIOD_DEFAULT       ( 20 )
+#define CFG_AP_KEEP_ALIVE_PERIOD_MIN           ( 3 )
+#define CFG_AP_KEEP_ALIVE_PERIOD_MAX           ( 20 )
+#define CFG_AP_KEEP_ALIVE_PERIOD_DEFAULT       ( 5 )
 
 #define CFG_GO_KEEP_ALIVE_PERIOD_NAME          "gGoKeepAlivePeriod"
-#define CFG_GO_KEEP_ALIVE_PERIOD_MIN           ( 0 )
-#define CFG_GO_KEEP_ALIVE_PERIOD_MAX           ( 255)
-#define CFG_GO_KEEP_ALIVE_PERIOD_DEFAULT       ( 20 )
+#define CFG_GO_KEEP_ALIVE_PERIOD_MIN           ( 3 )
+#define CFG_GO_KEEP_ALIVE_PERIOD_MAX           ( 20 )
+#define CFG_GO_KEEP_ALIVE_PERIOD_DEFAULT       ( 5 )
 
 #define CFG_AP_LINK_MONITOR_PERIOD_NAME          "gApLinkMonitorPeriod"
-#define CFG_AP_LINK_MONITOR_PERIOD_MIN           ( 0 )
-#define CFG_AP_LINK_MONITOR_PERIOD_MAX           ( 255)
-#define CFG_AP_LINK_MONITOR_PERIOD_DEFAULT       ( 3 )
+#define CFG_AP_LINK_MONITOR_PERIOD_MIN           ( 3 )
+#define CFG_AP_LINK_MONITOR_PERIOD_MAX           ( 50 )
+#define CFG_AP_LINK_MONITOR_PERIOD_DEFAULT       ( 10 )
+
+/* gGoLinkMonitorPeriod is period where link is idle and where
+ * we send NULL frame
+ */
+#define CFG_GO_LINK_MONITOR_PERIOD_NAME          "gGoLinkMonitorPeriod"
+#define CFG_GO_LINK_MONITOR_PERIOD_MIN           ( 3 )
+#define CFG_GO_LINK_MONITOR_PERIOD_MAX           ( 50 )
+#define CFG_GO_LINK_MONITOR_PERIOD_DEFAULT       ( 10 )
+
 
 #define CFG_BEACON_INTERVAL_NAME               "gBeaconInterval"
 #define CFG_BEACON_INTERVAL_MIN                WNI_CFG_BEACON_INTERVAL_STAMIN
@@ -783,11 +786,6 @@ typedef enum
 #define CFG_LFR_FEATURE_ENABLED_MIN                         (0)
 #define CFG_LFR_FEATURE_ENABLED_MAX                         (1)
 #define CFG_LFR_FEATURE_ENABLED_DEFAULT                     (0) //disabled
-
-#define CFG_LFR_MAWC_FEATURE_ENABLED_NAME                   "MAWCEnabled"
-#define CFG_LFR_MAWC_FEATURE_ENABLED_MIN                    (0)
-#define CFG_LFR_MAWC_FEATURE_ENABLED_MAX                    (1)
-#define CFG_LFR_MAWC_FEATURE_ENABLED_DEFAULT                (0) /* disabled */
 #endif // FEATURE_WLAN_LFR
 
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
@@ -826,12 +824,6 @@ typedef enum
 #define CFG_IMMEDIATE_ROAM_RSSI_DIFF_MIN                    (0)
 #define CFG_IMMEDIATE_ROAM_RSSI_DIFF_MAX                    (125)
 #define CFG_IMMEDIATE_ROAM_RSSI_DIFF_DEFAULT                (0)
-
-/*This parameter is used to set Wireless Extended Security Mode.*/
-#define CFG_ENABLE_WES_MODE_NAME                            "gWESModeEnabled"
-#define CFG_ENABLE_WES_MODE_NAME_MIN                        (0)
-#define CFG_ENABLE_WES_MODE_NAME_MAX                        (1)
-#define CFG_ENABLE_WES_MODE_NAME_DEFAULT                    (0)
 
 #define CFG_ROAM_SCAN_N_PROBES                             "gRoamScanNProbes"
 #define CFG_ROAM_SCAN_N_PROBES_MIN                          (1)
@@ -1910,47 +1902,17 @@ typedef enum
 #define CFG_SPLIT_SCAN_TRAFFIC_MONITOR_TIMER_MAX       ( 10000 )
 #define CFG_SPLIT_SCAN_TRAFFIC_MONITOR_TIMER_DEFAULT   ( 5000 )
 
-#define CFG_AMSDU_SUPPORT_IN_AMPDU_NAME                "gAmsduSupportInAMPDU"
-#define CFG_AMSDU_SUPPORT_IN_AMPDU_MIN                 (0)
-#define CFG_AMSDU_SUPPORT_IN_AMPDU_MAX                 (1)
-#define CFG_AMSDU_SUPPORT_IN_AMPDU_DEFAULT             (0) //disabled
-
 #ifdef FEATURE_WLAN_SCAN_PNO
-#define CFG_PNO_SCAN_SUPPORT                         "gPNOScanSupport"
-#define CFG_PNO_SCAN_SUPPORT_ENABLE                  ( 1 )
-#define CFG_PNO_SCAN_SUPPORT_DISABLE                 ( 0 )
-#define CFG_PNO_SCAN_SUPPORT_DEFAULT                 ( 1 )
-
 #define CFG_PNO_SCAN_TIMER_REPEAT_VALUE              "gPNOScanTimerRepeatValue"
 #define CFG_PNO_SCAN_TIMER_REPEAT_VALUE_DEFAULT      ( 6 )
 #define CFG_PNO_SCAN_TIMER_REPEAT_VALUE_MIN          ( 0 )
 #define CFG_PNO_SCAN_TIMER_REPEAT_VALUE_MAX          ( 0xffffffff )
 #endif
 
-#define CFG_DISABLE_ATH_NAME                       "gAthDisable"
-#define CFG_DISABLE_ATH_MIN                        (0)
-#define CFG_DISABLE_ATH_MAX                        (1)
-#define CFG_DISABLE_ATH_DEFAULT                    (0)
-
-#define CFG_BTC_ACTIVE_WLAN_LEN_NAME           "btcActiveWlanLen"
-#define CFG_BTC_ACTIVE_WLAN_LEN_MIN            ( 0 )
-#define CFG_BTC_ACTIVE_WLAN_LEN_MAX            ( 250000 )
-#define CFG_BTC_ACTIVE_WLAN_LEN_DEFAULT        ( 60000 )
-
-#define CFG_BTC_ACTIVE_BT_LEN_NAME             "btcActiveBtLen"
-#define CFG_BTC_ACTIVE_BT_LEN_MIN              ( 0 )
-#define CFG_BTC_ACTIVE_BT_LEN_MAX              ( 250000 )
-#define CFG_BTC_ACTIVE_BT_LEN_DEFAULT          ( 90000 )
-
-#define CFG_BTC_SAP_ACTIVE_WLAN_LEN_NAME       "btcSapActiveWlanLen"
-#define CFG_BTC_SAP_ACTIVE_WLAN_LEN_MIN        ( 0 )
-#define CFG_BTC_SAP_ACTIVE_WLAN_LEN_MAX        ( 250000 )
-#define CFG_BTC_SAP_ACTIVE_WLAN_LEN_DEFAULT    ( 60000 )
-
-#define CFG_BTC_SAP_ACTIVE_BT_LEN_NAME         "btcSapActiveBtLen"
-#define CFG_BTC_SAP_ACTIVE_BT_LEN_MIN          ( 0 )
-#define CFG_BTC_SAP_ACTIVE_BT_LEN_MAX          ( 250000 )
-#define CFG_BTC_SAP_ACTIVE_BT_LEN_DEFAULT      ( 90000 )
+#define CFG_AMSDU_SUPPORT_IN_AMPDU_NAME                "gAmsduSupportInAMPDU"
+#define CFG_AMSDU_SUPPORT_IN_AMPDU_MIN                 (0)
+#define CFG_AMSDU_SUPPORT_IN_AMPDU_MAX                 (1)
+#define CFG_AMSDU_SUPPORT_IN_AMPDU_DEFAULT             (0) //disabled
 
 /*--------------------------------------------------------------------------- 
   Type declarations
@@ -2064,6 +2026,7 @@ typedef struct
    v_U32_t       apKeepAlivePeriod;
    v_U32_t       goKeepAlivePeriod;
    v_U32_t       apLinkMonitorPeriod;
+   v_U32_t       goLinkMonitorPeriod;
    v_U32_t       nBeaconInterval;
    v_U8_t        nTxPowerCap;   //In dBm
    v_BOOL_t      fIsLowGainOverride;
@@ -2144,7 +2107,6 @@ typedef struct
    v_U32_t                      InfraUapsdBkSuspIntv;
 #ifdef FEATURE_WLAN_LFR
    v_BOOL_t                     isFastRoamIniFeatureEnabled;
-   v_BOOL_t                     MAWCEnabled;
 #endif
 #ifdef FEATURE_WLAN_CCX
    v_U32_t                      InfraInactivityInterval;
@@ -2154,7 +2116,6 @@ typedef struct
    v_BOOL_t                     isFastTransitionEnabled;
    v_U8_t                       RoamRssiDiff;
    v_U8_t                       nImmediateRoamRssiDiff;
-   v_BOOL_t                     isWESModeEnabled;
 #endif
 #ifdef FEATURE_WLAN_OKC
    v_BOOL_t                     isOkcIniFeatureEnabled;
@@ -2343,22 +2304,15 @@ typedef struct
                                                  //splitscan
    //Traffic monitor timer for split scan
    v_U32_t                     trafficMntrTmrForSplitScan;
-   v_BOOL_t                    enableOxygenNwk;
    v_U8_t                      flexConnectPowerFactor;
    v_BOOL_t                    enableIbssHeartBeatOffload;
    v_U32_t                     antennaDiversity;
    v_BOOL_t                    fEnableSNRMonitoring;
-   v_U8_t                      isAmsduSupportInAMPDU;
    /*PNO related parameters */
-#ifdef FEATURE_WLAN_SCAN_PNO
-   v_BOOL_t                    configPNOScanSupport;
+#if FEATURE_WLAN_SCAN_PNO
    v_U32_t                     configPNOScanTimerRepeatValue;
 #endif
-   v_BOOL_t                    cfgAthDisable;
-   v_U32_t                     cfgBtcActiveWlanLen;
-   v_U32_t                     cfgBtcActiveBtLen;
-   v_U32_t                     cfgBtcSapActiveWlanLen;
-   v_U32_t                     cfgBtcSapActiveBtLen;
+   v_U8_t                      isAmsduSupportInAMPDU;
 } hdd_config_t;
 /*--------------------------------------------------------------------------- 
   Function declarations and documenation

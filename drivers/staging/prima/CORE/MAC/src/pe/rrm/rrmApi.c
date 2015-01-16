@@ -226,7 +226,7 @@ rrmSetMaxTxPowerRsp ( tpAniSirGlobal pMac, tpSirMsgQ limMsgQ )
    tANI_U8  sessionId, i;
    tSirMacAddr bssid = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-   if( vos_mem_compare(bssid, pMaxTxParams->bssId, sizeof(tSirMacAddr)))
+   if( palEqualMemory(pMac->hHdd, bssid, pMaxTxParams->bssId, sizeof(tSirMacAddr)))
    {
       for (i =0;i < pMac->lim.maxBssId;i++)
       {
@@ -637,7 +637,7 @@ rrmProcessBeaconReportReq( tpAniSirGlobal pMac,
    }
 
    //Prepare the request to send to SME.
-   pSmeBcnReportReq = vos_mem_malloc(sizeof( tSirBeaconReportReqInd ));
+   pSmeBcnReportReq = vos_mem_malloc(sizeof( tSirBeaconReportReqInd ) + num_channels);
    if ( NULL == pSmeBcnReportReq )
    {
       limLog( pMac, LOGP,
@@ -647,16 +647,19 @@ rrmProcessBeaconReportReq( tpAniSirGlobal pMac,
 
    }
 
-   vos_mem_set(pSmeBcnReportReq,sizeof( tSirBeaconReportReqInd ),0);
+   vos_mem_set(pSmeBcnReportReq,sizeof( tSirBeaconReportReqInd ) + num_channels,0);
 
 #if defined WLAN_VOWIFI_DEBUG
    PELOGE(limLog( pMac, LOGE, FL(" Allocated memory for pSmeBcnReportReq....will be freed by other module") );)
 #endif
    vos_mem_copy(pSmeBcnReportReq->bssId, pSessionEntry->bssId, sizeof(tSirMacAddr));
    pSmeBcnReportReq->messageType = eWNI_SME_BEACON_REPORT_REQ_IND;
-   pSmeBcnReportReq->length = sizeof( tSirBeaconReportReqInd );
+   pSmeBcnReportReq->length = sizeof( tSirBeaconReportReqInd ) + num_channels;
    pSmeBcnReportReq->uDialogToken = pBeaconReq->measurement_token;
+   //pSmeBcnReportReq->measurementDuration = SYS_TU_TO_MS(pBeaconReq->measurement_request.Beacon.meas_duration);
+   pSmeBcnReportReq->measurementDuration = SYS_TU_TO_MS(measDuration /*pBeaconReq->measurement_request.Beacon.meas_duration*/);
    pSmeBcnReportReq->randomizationInterval = SYS_TU_TO_MS (pBeaconReq->measurement_request.Beacon.randomization);
+   pSmeBcnReportReq->fMeasurementtype = pBeaconReq->measurement_request.Beacon.meas_mode;
    pSmeBcnReportReq->channelInfo.regulatoryClass = pBeaconReq->measurement_request.Beacon.regClass;
    pSmeBcnReportReq->channelInfo.channelNum = pBeaconReq->measurement_request.Beacon.channel;
    vos_mem_copy(pSmeBcnReportReq->macaddrBssid, pBeaconReq->measurement_request.Beacon.BSSID,
@@ -683,8 +686,6 @@ rrmProcessBeaconReportReq( tpAniSirGlobal pMac,
           pBeaconReq->measurement_request.Beacon.APChannelReport[num_APChanReport].num_channelList);
 
          pChanList += pBeaconReq->measurement_request.Beacon.APChannelReport[num_APChanReport].num_channelList;
-         pSmeBcnReportReq->measurementDuration[num_APChanReport] = SYS_TU_TO_MS(measDuration /*pBeaconReq->measurement_request.Beacon.meas_duration*/);
-         pSmeBcnReportReq->fMeasurementtype[num_APChanReport] = pBeaconReq->measurement_request.Beacon.meas_mode;
       }
    }
 
@@ -799,156 +800,107 @@ rrmProcessBeaconReportXmit( tpAniSirGlobal pMac,
                             tpSirBeaconReportXmitInd pBcnReport)
 {
    tSirRetStatus status = eSIR_SUCCESS;
-   tSirMacRadioMeasureReport *pReport;
+   tSirMacRadioMeasureReport report, *pReport;
    tpRRMReq pCurrentReq = pMac->rrm.rrmPEContext.pCurrentReq; 
    tpPESession pSessionEntry ;
    tANI_U8 sessionId;
-   v_U8_t flagBSSPresent = FALSE, bssDescCnt = 0;
+   v_U8_t flagBSSPresent = FALSE;
 
 #if defined WLAN_VOWIFI_DEBUG
    PELOGE(limLog( pMac, LOGE, "Received beacon report xmit indication");)
 #endif
+   if(NULL == pBcnReport)
+      return eSIR_FAILURE;
 
-
-   if (NULL == pBcnReport)
+   if ( pCurrentReq == NULL )
    {
-      PELOGE(limLog( pMac, LOGE,
-             "Received pBcnReport is NULL in PE");)
+      PELOGE(limLog( pMac, LOGE, "Received report xmit while there is no request pending in PE");)
       return eSIR_FAILURE;
    }
-
-   pBcnReport->numBssDesc = (pBcnReport->numBssDesc == RRM_BCN_RPT_NO_BSS_INFO)?
-                            RRM_BCN_RPT_MIN_RPT : pBcnReport->numBssDesc;
-
-   if (NULL == pCurrentReq)
-   {
-      PELOGE(limLog( pMac, LOGE,
-             "Received report xmit while there is no request pending in PE");)
-      return eSIR_FAILURE;
-   }
-
-   if (NULL == (pSessionEntry = peFindSessionByBssid(pMac,
-                                                     pBcnReport->bssId,
-                                                     &sessionId)))
+   if ((pSessionEntry = peFindSessionByBssid(pMac,pBcnReport->bssId,&sessionId))==NULL)
    {
       PELOGE(limLog(pMac, LOGE,FL("session does not exist for given bssId"));)
       return eSIR_FAILURE;
    }
 
-   pReport = vos_mem_malloc(pBcnReport->numBssDesc *
-                           sizeof(tSirMacRadioMeasureReport));
+   pReport = &report;
+   vos_mem_set(pReport, sizeof(tSirMacRadioMeasureReport), 0);
+   //Prepare the beacon report and send it to the peer.
+   pReport->token = pBcnReport->uDialogToken;
+   pReport->refused = 0;
+   pReport->incapable = 0;
+   pReport->type = SIR_MAC_RRM_BEACON_TYPE;
 
-   if (NULL == pReport)
+   //If the scan result is NULL then send report request with option subelement as NULL..
+   if ( NULL != pBcnReport->pBssDescription[0] )
    {
-      PELOGE(limLog(pMac, LOGE,FL("RRM Report is NULL, allocation failed"));)
-      return eSIR_FAILURE;
+       flagBSSPresent = TRUE;
    }
 
-   vos_mem_zero( pReport,
-                 pBcnReport->numBssDesc * sizeof(tSirMacRadioMeasureReport) );
-
-   for (bssDescCnt = 0; bssDescCnt < pBcnReport->numBssDesc; bssDescCnt++)
+   //Valid response is included if the size of beacon xmit is == size of beacon xmit ind + ies
+   if ( pBcnReport->length >= sizeof( tSirBeaconReportXmitInd ) )
    {
-       //Prepare the beacon report and send it to the peer.
-       pReport[bssDescCnt].token = pBcnReport->uDialogToken;
-       pReport[bssDescCnt].refused = 0;
-       pReport[bssDescCnt].incapable = 0;
-       pReport[bssDescCnt].type = SIR_MAC_RRM_BEACON_TYPE;
+      pReport->report.beaconReport.regClass =  pBcnReport->regClass;
+      if ( flagBSSPresent )
+      {
+          pReport->report.beaconReport.channel = pBcnReport->pBssDescription[0]->channelId;
+          vos_mem_copy( pReport->report.beaconReport.measStartTime,
+                        pBcnReport->pBssDescription[0]->startTSF,
+                        sizeof( pBcnReport->pBssDescription[0]->startTSF) );
+          pReport->report.beaconReport.measDuration = SYS_MS_TO_TU(pBcnReport->duration);
+          pReport->report.beaconReport.phyType = pBcnReport->pBssDescription[0]->nwType;
+          pReport->report.beaconReport.bcnProbeRsp = 1;
+          pReport->report.beaconReport.rsni = pBcnReport->pBssDescription[0]->sinr;
+          pReport->report.beaconReport.rcpi = pBcnReport->pBssDescription[0]->rssi;
 
-       //If the scan result is NULL then send report request with
-       //option subelement as NULL..
-       if ( NULL != pBcnReport->pBssDescription[bssDescCnt] )
-       {
-           flagBSSPresent = TRUE;
-       }
+          pReport->report.beaconReport.antennaId = 0;
+          pReport->report.beaconReport.parentTSF = pBcnReport->pBssDescription[0]->parentTSF;
+          vos_mem_copy( pReport->report.beaconReport.bssid,
+                        pBcnReport->pBssDescription[0]->bssId, sizeof(tSirMacAddr));
+      }
 
-       //Valid response is included if the size of beacon xmit
-       //is == size of beacon xmit ind + ies
-       if ( pBcnReport->length >= sizeof( tSirBeaconReportXmitInd ) )
-       {
-           pReport[bssDescCnt].report.beaconReport.regClass =  pBcnReport->regClass;
-           if ( flagBSSPresent )
-           {
-               pReport[bssDescCnt].report.beaconReport.channel =
-                                 pBcnReport->pBssDescription[bssDescCnt]->channelId;
-               vos_mem_copy( pReport[bssDescCnt].report.beaconReport.measStartTime,
-                             pBcnReport->pBssDescription[bssDescCnt]->startTSF,
-                             sizeof( pBcnReport->pBssDescription[bssDescCnt]->startTSF) );
-               pReport[bssDescCnt].report.beaconReport.measDuration =
-                                 SYS_MS_TO_TU(pBcnReport->duration);
-               pReport[bssDescCnt].report.beaconReport.phyType =
-                             pBcnReport->pBssDescription[bssDescCnt]->nwType;
-               pReport[bssDescCnt].report.beaconReport.bcnProbeRsp = 1;
-               pReport[bssDescCnt].report.beaconReport.rsni =
-                             pBcnReport->pBssDescription[bssDescCnt]->sinr;
-               pReport[bssDescCnt].report.beaconReport.rcpi =
-                             pBcnReport->pBssDescription[bssDescCnt]->rssi;
-
-               pReport[bssDescCnt].report.beaconReport.antennaId = 0;
-               pReport[bssDescCnt].report.beaconReport.parentTSF =
-                             pBcnReport->pBssDescription[bssDescCnt]->parentTSF;
-               vos_mem_copy( pReport[bssDescCnt].report.beaconReport.bssid,
-                             pBcnReport->pBssDescription[bssDescCnt]->bssId,
-                             sizeof(tSirMacAddr));
-           }
-
-           switch ( pCurrentReq->request.Beacon.reportingDetail )
-           {
-               case BEACON_REPORTING_DETAIL_NO_FF_IE:
-               //0 No need to include any elements.
+      switch ( pCurrentReq->request.Beacon.reportingDetail )
+      {
+         case BEACON_REPORTING_DETAIL_NO_FF_IE: //0 No need to include any elements.
 #if defined WLAN_VOWIFI_DEBUG
-               PELOGE(limLog(pMac, LOGE, "No reporting detail requested");)
+            PELOGE(limLog(pMac, LOGE, "No reporting detail requested");)
 #endif
-               break;
-               case BEACON_REPORTING_DETAIL_ALL_FF_REQ_IE:
-               //1: Include all FFs and Requested Ies.
+            break;
+         case BEACON_REPORTING_DETAIL_ALL_FF_REQ_IE: //1: Include all FFs and Requested Ies.
 #if defined WLAN_VOWIFI_DEBUG
-               PELOGE(limLog(pMac, LOGE,
-               "Only requested IEs in reporting detail requested");)
+            PELOGE(limLog(pMac, LOGE, "Only requested IEs in reporting detail requested");)
 #endif
 
-               if ( flagBSSPresent )
-               {
-                   rrmFillBeaconIes( pMac,
-                      (tANI_U8*) &pReport[bssDescCnt].report.beaconReport.Ies[0],
-                      (tANI_U8*) &pReport[bssDescCnt].report.beaconReport.numIes,
-                      BEACON_REPORT_MAX_IES,
-                      pCurrentReq->request.Beacon.reqIes.pElementIds,
-                      pCurrentReq->request.Beacon.reqIes.num,
-                      pBcnReport->pBssDescription[bssDescCnt] );
-               }
+            if ( flagBSSPresent )
+            {
+                rrmFillBeaconIes( pMac, (tANI_U8*) &pReport->report.beaconReport.Ies[0],
+                      (tANI_U8*) &pReport->report.beaconReport.numIes, BEACON_REPORT_MAX_IES,
+                      pCurrentReq->request.Beacon.reqIes.pElementIds, pCurrentReq->request.Beacon.reqIes.num,
+                      pBcnReport->pBssDescription[0] );
+            }
 
-               break;
-               case BEACON_REPORTING_DETAIL_ALL_FF_IE:
-               //2 / default - Include all FFs and all Ies.
-               default:
+            break;
+         case BEACON_REPORTING_DETAIL_ALL_FF_IE: //2 / default - Include all FFs and all Ies.
+         default:
 #if defined WLAN_VOWIFI_DEBUG
-               PELOGE(limLog(pMac, LOGE, "Default all IEs and FFs");)
+            PELOGE(limLog(pMac, LOGE, "Default all IEs and FFs");)
 #endif
-               if ( flagBSSPresent )
-               {
-                   rrmFillBeaconIes( pMac,
-                      (tANI_U8*) &pReport[bssDescCnt].report.beaconReport.Ies[0],
-                      (tANI_U8*) &pReport[bssDescCnt].report.beaconReport.numIes,
-                      BEACON_REPORT_MAX_IES,
+            if ( flagBSSPresent )
+            {
+                rrmFillBeaconIes( pMac, (tANI_U8*) &pReport->report.beaconReport.Ies[0],
+                      (tANI_U8*) &pReport->report.beaconReport.numIes, BEACON_REPORT_MAX_IES,
                       NULL, 0,
-                      pBcnReport->pBssDescription[bssDescCnt] );
-               }
-               break;
-          }
-       }
-   }
+                      pBcnReport->pBssDescription[0] );
+            }
+            break;
+      }
 
 #if defined WLAN_VOWIFI_DEBUG
-   PELOGE(limLog( pMac, LOGE, "Sending Action frame ");)
+      PELOGE(limLog( pMac, LOGE, "Sending Action frame ");)
 #endif
-   limSendRadioMeasureReportActionFrame( pMac,
-                                         pCurrentReq->dialog_token,
-                                         bssDescCnt,
-                                         pReport,
-                                         pBcnReport->bssId,
-                                         pSessionEntry );
-
+      limSendRadioMeasureReportActionFrame( pMac, pCurrentReq->dialog_token, 1,
+            pReport, pBcnReport->bssId, pSessionEntry );
+   }
 
    if( pBcnReport->fMeasureDone )
    {
@@ -956,9 +908,6 @@ rrmProcessBeaconReportXmit( tpAniSirGlobal pMac,
 
       rrmCleanup(pMac);
    }
-
-   vos_mem_free(pReport);
-
    return status;
 }
 

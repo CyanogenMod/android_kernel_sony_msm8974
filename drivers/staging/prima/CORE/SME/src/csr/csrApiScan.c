@@ -67,9 +67,6 @@
 #include "wlan_qct_wda.h"
 
 #define CSR_VALIDATE_LIST  //This portion of code need to be removed once the issue is resolved.
-#define MIN_CHN_TIME_TO_FIND_GO 100
-#define MAX_CHN_TIME_TO_FIND_GO 100
-#define DIRECT_SSID_LEN 7
 
 #ifdef CSR_VALIDATE_LIST
 tDblLinkList *g_pchannelPowerInfoList24 = NULL, * g_pchannelPowerInfoList5 = NULL;
@@ -120,7 +117,7 @@ RSSI *cannot* be more than 0xFF or less than 0 for meaningful WLAN operation
 /* Maximum number of channels per country can be ignored */
 #define MAX_CHANNELS_IGNORE 10
 
-#define MAX_COUNTRY_IGNORE 5
+#define MAX_COUNTRY_IGNORE 4
 
 #define THIRTY_PERCENT(x)  (x*30/100);
 
@@ -132,17 +129,12 @@ typedef struct sCsrIgnoreChannels
     tANI_U16 channelCount;
 }tCsrIgnoreChannels;
 
-#ifndef CONFIG_ENABLE_LINUX_REG
 static tCsrIgnoreChannels countryIgnoreList[MAX_COUNTRY_IGNORE] = {
     { {'U','A'}, { 136, 140}, 2},
     { {'T','W'}, { 36, 40, 44, 48, 52}, 5},
     { {'I','D'}, { 165}, 1 },
-    { {'A','U'}, { 120, 124, 128}, 3 },
-    { {'A','R'}, { 120, 124, 128}, 3 }
+    { {'A','U'}, { 120, 124, 128}, 3 }
     };
-#else
-static tCsrIgnoreChannels countryIgnoreList[MAX_COUNTRY_IGNORE] = { };
-#endif //CONFIG_ENABLE_LINUX_REG
 
 //*** This is temporary work around. It need to call CCM api to get to CFG later
 /// Get string parameter value
@@ -730,26 +722,6 @@ eHalStatus csrScanRequest(tpAniSirGlobal pMac, tANI_U16 sessionId,
         VOS_ASSERT(0);
     }
 
-    /* During group formation, the P2P client scans for GO with the specific SSID.
-     * There will be chances of GO switching to other channels because of scan or
-     * to STA channel in case of STA+GO MCC scenario. So to increase the possibility
-     * of client to find the GO, the dwell time of scan is increased to 100ms.
-     */
-    if(pScanRequest->p2pSearch)
-    {
-        if(pScanRequest->SSIDs.numOfSSIDs)
-        {
-            //If the scan request is for specific SSId the length of SSID will be
-            //greater than 7 as SSID for p2p search contains "DIRECT-")
-            if(pScanRequest->SSIDs.SSIDList->SSID.length > DIRECT_SSID_LEN)
-            {
-                smsLog( pMac, LOG1, FL(" Increase the Dwell time to 100ms."));
-                pScanRequest->maxChnTime = MAX_CHN_TIME_TO_FIND_GO;
-                pScanRequest->minChnTime = MIN_CHN_TIME_TO_FIND_GO;
-            }
-        }
-    }
-
     do
     {
         if(pMac->scan.fScanEnable)
@@ -1178,7 +1150,8 @@ eHalStatus csrIssueRoamAfterLostlinkScan(tpAniSirGlobal pMac, tANI_U32 sessionId
 }
 
 
-eHalStatus csrScanGetScanChnInfo(tpAniSirGlobal pMac, void *callback, void *pContext)
+eHalStatus csrScanGetScanChnInfo(tpAniSirGlobal pMac, tANI_U8 sessionId,
+                                 void *pContext, void *callback)
 {
     eHalStatus status = eHAL_STATUS_SUCCESS;
     tSmeCmd *pScanCmd;
@@ -1195,6 +1168,7 @@ eHalStatus csrScanGetScanChnInfo(tpAniSirGlobal pMac, void *callback, void *pCon
             pScanCmd->u.scanCmd.reason = eCsrScanGetScanChnInfo;
             //Need to make the following atomic
             pScanCmd->u.scanCmd.scanID = pMac->scan.nextScanID++; //let it wrap around
+            pScanCmd->sessionId = sessionId;
             status = csrQueueSmeCommand(pMac, pScanCmd, eANI_BOOLEAN_FALSE);
             if( !HAL_STATUS_SUCCESS( status ) )
             {
@@ -2969,6 +2943,7 @@ static void csrMoveTempScanResultsToMainList( tpAniSirGlobal pMac, tANI_U8 reaso
                 }
             }
         }
+
         //Find a good AP for 11d info
         if ( csrIs11dSupported( pMac ) )
         {
@@ -3007,6 +2982,7 @@ static void csrMoveTempScanResultsToMainList( tpAniSirGlobal pMac, tANI_U8 reaso
             rssi_of_current_country =  pBssDescription->Result.BssDescriptor.rssi ;
         }
 
+
         
         // append to main list
         csrScanAddResult(pMac, pBssDescription, pIesLocal);
@@ -3016,76 +2992,42 @@ static void csrMoveTempScanResultsToMainList( tpAniSirGlobal pMac, tANI_U8 reaso
         }
     }
 
-    //we don't need to update CC while connected to an AP which is advertising CC already
-    if (csrIs11dSupported(pMac))
+    // Calculating 30% of current rssi is an idea for not to change
+    // country code so freq.
+    if (rssi_of_current_country != -128)
     {
-        tANI_U32 i;
-        tCsrRoamSession *pSession;
+        rssi_of_current_country = rssi_of_current_country
+                                     - THIRTY_PERCENT(rssi_of_current_country);
+    }
 
-        for (i = 0; i < CSR_ROAM_SESSION_MAX; i++ )
+    if ((rssi_of_current_country <= cand_Bss_rssi )  || rssi_of_current_country  == -128)
+    {
+        csrLLLock(&pMac->scan.scanResultList);
+        pEntryTemp = csrLLPeekHead(&pMac->scan.scanResultList, LL_ACCESS_NOLOCK);
+        while ( NULL != pEntryTemp)
         {
-            if (CSR_IS_SESSION_VALID( pMac, i ) )
+            pNext = csrLLNext(&pMac->scan.scanResultList, pEntryTemp,
+                                          LL_ACCESS_NOLOCK);
+            pBssDescription = GET_BASE_ADDR( pEntryTemp, tCsrScanResult, Link );
+            pIesLocal = (tDot11fBeaconIEs *)( pBssDescription->Result.pvIes );
+            // Need to traverse whole scan list to get description for best 11d AP.
+            if (csrIsMacAddressEqual(pMac, (tCsrBssid *)&bssid_temp,
+                         (tCsrBssid *) pBssDescription->Result.BssDescriptor.bssId))
             {
-                pSession = CSR_GET_SESSION( pMac, i );
-                if (csrIsConnStateConnected(pMac, i))
-                {
-                    if (csrIsBssidMatch(pMac, (tCsrBssid *)&pMac->scan.currentCountryBssid,
-                                        &pSession->connectedProfile.bssid))
-                    {
-                        smsLog(pMac, LOGW, FL("No need for updating CC, we will"
-                                              "continue with current AP's CC"));
-                        goto end;
-                    }
-                }
+                palCopyMemory(pMac->hHdd, pMac->scan.currentCountryBssid,
+                                bssid_temp, sizeof(tSirMacAddr));
+                // Best AP should be passed to update reg domain.
+                 csrLearnCountryInformation( pMac, &pBssDescription->Result.BssDescriptor,
+                              pIesLocal, eANI_BOOLEAN_FALSE );
+                 break;
             }
+            pEntryTemp = pNext;
         }
-
-        // Calculating 30% of current rssi is an idea for not to change
-        // country code so freq.
-        if (rssi_of_current_country != -128)
-        {
-            rssi_of_current_country = rssi_of_current_country
-                                         - THIRTY_PERCENT(rssi_of_current_country);
-        }
-        //if new candidate AP has 30% better RSSI or this is the first time or
-        //AP aged out of CSR cache or we are in world CC now
-        if ((rssi_of_current_country <= cand_Bss_rssi )  || (rssi_of_current_country  == -128)
-           ||( '0' == pMac->scan.countryCode11d[ 0 ] && '0' == pMac->scan.countryCode11d[ 1 ] ))
-        {
-            csrLLLock(&pMac->scan.scanResultList);
-            pEntryTemp = csrLLPeekHead(&pMac->scan.scanResultList, LL_ACCESS_NOLOCK);
-            while ( NULL != pEntryTemp)
-            {
-                pNext = csrLLNext(&pMac->scan.scanResultList, pEntryTemp,
-                                              LL_ACCESS_NOLOCK);
-                pBssDescription = GET_BASE_ADDR( pEntryTemp, tCsrScanResult, Link );
-                pIesLocal = (tDot11fBeaconIEs *)( pBssDescription->Result.pvIes );
-                // Need to traverse whole scan list to get description for best 11d AP.
-                if (csrIsMacAddressEqual(pMac, (tCsrBssid *)&bssid_temp,
-                             (tCsrBssid *) pBssDescription->Result.BssDescriptor.bssId))
-                {
-                    // Best AP should be passed to update reg domain.
-                    csrLearnCountryInformation( pMac, &pBssDescription->Result.BssDescriptor,
-                                 pIesLocal, eANI_BOOLEAN_TRUE );
-                     //this check is to avoid the case of invalid CC set via 11d
-                     //In that case we move to world CC & we are open to any new
-                     //valid CC we can get during scan
-                     if(( '0' != pMac->scan.countryCode11d[ 0 ] && '0' != pMac->scan.countryCode11d[ 1 ] ))
-                     {
-                         palCopyMemory(pMac->hHdd, pMac->scan.currentCountryBssid,
-                                         bssid_temp, sizeof(tSirMacAddr));
-                     }
-                    break;
-                }
-                pEntryTemp = pNext;
-            }
-            csrLLUnlock(&pMac->scan.scanResultList);
-        }
+        csrLLUnlock(&pMac->scan.scanResultList);
     }
 
 
-end:
-    //If we can find the current 11d info in any of the scan results, or
+    //Tush: If we can find the current 11d info in any of the scan results, or
     // a good enough AP with the 11d info from the scan results then no need to
     // get into ambiguous state
     if(pMac->scan.fAmbiguous11dInfoFound) 
@@ -3440,6 +3382,12 @@ void csrResetCountryInformation( tpAniSirGlobal pMac, tANI_BOOLEAN fForce, tANI_
     }
 #endif //#ifdef FEATURE_WLAN_DIAG_SUPPORT_CSR
 
+        // switch to passive scans only when 11d is enabled
+        if( csrIs11dSupported( pMac ) )
+        {
+            pMac->scan.curScanType = eSIR_PASSIVE_SCAN;
+        }
+
         csrPruneChannelListForMode(pMac, &pMac->scan.baseChannels);
         csrPruneChannelListForMode(pMac, &pMac->scan.base20MHzChannels);
 
@@ -3487,7 +3435,7 @@ eHalStatus csrSetCountryCode(tpAniSirGlobal pMac, tANI_U8 *pCountry, tANI_BOOLEA
 
     if(pCountry)
     {
-        status = csrGetRegulatoryDomainForCountry(pMac, pCountry, &domainId, COUNTRY_USER);
+        status = csrGetRegulatoryDomainForCountry(pMac, pCountry, &domainId);
         if(HAL_STATUS_SUCCESS(status))
         {
             status = csrSetRegulatoryDomain(pMac, domainId, pfRestartNeeded);
@@ -3563,9 +3511,7 @@ void csrApplyCountryInformation( tpAniSirGlobal pMac, tANI_BOOLEAN fForce )
         {
             // ambiguous info found
             //Restore te default domain as well
-            if(HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry(
-                                         pMac, pMac->scan.countryCodeCurrent,
-                                         &domainId, COUNTRY_QUERY)))
+            if(HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry( pMac, pMac->scan.countryCodeCurrent, &domainId )))
             {
                 pMac->scan.domainIdCurrent = domainId;
             }
@@ -3578,9 +3524,7 @@ void csrApplyCountryInformation( tpAniSirGlobal pMac, tANI_BOOLEAN fForce )
             break;
         }
         if ( pMac->scan.f11dInfoApplied && !fForce ) break;
-        if(HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry(
-                                        pMac, pMac->scan.countryCode11d,
-                                        &domainId, COUNTRY_QUERY)))
+        if(HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry( pMac, pMac->scan.countryCode11d, &domainId )))
         {
             //Check whether we need to enforce default domain
             if( ( !pMac->roam.configParam.fEnforceDefaultDomain ) ||
@@ -3648,10 +3592,7 @@ void csrApplyCountryInformation( tpAniSirGlobal pMac, tANI_BOOLEAN fForce )
                     smsLog( pMac, LOGE, FL("  fail to set regId %d"), domainId );
                 }
                 pMac->scan.domainIdCurrent = domainId;
-#ifndef CONFIG_ENABLE_LINUX_REG
-                csrApplyChannelPowerCountryInfo( pMac, &pMac->scan.base20MHzChannels,
-                                  pMac->scan.countryCodeCurrent, eANI_BOOLEAN_TRUE );
-#endif
+                csrApplyChannelPowerCountryInfo( pMac, &pMac->scan.channels11d, pMac->scan.countryCode11d, eANI_BOOLEAN_TRUE );
                 // switch to active scans using this new channel list
                 pMac->scan.curScanType = eSIR_ACTIVE_SCAN;
                 pMac->scan.f11dInfoApplied = eANI_BOOLEAN_TRUE;
@@ -3671,8 +3612,6 @@ tANI_BOOLEAN csrSave11dCountryString( tpAniSirGlobal pMac, tANI_U8 *pCountryCode
 {
     tANI_BOOLEAN fCountryStringChanged = FALSE, fUnknownCountryCode = FALSE;
     tANI_U32 i;
-    v_REGDOMAIN_t regd;
-    tANI_BOOLEAN fCountryNotPresentInDriver = FALSE;
 
     // convert to UPPER here so we are assured the strings are always in upper case.
     for( i = 0; i < 3; i++ )
@@ -3685,10 +3624,7 @@ tANI_BOOLEAN csrSave11dCountryString( tpAniSirGlobal pMac, tANI_U8 *pCountryCode
     // country code (which is US).  We've also seen some NETGEAR AP's that have "XX " as the country code
     // with valid 2.4 GHz US channel information.  If we cannot find the country code advertised in the
     // 11d information element, let's default to US.
-    if ( !HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry(pMac,
-                                                      pCountryCode,
-                                                      &regd,
-                                                      COUNTRY_QUERY) ) )
+    if ( !HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry( pMac, pCountryCode, NULL ) ) )
     {
         // Check the enforcement first
         if( pMac->roam.configParam.fEnforceDefaultDomain || pMac->roam.configParam.fEnforceCountryCodeMatch )
@@ -3697,15 +3633,9 @@ tANI_BOOLEAN csrSave11dCountryString( tpAniSirGlobal pMac, tANI_U8 *pCountryCode
         }
         else
         {
-            fCountryNotPresentInDriver = TRUE;
+            pCountryCode[ 0 ] = 'U';
+            pCountryCode[ 1 ] = 'S';
         }
-    }
-    //right now, even if we don't find the CC in driver we set to world. Making
-    //sure countryCode11d doesn't get updated with the invalid CC, instead
-    //reflect the world CC
-    else if (REGDOMAIN_WORLD == regd)
-    {
-        fCountryNotPresentInDriver = TRUE;
     }
 
     // We've seen some of the AP's improperly put a 0 for the third character of the country code.
@@ -3725,18 +3655,8 @@ tANI_BOOLEAN csrSave11dCountryString( tpAniSirGlobal pMac, tANI_U8 *pCountryCode
         if(( 0 == pMac->scan.countryCode11d[ 0 ] && 0 == pMac->scan.countryCode11d[ 1 ] )
              || (fForce))
         {
-            if (!fCountryNotPresentInDriver)
-            {
-                // this is the first .11d information
-                vos_mem_copy(pMac->scan.countryCode11d, pCountryCode,
-                         sizeof( pMac->scan.countryCode11d ));
-
-            }
-            else
-            {
-                pMac->scan.countryCode11d[0] = '0';
-                pMac->scan.countryCode11d[1] = '0';
-            }
+            // this is the first .11d information
+            palCopyMemory( pMac->hHdd, pMac->scan.countryCode11d, pCountryCode, sizeof( pMac->scan.countryCode11d ) );
         }
     }
 
@@ -3797,14 +3717,12 @@ void csrSetOppositeBandChannelInfo( tpAniSirGlobal pMac )
         if ( CSR_IS_CHANNEL_5GHZ( pMac->scan.channelOf11dInfo ) )
         {
             // and the 2.4 band is empty, then populate the 2.4 channel info
-            if ( !csrLLIsListEmpty( &pMac->scan.channelPowerInfoList24, LL_ACCESS_LOCK ) ) break;
             fPopulate5GBand = FALSE;
         }
         else
         {
             // else, we found channel info in the 2.4 GHz band.  If the 5.0 band is empty
             // set the 5.0 band info from the 2.4 country code.
-            if ( !csrLLIsListEmpty( &pMac->scan.channelPowerInfoList5G, LL_ACCESS_LOCK ) ) break;
             fPopulate5GBand = TRUE;
         }
         csrSaveChannelPowerForBand( pMac, fPopulate5GBand );
@@ -3899,6 +3817,7 @@ void csrConstructCurrentValidChannelList( tpAniSirGlobal pMac, tDblLinkList *pCh
 tANI_BOOLEAN csrLearnCountryInformation( tpAniSirGlobal pMac, tSirBssDescription *pSirBssDesc,
                                          tDot11fBeaconIEs *pIes, tANI_BOOLEAN fForce)
 {
+    tANI_U8 Num2GChannels, bMaxNumChn;
     eHalStatus status;
     tANI_BOOLEAN fRet = eANI_BOOLEAN_FALSE;
     v_REGDOMAIN_t domainId;
@@ -3990,18 +3909,13 @@ tANI_BOOLEAN csrLearnCountryInformation( tpAniSirGlobal pMac, tSirBssDescription
                 {
                     VOS_ASSERT( pMac->scan.domainIdCurrent == pMac->scan.domainIdDefault );
                     if( HAL_STATUS_SUCCESS(csrGetRegulatoryDomainForCountry( 
-                                pMac, pIesLocal->Country.country, &domainId,
-                                COUNTRY_QUERY)) &&
+                                pMac, pIesLocal->Country.country, &domainId )) &&
                                 ( domainId == pMac->scan.domainIdCurrent ) )
                     {
                         //Two countries in the same domain
                     }
                 }
             }
-#ifdef CONFIG_ENABLE_LINUX_REG
-            csrGetRegulatoryDomainForCountry(pMac, pIesLocal->Country.country,
-                                             &domainId, COUNTRY_IE);
-#endif
         }
         else //Tush
         {
@@ -4023,67 +3937,56 @@ tANI_BOOLEAN csrLearnCountryInformation( tpAniSirGlobal pMac, tSirBssDescription
             }
         }
         smsLog(pMac, LOG3, FL("  %d sets each one is %d"), pIesLocal->Country.num_triplets, sizeof(tSirMacChanInfo));
+        // save the channel/power information from the Channel IE.
+        //sizeof(tSirMacChanInfo) has to be 3
+        if (eHAL_STATUS_SUCCESS != csrSaveToChannelPower2G_5G( pMac, pIesLocal->Country.num_triplets * sizeof(tSirMacChanInfo),
+                    (tSirMacChanInfo *)(&pIesLocal->Country.triplets[0]) ))
+        {
+            fRet = eANI_BOOLEAN_FALSE;
+            return fRet;
+        }
 
         // set the indicator of the channel where the country IE was found...
         pMac->scan.channelOf11dInfo = pSirBssDesc->channelId;
-#ifndef CONFIG_ENABLE_LINUX_REG
-        status = csrGetRegulatoryDomainForCountry(pMac,
-                       pIesLocal->Country.country, &domainId, COUNTRY_IE);
-        if ( status != eHAL_STATUS_SUCCESS )
-        {
-            smsLog( pMac, LOGE, FL("  fail to get regId %d"), domainId );
-            fRet = eANI_BOOLEAN_FALSE;
-            break;
-        }
+        csrGetRegulatoryDomainForCountry(pMac, pIesLocal->Country.country, &domainId );
         // Checking for Domain Id change
         if ( domainId != pMac->scan.domainIdCurrent )
         {
-            vos_mem_copy(pMac->scan.countryCode11d,
-                                  pIesLocal->Country.country,
-                                  sizeof( pMac->scan.countryCode11d ) );
-            /* Set Current Country code and Current Regulatory domain */
-            status = csrSetRegulatoryDomain(pMac, domainId, NULL);
-            if (eHAL_STATUS_SUCCESS != status)
-            {
-                smsLog(pMac, LOGE, "Set Reg Domain Fail %d", status);
-                fRet = eANI_BOOLEAN_FALSE;
-                return fRet;
-            }
-            //csrSetRegulatoryDomain will fail if the country doesn't fit our domain criteria.
-            vos_mem_copy(pMac->scan.countryCodeCurrent,
-                            pIesLocal->Country.country, WNI_CFG_COUNTRY_CODE_LEN);
-            //Simply set it to cfg.
+            tSirMacChanInfo* pMacChnSet = (tSirMacChanInfo *)(&pIesLocal->Country.triplets[0]);
+            palCopyMemory( pMac->hHdd, pMac->scan.countryCode11d, pIesLocal->Country.country,
+                                        sizeof( pMac->scan.countryCode11d ) );
             csrSetCfgCountryCode(pMac, pIesLocal->Country.country);
-
-            /* overwrite the defualt country code */
-            vos_mem_copy(pMac->scan.countryCodeDefault,
-                                      pMac->scan.countryCodeCurrent,
-                                      WNI_CFG_COUNTRY_CODE_LEN);
-            /* Set Current RegDomain */
-            status = WDA_SetRegDomain(pMac, domainId);
-            if ( status != eHAL_STATUS_SUCCESS )
-            {
-                smsLog( pMac, LOGE, FL("  fail to Set regId %d"), domainId );
-                fRet = eANI_BOOLEAN_FALSE;
-                return fRet;
-            }
-             /* set to default domain ID */
+            WDA_SetRegDomain(pMac, domainId);
             pMac->scan.domainIdCurrent = domainId;
-            /* get the channels based on new cc */
-            status = csrInitGetChannels( pMac );
-
-            if ( status != eHAL_STATUS_SUCCESS )
+            // Check whether AP provided the 2.4GHZ list or 5GHZ list
+            if(CSR_IS_CHANNEL_24GHZ(pMacChnSet[0].firstChanNum))
             {
-                smsLog( pMac, LOGE, FL("  fail to get Channels "));
-                fRet = eANI_BOOLEAN_FALSE;
-                return fRet;
+                // AP Provided the 2.4 Channels, Update the 5GHz channels from nv.bin
+                csrGet5GChannels(pMac );
             }
-            /* reset info based on new cc, and we are done */
-            csrResetCountryInformation(pMac, eANI_BOOLEAN_TRUE, eANI_BOOLEAN_TRUE);
-
+            else
+            {
+                // AP Provided the 5G Channels, Update the 2.4GHZ channel list from nv.bin
+                csrGet24GChannels(pMac );
+            }
         }
-#endif
+        // Populate both band channel lists based on what we found in the country information...
+        csrSetOppositeBandChannelInfo( pMac );
+        bMaxNumChn = WNI_CFG_VALID_CHANNEL_LIST_LEN;
+        // construct 2GHz channel list first
+        csrConstructCurrentValidChannelList( pMac, &pMac->scan.channelPowerInfoList24, pMac->scan.channels11d.channelList, 
+                                                bMaxNumChn, &Num2GChannels );
+        // construct 5GHz channel list now
+        if(bMaxNumChn > Num2GChannels)
+        {
+            csrConstructCurrentValidChannelList( pMac, &pMac->scan.channelPowerInfoList5G, pMac->scan.channels11d.channelList + Num2GChannels,
+                                                 bMaxNumChn - Num2GChannels,
+                                                 &pMac->scan.channels11d.numChannels );
+        }
+
+        pMac->scan.channels11d.numChannels += Num2GChannels;
         fRet = eANI_BOOLEAN_TRUE;
+
     } while( 0 );
     
     if( !pIes && pIesLocal )
@@ -4109,6 +4012,13 @@ static void csrSaveScanResults( tpAniSirGlobal pMac, tANI_U8 reason )
     pMac->scan.fCurrent11dInfoMatch = eANI_BOOLEAN_FALSE;
     // move the scan results from interim list to the main scan list
     csrMoveTempScanResultsToMainList( pMac, reason );
+
+    // Now check if we gathered any domain/country specific information
+    // If so, we should update channel list and apply Tx power settings
+    if( csrIs11dSupported(pMac) )
+    {
+        csrApplyCountryInformation( pMac, FALSE );
+    }
 }
 
 
@@ -5013,11 +4923,15 @@ eHalStatus csrScanSmeScanResponse( tpAniSirGlobal pMac, void *pMsgBuf )
                         //Get the list of channels scanned
                        if( pCommand->u.scanCmd.reason != eCsrScanUserRequest)
                        {
-                           csrScanGetScanChnInfo(pMac, NULL, NULL);
+                           csrScanGetScanChnInfo(pMac, pCommand->sessionId,
+                                                 NULL, NULL);
                        }
                        else
                        {
-                           csrScanGetScanChnInfo(pMac, pCommand->u.scanCmd.callback, pCommand->u.scanCmd.pContext);
+                           csrScanGetScanChnInfo(pMac,
+                                   pCommand->sessionId,
+                                   pCommand->u.scanCmd.pContext,
+                                   pCommand->u.scanCmd.callback);
                            pCommand->u.scanCmd.callback = NULL;
                        }
                     }
@@ -5250,7 +5164,17 @@ eHalStatus csrSendMBScanReq( tpAniSirGlobal pMac, tANI_U16 sessionId,
             pMsg->messageType = pal_cpu_to_be16((tANI_U16)eWNI_SME_SCAN_REQ);
             pMsg->length = pal_cpu_to_be16(msgLen);
             //ToDO: Fill in session info when we need to do scan base on session.
-            pMsg->sessionId = 0;
+            if ((pMac->fScanOffload) && (sessionId != CSR_SESSION_ID_INVALID))
+            {
+                pMsg->sessionId = sessionId;
+            }
+            else
+            {
+                /* if sessionId == CSR_SESSION_ID_INVALID, then send the scan
+                   request on first available session */
+                pMsg->sessionId = 0;
+            }
+
             pMsg->transactionId = 0;
             pMsg->dot11mode = (tANI_U8) csrTranslateToWNICfgDot11Mode(pMac, csrFindBestPhyMode( pMac, pMac->roam.configParam.phyMode ));
             pMsg->bssType = pal_cpu_to_be32(csrTranslateBsstypeToMacType(pScanReq->BSSType));
@@ -5594,7 +5518,7 @@ eHalStatus csrProcessScanCommand( tpAniSirGlobal pMac, tSmeCmd *pCommand )
         status = csrSetCfgBackgroundScanPeriod(pMac, pMac->roam.configParam.bgScanInterval);
         break;
     case eCsrScanGetScanChnInfo:
-        status = csrScanGetScanChannelInfo(pMac);
+        status = csrScanGetScanChannelInfo(pMac, pCommand->sessionId);
         break;
     case eCsrScanUserRequest:
         if(pMac->roam.configParam.fScanTwice)
@@ -6642,6 +6566,7 @@ tANI_BOOLEAN csrScanRemoveNotRoamingScanCommand(tpAniSirGlobal pMac)
     tListElem *pEntry, *pEntryTmp;
     tSmeCmd *pCommand;
     tDblLinkList localList;
+    tDblLinkList *pCmdList;
 
     vos_mem_zero(&localList, sizeof(tDblLinkList));
     if(!HAL_STATUS_SUCCESS(csrLLOpen(pMac->hHdd, &localList)))
@@ -6649,19 +6574,23 @@ tANI_BOOLEAN csrScanRemoveNotRoamingScanCommand(tpAniSirGlobal pMac)
         smsLog(pMac, LOGE, FL(" failed to open list"));
         return fRet;
     }
+    if (!pMac->fScanOffload)
+        pCmdList = &pMac->sme.smeCmdPendingList;
+    else
+        pCmdList = &pMac->sme.smeScanCmdPendingList;
 
-    csrLLLock(&pMac->sme.smeCmdPendingList);
-    pEntry = csrLLPeekHead(&pMac->sme.smeCmdPendingList, LL_ACCESS_NOLOCK);
+    csrLLLock(pCmdList);
+    pEntry = csrLLPeekHead(pCmdList, LL_ACCESS_NOLOCK);
     while(pEntry)
     {
-        pEntryTmp = csrLLNext(&pMac->sme.smeCmdPendingList, pEntry, LL_ACCESS_NOLOCK);
+        pEntryTmp = csrLLNext(pCmdList, pEntry, LL_ACCESS_NOLOCK);
         pCommand = GET_BASE_ADDR(pEntry, tSmeCmd, Link);
         if( eSmeCommandScan == pCommand->command )
         {
             switch( pCommand->u.scanCmd.reason )
             {
             case eCsrScanIdleScan:
-                if( csrLLRemoveEntry(&pMac->sme.smeCmdPendingList, pEntry, LL_ACCESS_NOLOCK) )
+                if( csrLLRemoveEntry(pCmdList, pEntry, LL_ACCESS_NOLOCK) )
                 {
                     csrLLInsertTail(&localList, pEntry, LL_ACCESS_NOLOCK);
                 }
@@ -6675,7 +6604,7 @@ tANI_BOOLEAN csrScanRemoveNotRoamingScanCommand(tpAniSirGlobal pMac)
         pEntry = pEntryTmp;
     }
 
-    csrLLUnlock(&pMac->sme.smeCmdPendingList);
+    csrLLUnlock(pCmdList);
 
     while( (pEntry = csrLLRemoveHead(&localList, LL_ACCESS_NOLOCK)) )
     {
@@ -6695,6 +6624,7 @@ tANI_BOOLEAN csrScanRemoveFreshScanCommand(tpAniSirGlobal pMac, tANI_U8 sessionI
     tListElem *pEntry, *pEntryTmp;
     tSmeCmd *pCommand;
     tDblLinkList localList;
+    tDblLinkList *pCmdList;
 
     vos_mem_zero(&localList, sizeof(tDblLinkList));
     if(!HAL_STATUS_SUCCESS(csrLLOpen(pMac->hHdd, &localList)))
@@ -6703,11 +6633,16 @@ tANI_BOOLEAN csrScanRemoveFreshScanCommand(tpAniSirGlobal pMac, tANI_U8 sessionI
         return fRet;
     }
 
-    csrLLLock(&pMac->sme.smeCmdPendingList);
-    pEntry = csrLLPeekHead(&pMac->sme.smeCmdPendingList, LL_ACCESS_NOLOCK);
+    if (!pMac->fScanOffload)
+        pCmdList = &pMac->sme.smeCmdPendingList;
+    else
+        pCmdList = &pMac->sme.smeScanCmdPendingList;
+
+    csrLLLock(pCmdList);
+    pEntry = csrLLPeekHead(pCmdList, LL_ACCESS_NOLOCK);
     while(pEntry)
     {
-        pEntryTmp = csrLLNext(&pMac->sme.smeCmdPendingList, pEntry, LL_ACCESS_NOLOCK);
+        pEntryTmp = csrLLNext(pCmdList, pEntry, LL_ACCESS_NOLOCK);
         pCommand = GET_BASE_ADDR(pEntry, tSmeCmd, Link);
         if( (eSmeCommandScan == pCommand->command) && (sessionId == pCommand->sessionId) )
         {
@@ -6726,7 +6661,7 @@ tANI_BOOLEAN csrScanRemoveFreshScanCommand(tpAniSirGlobal pMac, tANI_U8 sessionI
                  smsLog (pMac, LOGW, "%s: -------- abort scan command reason = %d",
                     __func__, pCommand->u.scanCmd.reason);
                 //The rest are fresh scan requests
-                if( csrLLRemoveEntry(&pMac->sme.smeCmdPendingList, pEntry, LL_ACCESS_NOLOCK) )
+                if( csrLLRemoveEntry(pCmdList, pEntry, LL_ACCESS_NOLOCK) )
                 {
                     csrLLInsertTail(&localList, pEntry, LL_ACCESS_NOLOCK);
                 }
@@ -6737,7 +6672,7 @@ tANI_BOOLEAN csrScanRemoveFreshScanCommand(tpAniSirGlobal pMac, tANI_U8 sessionI
         pEntry = pEntryTmp;
     }
 
-    csrLLUnlock(&pMac->sme.smeCmdPendingList);
+    csrLLUnlock(pCmdList);
 
     while( (pEntry = csrLLRemoveHead(&localList, LL_ACCESS_NOLOCK)) )
     {
@@ -7430,8 +7365,14 @@ void csrScanCcmCfgSetCallback(tHalHandle hHal, tANI_S32 result)
     tListElem *pEntry = NULL;
     tSmeCmd *pCommand = NULL;
     tpAniSirGlobal pMac = PMAC_STRUCT( hHal );
-    
-    pEntry = csrLLPeekHead( &pMac->sme.smeCmdActiveList, LL_ACCESS_LOCK );
+    tDblLinkList *pCmdList ;
+
+    if (!pMac->fScanOffload)
+        pCmdList = &pMac->sme.smeCmdActiveList;
+    else
+        pCmdList = &pMac->sme.smeScanCmdActiveList;
+
+    pEntry = csrLLPeekHead( pCmdList, LL_ACCESS_LOCK );
     if ( pEntry )
     {
         pCommand = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
@@ -7511,49 +7452,123 @@ eHalStatus csrProcessSetBGScanParam(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 }
 
 
-eHalStatus csrScanAbortMacScan(tpAniSirGlobal pMac)
+eHalStatus csrScanAbortMacScan(tpAniSirGlobal pMac, tANI_U8 sessionId)
 {
-    eHalStatus status = eHAL_STATUS_SUCCESS;
-    tSirMbMsg *pMsg;
+    eHalStatus status = eHAL_STATUS_FAILURE;
+    tSirSmeScanAbortReq *pMsg;
     tANI_U16 msgLen;
     tListElem *pEntry;
     tSmeCmd *pCommand;
 
-#ifdef WLAN_AP_STA_CONCURRENCY
-    csrLLLock(&pMac->scan.scanCmdPendingList);
-    while( NULL != ( pEntry = csrLLRemoveHead( &pMac->scan.scanCmdPendingList, LL_ACCESS_NOLOCK) ) )
+    if (!pMac->fScanOffload)
     {
+#ifdef WLAN_AP_STA_CONCURRENCY
+        csrLLLock(&pMac->scan.scanCmdPendingList);
+        while(NULL !=
+               (pEntry = csrLLRemoveHead(&pMac->scan.scanCmdPendingList,
+                                LL_ACCESS_NOLOCK)))
+        {
 
-        pCommand = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
-        csrAbortCommand( pMac, pCommand, eANI_BOOLEAN_FALSE);
-    }
-    csrLLUnlock(&pMac->scan.scanCmdPendingList);
+            pCommand = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
+            csrAbortCommand( pMac, pCommand, eANI_BOOLEAN_FALSE);
+        }
+        csrLLUnlock(&pMac->scan.scanCmdPendingList);
 #endif
 
-    pMac->scan.fDropScanCmd = eANI_BOOLEAN_TRUE;
-    csrRemoveCmdFromPendingList( pMac, &pMac->roam.roamCmdPendingList, eSmeCommandScan);
-    csrRemoveCmdFromPendingList( pMac, &pMac->sme.smeCmdPendingList, eSmeCommandScan);
-    pMac->scan.fDropScanCmd = eANI_BOOLEAN_FALSE;
+        pMac->scan.fDropScanCmd = eANI_BOOLEAN_TRUE;
+        csrRemoveCmdFromPendingList( pMac, &pMac->roam.roamCmdPendingList, eSmeCommandScan);
+        csrRemoveCmdFromPendingList( pMac, &pMac->sme.smeCmdPendingList, eSmeCommandScan);
+        pMac->scan.fDropScanCmd = eANI_BOOLEAN_FALSE;
+
+        pEntry = csrLLPeekHead(&pMac->sme.smeCmdActiveList, LL_ACCESS_LOCK);
+    }
+    else
+    {
+        pMac->scan.fDropScanCmd = eANI_BOOLEAN_TRUE;
+        csrRemoveCmdWithSessionIdFromPendingList(pMac,
+                sessionId,
+                &pMac->sme.smeScanCmdPendingList,
+                eSmeCommandScan);
+        pMac->scan.fDropScanCmd = eANI_BOOLEAN_FALSE;
+
+        pEntry = csrLLPeekHead(&pMac->sme.smeScanCmdActiveList, LL_ACCESS_LOCK);
+    }
 
     //We need to abort scan only if we are scanning
-    if(NULL != (pEntry = csrLLPeekHead(&pMac->sme.smeCmdActiveList, LL_ACCESS_LOCK)))
+    if(NULL != pEntry)
     {
         pCommand = GET_BASE_ADDR( pEntry, tSmeCmd, Link );
-        if(eSmeCommandScan == pCommand->command)
+        if(eSmeCommandScan == pCommand->command &&
+           pCommand->sessionId == sessionId)
         {
-            msgLen = (tANI_U16)(sizeof( tSirMbMsg ));
+            msgLen = (tANI_U16)(sizeof(tSirSmeScanAbortReq));
             status = palAllocateMemory(pMac->hHdd, (void **)&pMsg, msgLen);
             if(HAL_STATUS_SUCCESS(status))
             {
                 palZeroMemory(pMac->hHdd, (void *)pMsg, msgLen);
                 pMsg->type = pal_cpu_to_be16((tANI_U16)eWNI_SME_SCAN_ABORT_IND);
                 pMsg->msgLen = pal_cpu_to_be16(msgLen);
+                pMsg->sessionId = sessionId;
                 status = palSendMBMessage(pMac->hHdd, pMsg);
             }
+            else
+                smsLog(pMac, LOGE, FL("Failed to allocate memory for"
+                                      " SmeScanAbortReq"));
         }
     }
 
-    return( status );
+    return(status);
+}
+
+void csrRemoveCmdWithSessionIdFromPendingList(tpAniSirGlobal pMac,
+                                              tANI_U8 sessionId,
+                                              tDblLinkList *pList,
+                                              eSmeCommandType commandType)
+{
+    tDblLinkList localList;
+    tListElem *pEntry;
+    tSmeCmd   *pCommand;
+    tListElem  *pEntryToRemove;
+
+    vos_mem_zero(&localList, sizeof(tDblLinkList));
+    if(!HAL_STATUS_SUCCESS(csrLLOpen(pMac->hHdd, &localList)))
+    {
+        smsLog(pMac, LOGE, FL(" failed to open list"));
+        return;
+    }
+
+    csrLLLock(pList);
+    if ((pEntry = csrLLPeekHead( pList, LL_ACCESS_NOLOCK)))
+    {
+
+        /* Have to make sure we don't loop back to the head of the list,
+         * which will happen if the entry is NOT on the list */
+        while (pEntry)
+        {
+            pEntryToRemove = pEntry;
+            pEntry = csrLLNext(pList, pEntry, LL_ACCESS_NOLOCK);
+            pCommand = GET_BASE_ADDR( pEntryToRemove, tSmeCmd, Link );
+            if ((pCommand->command == commandType)  &&
+                    (pCommand->sessionId == sessionId))
+            {
+                /* Remove that entry only */
+                if (csrLLRemoveEntry( pList, pEntryToRemove, LL_ACCESS_NOLOCK))
+                {
+                    csrLLInsertTail(&localList, pEntryToRemove,
+                                    LL_ACCESS_NOLOCK);
+                }
+            }
+        }
+    }
+    csrLLUnlock(pList);
+
+    while ((pEntry = csrLLRemoveHead(&localList, LL_ACCESS_NOLOCK)))
+    {
+        pCommand = GET_BASE_ADDR(pEntry, tSmeCmd, Link);
+        csrAbortCommand(pMac, pCommand, eANI_BOOLEAN_FALSE);
+    }
+
+    csrLLClose(&localList);
 }
 
 void csrRemoveCmdFromPendingList(tpAniSirGlobal pMac, tDblLinkList *pList,
@@ -7607,33 +7622,40 @@ void csrRemoveCmdFromPendingList(tpAniSirGlobal pMac, tDblLinkList *pList,
 }
 
 
-eHalStatus csrScanAbortMacScanNotForConnect(tpAniSirGlobal pMac)
+eHalStatus csrScanAbortMacScanNotForConnect(tpAniSirGlobal pMac,
+                                            tANI_U8 sessionId)
 {
     eHalStatus status = eHAL_STATUS_SUCCESS;
 
     if( !csrIsScanForRoamCommandActive( pMac ) )
     {
         //Only abort the scan if it is not used for other roam/connect purpose
-        status = csrScanAbortMacScan(pMac);
+        status = csrScanAbortMacScan(pMac, sessionId);
     }
 
     return (status);
 }
 
 
-eHalStatus csrScanGetScanChannelInfo(tpAniSirGlobal pMac)
+eHalStatus csrScanGetScanChannelInfo(tpAniSirGlobal pMac, tANI_U8 sessionId)
 {
     eHalStatus status = eHAL_STATUS_SUCCESS;
     tSirMbMsg *pMsg;
     tANI_U16 msgLen;
 
-    msgLen = (tANI_U16)(sizeof( tSirMbMsg ));
+    if (pMac->fScanOffload)
+        msgLen = (tANI_U16)(sizeof(tSirSmeGetScanChanReq));
+    else
+        msgLen = (tANI_U16)(sizeof(tSirMbMsg));
+
     status = palAllocateMemory(pMac->hHdd, (void **)&pMsg, msgLen);
     if(HAL_STATUS_SUCCESS(status))
     {
         palZeroMemory(pMac->hHdd, pMsg, msgLen);
         pMsg->type = eWNI_SME_GET_SCANNED_CHANNEL_REQ;
         pMsg->msgLen = msgLen;
+        if (pMac->fScanOffload)
+            ((tSirSmeGetScanChanReq *)pMsg)->sessionId = sessionId;
         status = palSendMBMessage(pMac->hHdd, pMsg);
     }                             
 
@@ -7658,7 +7680,6 @@ tANI_BOOLEAN csrRoamIsValidChannel( tpAniSirGlobal pMac, tANI_U8 channel )
     return fValid;
 }
 
-#ifdef FEATURE_WLAN_SCAN_PNO
 eHalStatus csrScanSavePreferredNetworkFound(tpAniSirGlobal pMac,
             tSirPrefNetworkFoundInd *pPrefNetworkFoundInd)
 {
@@ -7824,16 +7845,10 @@ eHalStatus csrScanSavePreferredNetworkFound(tpAniSirGlobal pMac,
    //Add to scan cache
    csrScanAddResult(pMac, pScanResult, pIesLocal);
 
-   if( (pScanResult->Result.pvIes == NULL) && pIesLocal )
-   {
-       vos_mem_free(pIesLocal);
-   }
-
    vos_mem_free(pParsedFrame);
 
    return eHAL_STATUS_SUCCESS;
 }
-#endif //FEATURE_WLAN_SCAN_PNO
 
 #ifdef FEATURE_WLAN_LFR
 void csrInitOccupiedChannelsList(tpAniSirGlobal pMac)
@@ -7899,7 +7914,7 @@ eHalStatus csrScanCreateEntryInScanCache(tpAniSirGlobal pMac, tANI_U32 sessionId
     eHalStatus status = eHAL_STATUS_SUCCESS;
     tDot11fBeaconIEs *pNewIes = NULL;
     tCsrRoamSession *pSession = CSR_GET_SESSION( pMac, sessionId );
-    tSirBssDescription *pNewBssDescriptor = NULL;
+    tSirBssDescription *pNewBssDescriptor;
     tANI_U32 size = 0;
 
     if(NULL == pSession)
@@ -7980,15 +7995,3 @@ eHalStatus csrScanCreateEntryInScanCache(tpAniSirGlobal pMac, tANI_U32 sessionId
     }
     return status;
 }
-
-#ifdef FEATURE_WLAN_CCX
-//  Update the TSF with the difference in system time
-void UpdateCCKMTSF(tANI_U32 *timeStamp0, tANI_U32 *timeStamp1, tANI_U32 *incr)
-{
-    tANI_U64 timeStamp64 = ((tANI_U64)*timeStamp1 << 32) | (*timeStamp0);
-
-    timeStamp64 = (tANI_U64)(timeStamp64 + (tANI_U64)*incr);
-    *timeStamp0 = (tANI_U32)(timeStamp64 & 0xffffffff);
-    *timeStamp1 = (tANI_U32)((timeStamp64 >> 32) & 0xffffffff);
-}
-#endif

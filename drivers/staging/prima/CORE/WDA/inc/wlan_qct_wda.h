@@ -154,7 +154,6 @@ typedef enum
  */
 #define IS_MCC_SUPPORTED (WDA_IsWcnssWlanReportedVersionGreaterThanOrEqual( 0, 1, 1, 0))
 #define IS_FEATURE_SUPPORTED_BY_FW(featEnumValue) (!!WDA_getFwWlanFeatCaps(featEnumValue))
-#define IS_FEATURE_SUPPORTED_BY_DRIVER(featEnumValue) (!!WDA_getHostWlanFeatCaps(featEnumValue))
 
 #ifdef WLAN_ACTIVEMODE_OFFLOAD_FEATURE
 #define IS_ACTIVEMODE_OFFLOAD_FEATURE_ENABLE ((WDA_getFwWlanFeatCaps(WLANACTIVE_OFFLOAD)) & (WDI_getHostWlanFeatCaps(WLANACTIVE_OFFLOAD)))
@@ -171,6 +170,11 @@ typedef enum
 /* Check if heartbeat offload is enabled */
 #define IS_IBSS_HEARTBEAT_OFFLOAD_FEATURE_ENABLE ((WDI_getHostWlanFeatCaps(IBSS_HEARTBEAT_OFFLOAD)) & (WDA_getFwWlanFeatCaps(IBSS_HEARTBEAT_OFFLOAD)))
 
+#ifdef FEATURE_WLAN_TDLS
+#define IS_ADVANCE_TDLS_ENABLE ((WDI_getHostWlanFeatCaps(ADVANCE_TDLS)) & (WDA_getFwWlanFeatCaps(ADVANCE_TDLS)))
+#else
+#define IS_ADVANCE_TDLS_ENABLE 0
+#endif
 /*--------------------------------------------------------------------------
   Definitions for Data path APIs
  --------------------------------------------------------------------------*/
@@ -1101,13 +1105,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 
 #define WDA_ADD_PERIODIC_TX_PTRN_IND    SIR_HAL_ADD_PERIODIC_TX_PTRN_IND
 #define WDA_DEL_PERIODIC_TX_PTRN_IND    SIR_HAL_DEL_PERIODIC_TX_PTRN_IND
-
-#ifdef FEATURE_WLAN_BATCH_SCAN
-#define WDA_SET_BATCH_SCAN_REQ            SIR_HAL_SET_BATCH_SCAN_REQ
-#define WDA_SET_BATCH_SCAN_RSP            SIR_HAL_SET_BATCH_SCAN_RSP
-#define WDA_STOP_BATCH_SCAN_IND           SIR_HAL_STOP_BATCH_SCAN_IND
-#define WDA_TRIGGER_BATCH_SCAN_RESULT_IND SIR_HAL_TRIGGER_BATCH_SCAN_RESULT_IND
-#endif
 
 tSirRetStatus wdaPostCtrlMsg(tpAniSirGlobal pMac, tSirMsgQ *pMsg);
 

@@ -114,8 +114,7 @@ typedef struct
 
 } sysContextData;
 
-// sysStop 20 Seconds timeout
-#define SYS_STOP_TIMEOUT 20000
+
 static vos_event_t gStopEvt;
 
 VOS_STATUS sysBuildMessageHeader( SYS_MSG_ID sysMsgId, vos_msg_t *pMsg )
@@ -178,7 +177,7 @@ VOS_STATUS sysStop( v_CONTEXT_t pVosContext )
       vosStatus = VOS_STATUS_E_BADMSG;
    }
 
-   vosStatus = vos_wait_events( &gStopEvt, 1, SYS_STOP_TIMEOUT, &evtIndex );
+   vosStatus = vos_wait_events( &gStopEvt, 1, 0, &evtIndex );
    VOS_ASSERT( VOS_IS_STATUS_SUCCESS ( vosStatus ) );
 
    vosStatus = vos_event_destroy( &gStopEvt );
@@ -337,13 +336,7 @@ VOS_STATUS sysMcProcessMsg( v_CONTEXT_t pVosContext, vos_msg_t *pMsg )
    VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
    v_VOID_t *hHal;
 
-   if (NULL == pMsg)
-   {
-      VOS_ASSERT(0);
-      VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_ERROR,
-            "%s: NULL pointer to vos_msg_t", __func__);
-      return VOS_STATUS_E_INVAL;
-   }
+   VOS_ASSERT( pMsg );
 
    // All 'new' SYS messages are identified by a cookie in the reserved
    // field of the message as well as the message type.  This prevents
@@ -380,7 +373,7 @@ VOS_STATUS sysMcProcessMsg( v_CONTEXT_t pVosContext, vos_msg_t *pMsg )
             }
             else
             {
-               vosStatus = sme_Stop( hHal, HAL_STOP_TYPE_SYS_DEEP_SLEEP);
+               vosStatus = sme_Stop( hHal, TRUE );
                VOS_ASSERT( VOS_IS_STATUS_SUCCESS( vosStatus ) );
 
                vosStatus = macStop( hHal, HAL_STOP_TYPE_SYS_DEEP_SLEEP );
@@ -466,13 +459,7 @@ VOS_STATUS sysTxProcessMsg( v_CONTEXT_t pVosContext, vos_msg_t *pMsg )
 {
    VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
 
-   if (NULL == pMsg)
-   {
-      VOS_ASSERT(0);
-      VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_ERROR,
-            "%s: NULL pointer to vos_msg_t", __func__);
-      return VOS_STATUS_E_INVAL;
-   }
+   VOS_ASSERT( pMsg );
 
    // All 'new' SYS messages are identified by a cookie in the reserved
    // field of the message as well as the message type.  This prevents
@@ -543,13 +530,7 @@ VOS_STATUS sysRxProcessMsg( v_CONTEXT_t pVosContext, vos_msg_t *pMsg )
 {
    VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
 
-   if (NULL == pMsg)
-   {
-      VOS_ASSERT(0);
-      VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_ERROR,
-            "%s: NULL pointer to vos_msg_t", __func__);
-      return VOS_STATUS_E_INVAL;
-   }
+   VOS_ASSERT( pMsg );
 
    // All 'new' SYS messages are identified by a cookie in the reserved
    // field of the message as well as the message type.  This prevents

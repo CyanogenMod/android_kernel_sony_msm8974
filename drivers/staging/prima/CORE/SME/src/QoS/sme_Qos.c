@@ -64,7 +64,7 @@
 #include "smsDebug.h"
 #include "utilsParser.h"
 #endif
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
 #include <csrCcx.h>
 #endif
 
@@ -134,14 +134,6 @@ typedef enum
    SME_QOS_HANDOFF,
    
 }sme_QosStates;
-/*---------------------------------------------------------------------------
-   Enumeration of the various Release QoS trigger
----------------------------------------------------------------------------*/
-typedef enum
-{
-   SME_QOS_RELEASE_DEFAULT = 0,
-   SME_QOS_RELEASE_BY_AP,
-}sme_QosRelTriggers;
 /*---------------------------------------------------------------------------
    Enumeration of the various QoS cmds 
 ---------------------------------------------------------------------------*/
@@ -314,7 +306,6 @@ typedef struct sme_QosACInfo_s
    parsing the RIC received in the the reassoc response */
    tSirAddtsRsp           addTsRsp[SME_QOS_TSPEC_INDEX_MAX];
 #endif
-   sme_QosRelTriggers     relTrig;
 
 } sme_QosACInfo;
 /*---------------------------------------------------------------------------
@@ -2491,7 +2482,7 @@ sme_QosStatusType sme_QosInternalReleaseReq(tpAniSirGlobal pMac,
       {
          // this is the only flow aggregated in this TSPEC
          status = SME_QOS_STATUS_RELEASE_SUCCESS_RSP;
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
          if (ac == SME_QOS_EDCA_AC_VO)
          {
             // Indicate to neighbor roam logic of the new required VO
@@ -2525,34 +2516,24 @@ sme_QosStatusType sme_QosInternalReleaseReq(tpAniSirGlobal pMac,
                   }
                }
             }
-            if (SME_QOS_RELEASE_DEFAULT == pACInfo->relTrig)
+            //send delts
+            hstatus = qosIssueCommand(pMac, sessionId, eSmeCommandDelTs,
+                                      NULL, ac, flow_info->tspec_mask);
+            if(!HAL_STATUS_SUCCESS(hstatus))
             {
-               //send delts
-               hstatus = qosIssueCommand(pMac, sessionId, eSmeCommandDelTs,
-                                         NULL, ac, flow_info->tspec_mask);
-               if(!HAL_STATUS_SUCCESS(hstatus))
-               {
-                  //err msg
-                  VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
-                            "%s: %d: sme_QosDelTsReq() failed",
-                            __func__, __LINE__);
-                  status = SME_QOS_STATUS_RELEASE_FAILURE_RSP;
-                  // we won't be waiting for a response from the AP
-                  // so vote powersave back on
-                  pSession->readyForPowerSave = VOS_TRUE;
-               }
-               else
-               {
-                  pACInfo->tspec_mask_status &= SME_QOS_TSPEC_MASK_BIT_1_2_SET &
-                                                (~flow_info->tspec_mask);
-                  deltsIssued = VOS_TRUE;
-               }
+               //err msg
+               VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, 
+                         "%s: %d: sme_QosDelTsReq() failed",
+                         __func__, __LINE__);
+               status = SME_QOS_STATUS_RELEASE_FAILURE_RSP;
+               // we won't be waiting for a response from the AP
+               // so vote powersave back on
+               pSession->readyForPowerSave = VOS_TRUE;
             }
             else
             {
-               pSession->readyForPowerSave = VOS_TRUE;
-               pACInfo->tspec_mask_status &= SME_QOS_TSPEC_MASK_BIT_1_2_SET &
-                                              (~flow_info->tspec_mask);
+               pACInfo->tspec_mask_status &= SME_QOS_TSPEC_MASK_BIT_1_2_SET & 
+                  (~flow_info->tspec_mask);
                deltsIssued = VOS_TRUE;
             }
          }
@@ -2603,27 +2584,13 @@ sme_QosStatusType sme_QosInternalReleaseReq(tpAniSirGlobal pMac,
             // so vote powersave back on
             pSession->readyForPowerSave = VOS_TRUE;
          }
-
-         if (SME_QOS_RELEASE_BY_AP == pACInfo->relTrig)
+         if(buffered_cmd)
          {
-            flow_info->QoSCallback(pMac, flow_info->HDDcontext,
-                          &pACInfo->curr_QoSInfo[flow_info->tspec_mask - 1],
-                          SME_QOS_STATUS_RELEASE_QOS_LOST_IND,
-                          flow_info->QosFlowID);
-
-            VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO_HIGH,
-                      "%s: %d: Deleting entry at %p with flowID %d",
-                      __func__, __LINE__,
-                      flow_info, flow_info->QosFlowID);
-         }
-         else if(buffered_cmd)
-         {
-            flow_info->QoSCallback(pMac, flow_info->HDDcontext,
+            flow_info->QoSCallback(pMac, flow_info->HDDcontext, 
                                    NULL,
                                    status,
                                    flow_info->QosFlowID);
          }
-
          if(SME_QOS_STATUS_RELEASE_FAILURE_RSP == status)
          {
             break;
@@ -2667,7 +2634,6 @@ sme_QosStatusType sme_QosInternalReleaseReq(tpAniSirGlobal pMac,
                    sessionId, flow_info, QosFlowID);
          csrLLRemoveEntry(&sme_QosCb.flow_list, pEntry, VOS_TRUE );
          pDeletedFlow = flow_info;
-         pACInfo->relTrig = SME_QOS_RELEASE_DEFAULT;
       }
       /* if we are doing reassoc & we are already in handoff state, no need
          to move to requested state. But make sure to set the previous state
@@ -3788,14 +3754,6 @@ eHalStatus sme_QosAddTsReq(tpAniSirGlobal pMac,
              "%s: %d: invoked on session %d for AC %d",
              __func__, __LINE__,
              sessionId, ac);
-   if (sessionId >= CSR_ROAM_SESSION_MAX)
-   {
-      //err msg
-      VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
-                "%s: %d: sessionId(%d) is invalid",
-                __func__, __LINE__, sessionId);
-      return eHAL_STATUS_FAILURE;
-   }
    pSession = &sme_QosCb.sessionInfo[sessionId];
    pMsg = (tSirAddtsReq *)vos_mem_malloc(sizeof(tSirAddtsReq));
    if (!pMsg)
@@ -4168,14 +4126,26 @@ eHalStatus sme_QosProcessDelTsInd(tpAniSirGlobal pMac, void *pMsgBuf)
       VOS_ASSERT(0);
       return eHAL_STATUS_FAILURE;
    }
-
-//event: EVENT_WLAN_QOS
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
+   //clean up the CB
+   vos_mem_zero(&pACInfo->curr_QoSInfo[SME_QOS_TSPEC_INDEX_0], 
+                sizeof(sme_QosWmmTspecInfo));
+   vos_mem_zero(&pACInfo->requested_QoSInfo[SME_QOS_TSPEC_INDEX_0], 
+                sizeof(sme_QosWmmTspecInfo));
+   vos_mem_zero(&pACInfo->curr_QoSInfo[SME_QOS_TSPEC_INDEX_1], 
+                sizeof(sme_QosWmmTspecInfo));
+   vos_mem_zero(&pACInfo->requested_QoSInfo[SME_QOS_TSPEC_INDEX_1], 
+                sizeof(sme_QosWmmTspecInfo));
+   pACInfo->tspec_mask_status = SME_QOS_TSPEC_MASK_CLEAR;
+   pACInfo->tspec_pending = 0;
+   //event: EVENT_WLAN_QOS
+#ifdef FEATURE_WLAN_DIAG_SUPPORT          
    qos.eventId = SME_QOS_DIAG_DELTS;
    qos.reasonCode = SME_QOS_DIAG_DELTS_IND_FROM_AP;
    WLAN_VOS_DIAG_EVENT_REPORT(&qos, EVENT_WLAN_QOS);
 #endif //FEATURE_WLAN_DIAG_SUPPORT
 
+   sme_QosStateTransition(sessionId, ac, SME_QOS_LINK_UP);
+   (void)sme_QosProcessBufferedCmd(sessionId);
    return eHAL_STATUS_SUCCESS;
 }
 /*--------------------------------------------------------------------------
@@ -4397,7 +4367,7 @@ eHalStatus sme_QosProcessReassocReqEv(tpAniSirGlobal pMac, v_U8_t sessionId, voi
 eHalStatus sme_QosProcessReassocSuccessEv(tpAniSirGlobal pMac, v_U8_t sessionId, void * pEvent_info)
 {
 
-   tCsrRoamSession *pCsrRoamSession = NULL;
+   tCsrRoamSession *pCsrRoamSession = CSR_GET_SESSION( pMac, sessionId );
    sme_QosSessionInfo *pSession;
    sme_QosACInfo *pACInfo;
    sme_QosEdcaAcType ac, ac_index;
@@ -4411,17 +4381,6 @@ eHalStatus sme_QosProcessReassocSuccessEv(tpAniSirGlobal pMac, v_U8_t sessionId,
              "%s: %d: invoked on session %d",
              __func__, __LINE__,
              sessionId);
-
-   if (CSR_ROAM_SESSION_MAX <= sessionId) {
-       VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
-                "%s: %d: invoked on session %d",
-                __func__, __LINE__,
-                sessionId);
-       return status;
-   }
-
-   pCsrRoamSession = CSR_GET_SESSION( pMac, sessionId );
-
    pSession = &sme_QosCb.sessionInfo[sessionId];
    // our pending reassociation has completed
    // we can allow powersave
@@ -5481,7 +5440,7 @@ eHalStatus sme_QosProcessAddTsSuccessRsp(tpAniSirGlobal pMac,
    }
    WLAN_VOS_DIAG_LOG_REPORT(log_ptr);
 #endif //FEATURE_WLAN_DIAG_SUPPORT
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
    if (ac == SME_QOS_EDCA_AC_VO)
    {
       // Indicate to neighbor roam logic of the new required VO
@@ -6669,9 +6628,6 @@ eHalStatus sme_QosDelTsIndFnp(tpAniSirGlobal pMac, tListElem *pEntry)
    sme_QosACInfo *pACInfo;
    sme_QosFlowInfoEntry *flow_info = NULL;
    sme_QosEdcaAcType ac;
-   eHalStatus lock_status = eHAL_STATUS_FAILURE;
-   sme_QosStatusType status;
-
    if(!pEntry)
    {
       VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, 
@@ -6686,24 +6642,18 @@ eHalStatus sme_QosDelTsIndFnp(tpAniSirGlobal pMac, tListElem *pEntry)
    ac = flow_info->ac_type;
    pSession = &sme_QosCb.sessionInfo[flow_info->sessionId];
    pACInfo = &pSession->ac_info[ac];
-   pACInfo->relTrig = SME_QOS_RELEASE_BY_AP;
-
-   lock_status = sme_AcquireGlobalLock( &pMac->sme );
-   if ( !HAL_STATUS_SUCCESS( lock_status ) )
-   {
-      VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
-                "%s: %d: Unable to obtain lock",
-                __func__, __LINE__);
-      return SME_QOS_STATUS_RELEASE_FAILURE_RSP;
-   }
-   //Call the internal function for QoS release, adding a layer of abstraction
-   status = sme_QosInternalReleaseReq(pMac, flow_info->QosFlowID, VOS_FALSE);
-   sme_ReleaseGlobalLock( &pMac->sme );
+   flow_info->QoSCallback(pMac, flow_info->HDDcontext, 
+                          &pACInfo->curr_QoSInfo[flow_info->tspec_mask - 1],
+                          SME_QOS_STATUS_RELEASE_QOS_LOST_IND,
+                          flow_info->QosFlowID);
+   pACInfo->num_flows[flow_info->tspec_mask - 1]--;
    VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO_HIGH, 
-             "%s: %d: QoS Release return status on Flow %d is %d",
+             "%s: %d: Deleting entry at %p with flowID %d",
              __func__, __LINE__,
-             flow_info->QosFlowID, status);
-
+             flow_info, flow_info->QosFlowID);
+   csrLLRemoveEntry(&sme_QosCb.flow_list, pEntry, VOS_TRUE );
+   // reclaim the memory
+   vos_mem_free(flow_info);
    return eHAL_STATUS_SUCCESS;
 }
 /*--------------------------------------------------------------------------

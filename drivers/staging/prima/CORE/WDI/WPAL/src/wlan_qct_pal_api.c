@@ -430,7 +430,7 @@ void wpalWcnssResetIntr(void)
 
 /*---------------------------------------------------------------------------
     wpalFwDumpReq -  Trigger the dump commands to Firmware
-
+     
     Param:
        cmd - Command No. to execute
        arg1 - argument 1 to cmd
@@ -446,20 +446,3 @@ void wpalFwDumpReq(wpt_uint32 cmd, wpt_uint32 arg1, wpt_uint32 arg2,
    vos_fwDumpReq(cmd, arg1, arg2, arg3, arg4);
    return;
 }
-
-/*---------------------------------------------------------------------------
-    wpalDevicePanic -  Trigger Device Panic
-       Trigger device panic to help debug
-
-    Param:
-       NONE
-
-    Return:
-       NONE
----------------------------------------------------------------------------*/
-void wpalDevicePanic(void)
-{
-   BUG_ON(0);
-   return;
-}
-

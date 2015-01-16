@@ -85,8 +85,8 @@
 #include <vos_trace.h>
 #include <vos_event.h>
 #include <vos_lock.h>
-#include <vos_nvitem.h>
 #include <vos_mq.h>
+#include <vos_nvitem.h>
 #include <vos_packet.h>
 #include <vos_threads.h>
 #include <vos_timer.h>
@@ -186,12 +186,8 @@ v_CONTEXT_t vos_get_global_context( VOS_MODULE_ID moduleId,
 
 v_U8_t vos_is_logp_in_progress(VOS_MODULE_ID moduleId, v_VOID_t *moduleContext);
 void vos_set_logp_in_progress(VOS_MODULE_ID moduleId, v_U8_t value);
-
 v_U8_t vos_is_load_unload_in_progress(VOS_MODULE_ID moduleId, v_VOID_t *moduleContext);
 void vos_set_load_unload_in_progress(VOS_MODULE_ID moduleId, v_U8_t value);
-
-v_U8_t vos_is_reinit_in_progress(VOS_MODULE_ID moduleId, v_VOID_t *moduleContext);
-void vos_set_reinit_in_progress(VOS_MODULE_ID moduleId, v_U8_t value);
 
 /**---------------------------------------------------------------------------
   
@@ -270,7 +266,7 @@ VOS_STATUS vos_free_context( v_VOID_t *pVosContext, VOS_MODULE_ID moduleID,
                              v_VOID_t *pModuleContext );
                              
 v_BOOL_t vos_is_apps_power_collapse_allowed(void* pHddCtx);
-void vos_abort_mac_scan(void);
+void vos_abort_mac_scan(tANI_U8 sessionId);
 
 /**
   @brief vos_wlanShutdown() - This API will shutdown WLAN driver

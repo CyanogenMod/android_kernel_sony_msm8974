@@ -1017,13 +1017,8 @@ VOS_STATUS vos_ftm_preStart( v_CONTEXT_t vosContext )
    VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
              "vos prestart");
 
-   if (NULL == pVosContext->pWDAContext)
-   {
-      VOS_ASSERT(0);
-      VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_ERROR,
-            "%s: WDA NULL context", __func__);
-      return VOS_STATUS_E_FAILURE;
-   }
+
+   VOS_ASSERT( NULL != pVosContext->pWDAContext);
 
    /* call macPreStart */
    vStatus = macPreStart(pVosContext->pMACContext);
@@ -1404,7 +1399,7 @@ static int wlan_hdd_ftm_start(hdd_context_t *pHddCtx)
                     "%s: WDA_NVDownload_Start reporting  other error \n",__func__);
        }
        VOS_ASSERT(0);
-       goto err_status_failure;
+       goto err_wda_stop;
     }
 
     vStatus = WDA_start(pVosContext);
@@ -4192,12 +4187,7 @@ static VOS_STATUS wlan_ftm_priv_set_mac_address(hdd_adapter_t *pAdapter,char *bu
     pMsgBody->SetNvField.nvField = NV_COMMON_MAC_ADDR;
 
     /*We get the mac address in string format "XX:XX:XX:XX:XX:XX" convert to hex*/
-    if (6 != sscanf(buf,"%02x:%02x:%02x:%02x:%02x:%02x",&macAddr[0],(int*)&macAddr[1],(int*)&macAddr[2],(int*)&macAddr[3],(int*)&macAddr[4],(int*)&macAddr[5]))
-    {
-       VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-                 "Invalid MacAddress Input %s", buf);
-       return VOS_STATUS_E_FAILURE;
-    }
+    sscanf(buf,"%02x:%02x:%02x:%02x:%02x:%02x",&macAddr[0],(int*)&macAddr[1],(int*)&macAddr[2],(int*)&macAddr[3],(int*)&macAddr[4],(int*)&macAddr[5]);
 
     VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "MacAddress = %02x:%02x:%02x:%02x:%02x:%02x",MAC_ADDR_ARRAY(macAddr));
 
@@ -4262,44 +4252,26 @@ done:
 static int iw_ftm_setchar_getnone(struct net_device *dev, struct iw_request_info *info,
                        union iwreq_data *wrqu, char *extra)
 {
-    int ret,sub_cmd;
-    unsigned int length;
+    int sub_cmd = wrqu->data.flags;
+    int ret = 0; /* success */
     VOS_STATUS status;
-    hdd_adapter_t *pAdapter;
+    hdd_adapter_t *pAdapter = (netdev_priv(dev));
 
-    ret =0;
-    length = wrqu->data.length;
-    sub_cmd = wrqu->data.flags;
-    pAdapter = (hdd_adapter_t *)netdev_priv(dev);
-
-    /*we can only accept input falling between 1 and length bytes,
-     *and ensure extra is null delimited string
-     */
-    if (wrqu->data.length>=512)
-        return -EINVAL;
-    vos_mem_zero(extra + length,512 - length);
-
-    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-              "%s: Received length %d", __func__, length);
-
-    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-              "%s: Received data %s", __func__, extra);
+    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO, "%s: Received length %d", __func__, wrqu->data.length);
+    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO, "%s: Received data %s", __func__, (char*)wrqu->data.pointer);
 
     switch(sub_cmd)
     {
        case WE_SET_MAC_ADDRESS:
        {
 
-          VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-                    "SET MAC ADDRESS\n");
+          VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO, "SET MAC ADDRESS\n");
 
-          status  = wlan_ftm_priv_set_mac_address(pAdapter,extra);
+          status  = wlan_ftm_priv_set_mac_address(pAdapter,(char*)wrqu->data.pointer);
 
           if(status != VOS_STATUS_SUCCESS)
           {
-             hddLog(VOS_TRACE_LEVEL_FATAL,
-                    "wlan_ftm_priv_set_mac_address Failed =%d\n",status);
-
+             hddLog(VOS_TRACE_LEVEL_FATAL,"wlan_ftm_priv_set_mac_address Failed =%d\n",status);
              ret = -EINVAL;
           }
 
@@ -4307,14 +4279,12 @@ static int iw_ftm_setchar_getnone(struct net_device *dev, struct iw_request_info
        break;
        case WE_SET_TX_RATE:
        {
-            status  = wlan_ftm_priv_set_txrate(pAdapter,extra);
+            status  = wlan_ftm_priv_set_txrate(pAdapter,(char*)wrqu->data.pointer);
 
             if(status != VOS_STATUS_SUCCESS)
             {
-               hddLog(VOS_TRACE_LEVEL_FATAL,
-                      "wlan_ftm_priv_set_txrate Failed =%d\n",status);
-
-                ret = -EINVAL;
+               hddLog(VOS_TRACE_LEVEL_FATAL,"wlan_ftm_priv_set_txrate Failed =%d\n",status);
+               ret = -EINVAL;
             }
 
             break;

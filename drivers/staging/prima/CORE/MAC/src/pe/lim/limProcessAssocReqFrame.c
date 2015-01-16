@@ -654,8 +654,8 @@ limProcessAssocReqFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,
             && psessionEntry->pLimStartBssReq->rsnIE.length)
         {
             limLog(pMac, LOGE,
-                   FL("RSN enabled auth, Re/Assoc req from STA: "MAC_ADDRESS_STR),
-                       MAC_ADDR_ARRAY(pHdr->sa));
+                   FL("AP supports RSN enabled authentication"));
+
             if(pAssocReq->rsnPresent)
             {
                 if(pAssocReq->rsn.length)
@@ -1185,14 +1185,6 @@ if (limPopulateMatchingRateSet(pMac,
                  * STA when UPASD is not supported.
                  */
                 limLog( pMac, LOGE, FL( "AP do not support UPASD REASSOC Failed" ));
-                /* During wlan fuzz tests for softAP when mal-formed assoc req is
-                 * sent to AP due to delSTA is not done in firmnware UMAC is
-                 * stuck in some bad state.if we set this flag delsta will happen
-                 * and UMAC will recover*/
-                if (updateContext)
-                {
-                    pStaDs->mlmStaContext.updateContext = 1;
-                }
                 limRejectAssociation(pMac, pHdr->sa,
                                      subType, true, authType, peerIdx, true,
                                      (tSirResultCodes) eSIR_MAC_WME_REFUSED_STATUS, psessionEntry);

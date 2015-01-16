@@ -1149,8 +1149,7 @@ limSendHalMsgDelTs(
   tANI_U16       staIdx,
   tANI_U8         tspecIdx,
   tSirDeltsReqInfo delts,
-  tANI_U8        sessionId,
-  tANI_U8        *bssId)
+  tANI_U8        sessionId)
 {
   tSirMsgQ msg;
   tpDelTsParams pDelTsParam;
@@ -1170,7 +1169,6 @@ limSendHalMsgDelTs(
   //filling message parameters.
   pDelTsParam->staIdx = staIdx;
   pDelTsParam->tspecIdx = tspecIdx;
-  vos_mem_copy(&pDelTsParam->bssId, bssId, sizeof(tSirMacAddr));
 
   PELOGW(limLog(pMac, LOGW, FL("calling wdaPostCtrlMsg()"));)
   MTRACE(macTraceMsgTx(pMac, sessionId, msg.type));

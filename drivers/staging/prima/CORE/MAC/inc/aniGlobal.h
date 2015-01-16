@@ -97,7 +97,7 @@ typedef struct sAniSirGlobal *tpAniSirGlobal;
 #include "smeRrmInternal.h"
 #include "rrmGlobal.h"
 #endif
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#if defined FEATURE_WLAN_CCX
 #include "ccxApi.h"
 #include "ccxGlobal.h"
 #endif
@@ -149,10 +149,6 @@ typedef struct sAniSirGlobal *tpAniSirGlobal;
 #endif //WLAN_FEATURE_CONCURRENT_P2P
 
 #define SPACE_ASCII_VALUE  32
-
-#ifdef FEATURE_WLAN_BATCH_SCAN
-#define EQUALS_TO_ASCII_VALUE (61)
-#endif
 
 // -------------------------------------------------------------------
 // Change channel generic scheme
@@ -924,6 +920,7 @@ tLimMlmOemDataRsp       *gpLimMlmOemDataRsp;
     tANI_U8 deferredMsgCnt;
     tSirDFSChannelList    dfschannelList;
     tANI_U8 deauthMsgCnt;
+    tANI_U8 gLimIbssStaLimit;
 } tAniSirLim, *tpAniSirLim;
 
 typedef struct sLimMgmtFrameRegistration
@@ -985,6 +982,13 @@ typedef struct sMacOpenParameters
     tANI_U32 frameTransRequired;
     tDriverType  driverType;
 } tMacOpenParameters;
+
+typedef enum
+{
+    HAL_STOP_TYPE_SYS_RESET,
+    HAL_STOP_TYPE_SYS_DEEP_SLEEP,
+    HAL_STOP_TYPE_RF_KILL   
+}tHalStopType;
 
 typedef struct sHalMacStartParameters
 {

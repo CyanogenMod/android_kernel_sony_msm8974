@@ -241,7 +241,8 @@ tSmeCmd *smeGetCommandBuffer( tpAniSirGlobal pMac );
 void smePushCommand( tpAniSirGlobal pMac, tSmeCmd *pCmd, tANI_BOOLEAN fHighPriority );
 void smeProcessPendingQueue( tpAniSirGlobal pMac );
 void smeReleaseCommand(tpAniSirGlobal pMac, tSmeCmd *pCmd);
-void purgeSmeSessionCmdList(tpAniSirGlobal pMac, tANI_U32 sessionId);
+void purgeSmeSessionCmdList(tpAniSirGlobal pMac, tANI_U32 sessionId,
+        tDblLinkList *pList);
 tANI_BOOLEAN smeCommandPending(tpAniSirGlobal pMac);
 tANI_BOOLEAN pmcProcessCommand( tpAniSirGlobal pMac, tSmeCmd *pCommand );
 //this function is used to abort a command where the normal processing of the command
@@ -326,18 +327,12 @@ eHalStatus csrTdlsTeardownReq(tHalHandle hHal, tANI_U8 sessionId,
 #endif /* FEATURE_WLAN_TDLS */
 
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_CCX) || defined(FEATURE_WLAN_LFR)
-eHalStatus csrFlushCfgBgScanRoamChannelList(tpAniSirGlobal pMac);
+eHalStatus csrFlushBgScanRoamChannelList(tpAniSirGlobal pMac);
 eHalStatus csrCreateBgScanRoamChannelList(tpAniSirGlobal pMac,
                                             const tANI_U8 *pChannelList,
                                             const tANI_U8 numChannels);
 eHalStatus csrUpdateBgScanConfigIniChannelList(tpAniSirGlobal pMac, eCsrBand eBand);
 #endif
 
-#if defined(FEATURE_WLAN_CCX) && defined(FEATURE_WLAN_CCX_UPLOAD)
-eHalStatus csrCreateRoamScanChannelList(tpAniSirGlobal pMac,
-                                                tANI_U8 *pChannelList,
-                                                tANI_U8 numChannels,
-                                                const eCsrBand eBand);
-#endif
 
 #endif //#if !defined( __SMEINSIDE_H )

@@ -67,7 +67,7 @@
 #include "limStaHashApi.h"
 #include "limSendMessages.h"
 
-#if defined(FEATURE_WLAN_CCX) && !defined(FEATURE_WLAN_CCX_UPLOAD)
+#ifdef FEATURE_WLAN_CCX
 #include "ccxApi.h"
 #endif
 
@@ -161,7 +161,7 @@ void limUpdateAssocStaDatas(tpAniSirGlobal pMac, tpDphHashNode pStaDs, tpSirAsso
        }
        if (limPopulatePeerRateSet(pMac, &pStaDs->supportedRates,
                                 pAssocRsp->HTCaps.supportedMCSSet,
-                                false,psessionEntry , &pAssocRsp->VHTCaps) != eSIR_SUCCESS) 
+                                false,psessionEntry , &pAssocRsp->VHTCaps) != eSIR_SUCCESS)
 #else
        if (limPopulatePeerRateSet(pMac, &pStaDs->supportedRates, pAssocRsp->HTCaps.supportedMCSSet, false,psessionEntry) != eSIR_SUCCESS)
 #endif
@@ -672,15 +672,7 @@ limProcessAssocRspFrame(tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo, tANI_U8 sub
                             psessionEntry->ccxContext.tsm.tid = pAssocRsp->TSPECInfo[cnt].user_priority;
                             vos_mem_copy(&psessionEntry->ccxContext.tsm.tsmInfo,
                                     &pAssocRsp->tsmIE, sizeof(tSirMacCCXTSMIE));
-#ifdef FEATURE_WLAN_CCX_UPLOAD
-                            limSendSmeTsmIEInd(pMac,
-                                               psessionEntry,
-                                               pAssocRsp->tsmIE.tsid,
-                                               pAssocRsp->tsmIE.state,
-                                               pAssocRsp->tsmIE.msmt_interval);
-#else
                             limActivateTSMStatsTimer(pMac, psessionEntry);
-#endif /* FEATURE_WLAN_CCX_UPLOAD */
                             if(psessionEntry->ccxContext.tsm.tsmInfo.state) {
                                 psessionEntry->ccxContext.tsm.tsmMetrics.RoamingCount++;
                             }

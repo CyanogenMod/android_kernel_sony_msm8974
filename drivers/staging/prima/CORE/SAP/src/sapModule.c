@@ -639,8 +639,7 @@ WLANSAP_StartBss
             //then we just follow that sessions country info (whether
             //present or not doesn't maater as we have to follow whatever
             //STA session does)
-            if ((0 == sme_GetConcurrentOperationChannel(hHal)) &&
-                pConfig->ieee80211d)
+            if (0 == sme_GetConcurrentOperationChannel(hHal))
             {
                 /* Setting the region/country  information */
                 sme_setRegInfo(hHal, pConfig->countryCode);
