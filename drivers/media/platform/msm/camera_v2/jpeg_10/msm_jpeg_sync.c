@@ -1,5 +1,5 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2014 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -666,7 +666,11 @@ int msm_jpeg_ioctl_hw_cmd(struct msm_jpeg_device *pgmn_dev,
 		__func__, __LINE__, hw_cmd.type, hw_cmd.n, hw_cmd.offset,
 		hw_cmd.mask, hw_cmd.data, (int) hw_cmd.pdata);
 
+#if defined(CONFIG_SONY_CAM_V4L2)
+	if (is_copy_to_user > 0) {
+#else
 	if (is_copy_to_user >= 0) {
+#endif
 		if (copy_to_user(arg, &hw_cmd, sizeof(hw_cmd))) {
 			JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
 			return -EFAULT;
@@ -723,6 +727,9 @@ int msm_jpeg_ioctl_hw_cmds(struct msm_jpeg_device *pgmn_dev,
 			kfree(hw_cmds_p);
 			return -EFAULT;
 		}
+	} else {
+		kfree(hw_cmds_p);
+		return is_copy_to_user;
 	}
 	kfree(hw_cmds_p);
 	return 0;
@@ -766,11 +773,12 @@ int msm_jpeg_start(struct msm_jpeg_device *pgmn_dev, void * __user arg)
 	for (i = 0; i < 2; i++)
 		kfree(buf_out_free[i]);
 
+	pgmn_dev->state = MSM_JPEG_EXECUTING;
 	JPEG_DBG_HIGH("%s:%d] START\n", __func__, __LINE__);
 	wmb();
 	rc = msm_jpeg_ioctl_hw_cmds(pgmn_dev, arg);
 	wmb();
-	pgmn_dev->state = MSM_JPEG_EXECUTING;
+
 	JPEG_DBG("%s:%d]", __func__, __LINE__);
 	return rc;
 }
@@ -805,6 +813,36 @@ int msm_jpeg_ioctl_test_dump_region(struct msm_jpeg_device *pgmn_dev,
 {
 	JPEG_DBG("%s:%d] Enter\n", __func__, __LINE__);
 	msm_jpeg_io_dump(pgmn_dev->base, JPEG_REG_SIZE);
+	return 0;
+}
+
+int msm_jpeg_ioctl_set_clk_rate(struct msm_jpeg_device *pgmn_dev,
+	unsigned long arg)
+{
+	long clk_rate;
+	int rc;
+
+	if ((pgmn_dev->state != MSM_JPEG_INIT) &&
+		(pgmn_dev->state != MSM_JPEG_RESET)) {
+		JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
+		return -EFAULT;
+	}
+	if (get_user(clk_rate, (long __user *)arg)) {
+		JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
+		return -EFAULT;
+	}
+	JPEG_DBG("%s:%d] Requested clk rate %ld\n", __func__, __LINE__,
+		clk_rate);
+	if (clk_rate < 0) {
+		JPEG_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
+		return -EFAULT;
+	}
+	rc = msm_jpeg_platform_set_clk_rate(pgmn_dev, clk_rate);
+	if (rc < 0) {
+		JPEG_PR_ERR("%s: clk failed rc = %d\n", __func__, rc);
+		return -EFAULT;
+	}
+
 	return 0;
 }
 
@@ -877,6 +915,9 @@ long __msm_jpeg_ioctl(struct msm_jpeg_device *pgmn_dev,
 		rc = msm_jpeg_ioctl_test_dump_region(pgmn_dev, arg);
 		break;
 
+	case MSM_JPEG_IOCTL_SET_CLK_RATE:
+		rc = msm_jpeg_ioctl_set_clk_rate(pgmn_dev, arg);
+		break;
 	default:
 		pr_err_ratelimited("%s:%d] cmd = %d not supported\n",
 			__func__, __LINE__, _IOC_NR(cmd));

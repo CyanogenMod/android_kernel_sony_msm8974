@@ -28,6 +28,24 @@
 #include "msm_jpeg_common.h"
 #include "msm_jpeg_hw.h"
 
+int msm_jpeg_platform_set_clk_rate(struct msm_jpeg_device *pgmn_dev,
+		long clk_rate)
+{
+	int rc = 0;
+	struct clk *jpeg_clk;
+
+	jpeg_clk = clk_get(&pgmn_dev->pdev->dev, "core_clk");
+	if (IS_ERR(jpeg_clk)) {
+		JPEG_PR_ERR("%s get failed\n", "core_clk");
+		rc = PTR_ERR(jpeg_clk);
+		return rc;
+	}
+
+	rc = clk_set_rate(jpeg_clk, clk_rate);
+
+	return rc;
+}
+
 void msm_jpeg_platform_p2v(struct msm_jpeg_device *pgmn_dev, struct file  *file,
 	struct ion_handle **ionhandle, int domain_num)
 {
@@ -135,8 +153,8 @@ static struct msm_bus_vectors msm_jpeg_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_JPEG,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = JPEG_CLK_RATE * 2.5,
-		.ib  = JPEG_CLK_RATE * 2.5,
+		.ab  = JPEG_MAX_CLK_RATE * 2.5,
+		.ib  = JPEG_MAX_CLK_RATE * 2.5,
 	},
 };
 

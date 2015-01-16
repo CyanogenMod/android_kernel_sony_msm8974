@@ -1,5 +1,5 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2014 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,6 @@
 #include <linux/spinlock.h>
 #include <linux/proc_fs.h>
 #include <linux/atomic.h>
-#include <linux/wait.h>
 #include <linux/videodev2.h>
 #include <linux/msm_ion.h>
 #include <linux/iommu.h>
@@ -30,6 +29,8 @@
 #include "msm.h"
 #include "msm_vb2.h"
 #include "msm_sd.h"
+#include <media/msmb_generic_buf_mgr.h>
+
 
 static struct v4l2_device *msm_v4l2_dev;
 static struct list_head    ordered_sd_list;
@@ -401,7 +402,7 @@ int msm_create_command_ack_q(unsigned int session_id, unsigned int stream_id)
 
 	msm_init_queue(&cmd_ack->command_q);
 	INIT_LIST_HEAD(&cmd_ack->list);
-	init_waitqueue_head(&cmd_ack->wait);
+	init_completion(&cmd_ack->wait_complete);
 	cmd_ack->stream_id = stream_id;
 
 	msm_enqueue(&session->command_ack_q, &cmd_ack->list);
@@ -505,6 +506,7 @@ static void msm_remove_session_cmd_ack_q(struct msm_session *session)
 int msm_destroy_session(unsigned int session_id)
 {
 	struct msm_session *session;
+	struct v4l2_subdev *buf_mgr_subdev;
 
 	session = msm_queue_find(msm_session_q, struct msm_session,
 		list, __msm_queue_find_session, &session_id);
@@ -516,6 +518,20 @@ int msm_destroy_session(unsigned int session_id)
 	mutex_destroy(&session->lock);
 	msm_delete_entry(msm_session_q, struct msm_session,
 		list, session);
+	buf_mgr_subdev = msm_buf_mngr_get_subdev();
+	if (buf_mgr_subdev) {
+#if defined(CONFIG_SONY_CAM_V4L2)
+		struct msm_buf_mngr_info buf_info;
+		memset(&buf_info, 0 , sizeof(struct msm_buf_mngr_info));
+		buf_info.session_id = session_id;
+		v4l2_subdev_call(buf_mgr_subdev, core, ioctl,
+			MSM_SD_SHUTDOWN, &buf_info);
+#else
+		v4l2_subdev_call(buf_mgr_subdev, core, ioctl,
+			MSM_SD_SHUTDOWN, NULL);
+#endif
+	} else
+		pr_err("%s: Buff manger device node is NULL\n", __func__);
 
 	return 0;
 }
@@ -594,7 +610,7 @@ static long msm_private_ioctl(struct file *file, void *fh,
 		   spin_flags);
 		ret_cmd->event = *(struct v4l2_event *)arg;
 		msm_enqueue(&cmd_ack->command_q, &ret_cmd->list);
-		wake_up(&cmd_ack->wait);
+		complete(&cmd_ack->wait_complete);
 		spin_unlock_irqrestore(&(session->command_ack_q.lock),
 		   spin_flags);
 	}
@@ -663,9 +679,6 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 	struct msm_command *cmd;
 	int session_id, stream_id;
 	unsigned long flags = 0;
-#if defined(CONFIG_SONY_CAM_V4L2)
-	uint32_t retry_count = 0;
-#endif
 
 	session_id = event_data->session_id;
 	stream_id = event_data->stream_id;
@@ -700,52 +713,36 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 		return -EIO;
 	}
 
+	/*re-init wait_complete */
+	INIT_COMPLETION(cmd_ack->wait_complete);
+
 	v4l2_event_queue(vdev, event);
 
 	if (timeout < 0) {
 		mutex_unlock(&session->lock);
+#if defined(CONFIG_SONY_CAM_V4L2)
+		pr_debug("%s : timeout cannot be negative Line %d\n",
+				__func__, __LINE__);
+#else
 		pr_err("%s : timeout cannot be negative Line %d\n",
 				__func__, __LINE__);
+#endif
 		return rc;
 	}
 
 	/* should wait on session based condition */
-#if defined(CONFIG_SONY_CAM_V4L2)
-	retry_count = 5000;
-	do {
-		rc = wait_event_interruptible_timeout(cmd_ack->wait,
-			!list_empty_careful(&cmd_ack->command_q.list),
+	rc = wait_for_completion_timeout(&cmd_ack->wait_complete,
 			msecs_to_jiffies(timeout));
-		retry_count--;
-		if (rc != -ERESTARTSYS)
-			break;
-		pr_debug("%s: wait_event interrupted by signal, count = %d",
-				__func__, retry_count);
-		msleep(20);
-	} while (retry_count > 0);
 
-	if (rc == -ERESTARTSYS) {
-		pr_err("%s: rc = %d\n", __func__, rc);
-		rc = -EINVAL;
-	}
-#else
-	do {
-		rc = wait_event_interruptible_timeout(cmd_ack->wait,
-			!list_empty_careful(&cmd_ack->command_q.list),
-			msecs_to_jiffies(timeout));
-		if (rc != -ERESTARTSYS)
-			break;
-	} while (1);
-#endif
 	if (list_empty_careful(&cmd_ack->command_q.list)) {
 		if (!rc) {
 			pr_err("%s: Timed out\n", __func__);
 			rc = -ETIMEDOUT;
-		}
-		if (rc < 0) {
-			pr_err("%s: rc = %d\n", __func__, rc);
+		} else {
+			pr_err("%s: Error: No timeout but list empty!",
+					__func__);
 			mutex_unlock(&session->lock);
-			return rc;
+			return -EINVAL;
 		}
 	}
 
@@ -1093,6 +1090,7 @@ probe_end:
 
 static const struct of_device_id msm_dt_match[] = {
 	{.compatible = "qcom,msm-cam"},
+	{}
 }
 
 MODULE_DEVICE_TABLE(of, msm_dt_match);

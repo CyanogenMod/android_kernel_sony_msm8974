@@ -230,7 +230,6 @@ config OV12830
 config SONY_CAM_V4L2
 	bool "SONY specific camera"
 	depends on MSMB_CAMERA
-	select VIDEOBUF2_VMALLOC
 	default n
 	---help---
 	  SONY specific camera module
