@@ -722,16 +722,6 @@
 				qcom,ovp-val = <2>;
 				qcom,num-strings = <2>;
 				qcom,id = <0>;
-				qcom,full-scale-seg@0 {
-					threshold = <1023>;
-					curr = <6>;
-					coef = <4>;
-				};
-				qcom,full-scale-seg@1 {
-					threshold = <2047>;
-					curr = <12>;
-					coef = <2>;
-				};
 			};
 		};
 	};
