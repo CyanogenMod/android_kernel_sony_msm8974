@@ -53,7 +53,6 @@ struct max1187x_pdata {
 	u32	pressure_enabled;
 	u32	size_enabled;
 	u32	orientation_enabled;
-	u32	glove_enabled;
 	u32	report_pen_as_finger;
 	u32	wakeup_gesture_support;
 	u32	wakeup_gesture_timeout;

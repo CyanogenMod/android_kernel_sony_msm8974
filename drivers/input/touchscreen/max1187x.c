@@ -191,7 +191,6 @@ enum maxim_command_id {
 	MXM_CMD_ID_SET_TOUCH_RPT_MODE  = 0x0018,
 	MXM_CMD_ID_SET_POWER_MODE      = 0x0020,
 	MXM_CMD_ID_GET_FW_VERSION      = 0x0040,
-	MXM_CMD_ID_SET_GLOVE_MODE      = 0x0083,
 	MXM_CMD_ID_RESET_SYSTEM        = 0x00E9,
 };
 
@@ -223,7 +222,6 @@ enum maxim_system_status {
 enum maxim_tool_type {
 	MXM_TOOL_PEN       = 0x01,
 	MXM_TOOL_FINGER    = 0x02,
-	MXM_TOOL_GLOVE     = 0x03,
 };
 
 struct max1187x_packet_header {
@@ -368,8 +366,6 @@ static int rbcmd_send_receive(struct data *ts, u16 *cmd_buf,
 		u16 *rpt_buf, u16 *rpt_len, u16 timeout);
 static u16 max1187x_sqrt(u32 num);
 static int reset_power(struct data *ts);
-static int max1187x_set_glove_locked(struct data *ts, int enable);
-static int max1187x_set_glove(struct data *ts, int enable);
 
 /* I2C communication */
 static int i2c_rx_bytes(struct data *ts, u8 *buf, u16 len)
@@ -720,15 +716,9 @@ static void report_down(struct data *ts,
 			tool_type = MT_TOOL_FINGER;
 		else
 			tool_type = MT_TOOL_PEN;
-	} else {
-		if (raw_tool_type == MXM_TOOL_GLOVE) {
-			if (ts->pdata->glove_enabled)
-				z += MXM_PRESSURE_SQRT_MAX + 1;
-			else
-				return;
-		}
+	} else
 		tool_type = MT_TOOL_FINGER;
-	}
+
 	valid = idev->users > 0;
 	ts->curr_finger_ids |= idbit;
 
@@ -751,8 +741,7 @@ static void report_down(struct data *ts,
 		!(ts->list_finger_ids & (1 << id)) ? "DOWN" : "MOVE",
 		valid ? " " : "#",
 		raw_tool_type == MXM_TOOL_FINGER ? "Finger" :
-		raw_tool_type == MXM_TOOL_PEN ? "Stylus" :
-		raw_tool_type == MXM_TOOL_GLOVE ? "Glove" : "*Unknown*",
+		raw_tool_type == MXM_TOOL_PEN ? "Stylus" : "*Unknown*",
 		id, x, y, z, touch_major, touch_minor, orientation);
 }
 
@@ -774,8 +763,7 @@ static void report_up(struct data *ts, int id,
 	dev_dbg(dev, "event: UP%s%s %u\n",
 		valid ? " " : "#",
 		raw_tool_type == MXM_TOOL_FINGER ? "Finger" :
-		raw_tool_type == MXM_TOOL_PEN ? "Stylus" :
-		raw_tool_type == MXM_TOOL_GLOVE ? "Glove" : "*Unknown*",
+		raw_tool_type == MXM_TOOL_PEN ? "Stylus" : "*Unknown*",
 		id);
 	ts->list_finger_ids &= ~idbit;
 }
@@ -812,8 +800,6 @@ static void reinit_chip_settings(struct data *ts)
 	ret = cmd_send_locked(ts, cmd_buf, NWORDS(cmd_buf));
 	if (ret)
 		dev_err(&ts->client->dev, "Failed to set up touch report mode");
-
-	max1187x_set_glove_locked(ts, ts->pdata->glove_enabled);
 
 	dev_dbg(&ts->client->dev, "%s: Exit\n", __func__);
 }
@@ -1312,57 +1298,6 @@ static ssize_t report_read(struct file *file, struct kobject *kobj,
 	return count;
 }
 
-static int max1187x_set_glove_locked(struct data *ts, int enable)
-{
-	u16 cmd_buf[] = {MXM_CMD_ID_SET_GLOVE_MODE,
-			  MXM_ONE_SIZE_CMD,
-			  enable};
-	int ret;
-
-	ret = cmd_send_locked(ts, cmd_buf, NWORDS(cmd_buf));
-	if (ret)
-		dev_err(&ts->client->dev, "Failed to set glove mode");
-
-	return ret;
-}
-
-static int max1187x_set_glove(struct data *ts, int enable)
-{
-	int ret;
-
-	mutex_lock(&ts->i2c_mutex);
-	ret = max1187x_set_glove_locked(ts, enable);
-	mutex_unlock(&ts->i2c_mutex);
-
-	return ret;
-}
-
-static ssize_t glove_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct data *ts = i2c_get_clientdata(client);
-
-	return snprintf(buf, PAGE_SIZE, "%u\n", ts->pdata->glove_enabled);
-}
-
-static ssize_t glove_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct data *ts = i2c_get_clientdata(client);
-	int ret;
-
-	if (sscanf(buf, "%u", &ts->pdata->glove_enabled) != 1) {
-		dev_err(dev, "Invalid (%s)", buf);
-		return -EINVAL;
-	}
-
-	ret = max1187x_set_glove(ts, ts->pdata->glove_enabled);
-
-	return ret ? ret : strnlen(buf, PAGE_SIZE);
-}
-
 static struct device_attribute dev_attrs[] = {
 	__ATTR(i2c_reset, S_IWUSR, NULL, i2c_reset_store),
 	__ATTR(por, S_IWUSR, NULL, power_on_reset_store),
@@ -1377,7 +1312,6 @@ static struct device_attribute dev_attrs[] = {
 	__ATTR(config_id, S_IRUGO, config_id_show, NULL),
 	__ATTR(driver_ver, S_IRUGO, driver_ver_show, NULL),
 	__ATTR(command, S_IWUSR, NULL, command_store),
-	__ATTR(glove, S_IRUGO | S_IWUSR, glove_show, glove_store)
 };
 
 static struct bin_attribute dev_attr_report = {
@@ -1718,8 +1652,6 @@ set_id:
 		dev_err(dev, "Failed to set up touch report mode");
 		return;
 	}
-
-	max1187x_set_glove(ts, ts->pdata->glove_enabled);
 }
 
 static int regulator_handler(struct regulator *regulator,
@@ -2024,12 +1956,6 @@ static struct max1187x_pdata *max1187x_get_platdata_dt(struct device *dev)
 		&pdata->orientation_enabled)) {
 		dev_err(dev, "Failed to get property: touch_orientation_enabled\n");
 		goto err_max1187x_get_platdata_dt;
-	}
-
-	/* Parse glove_enabled */
-	if (of_property_read_u32(devnode, "glove_enabled",
-		&pdata->glove_enabled)) {
-		dev_warn(dev, "no glove_enabled config\n");
 	}
 
 	/* Parse report_pen_as_finger */
