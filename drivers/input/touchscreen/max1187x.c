@@ -733,8 +733,8 @@ static void report_down(struct data *ts,
 	ts->curr_finger_ids |= idbit;
 
 	if (valid) {
-		input_report_abs(idev, ABS_MT_TRACKING_ID, id);
-		input_report_abs(idev, ABS_MT_TOOL_TYPE, tool_type);
+		input_mt_slot(idev, id);
+		input_mt_report_slot_state(idev, tool_type, true);
 		input_report_abs(idev, ABS_MT_POSITION_X, x);
 		input_report_abs(idev, ABS_MT_POSITION_Y, y);
 		if (pdata->pressure_enabled)
@@ -745,7 +745,6 @@ static void report_down(struct data *ts,
 			input_report_abs(idev, ABS_MT_TOUCH_MAJOR, touch_major);
 			input_report_abs(idev, ABS_MT_TOUCH_MINOR, touch_minor);
 		}
-		input_mt_sync(idev);
 	}
 	dev_dbg(dev, "event: %s%s%s %u: [XY %4d %4d ][PMmO %4d %4d %4d %3d ]",
 		!(ts->list_finger_ids & (1 << id)) ? "DOWN" : "MOVE",
@@ -770,7 +769,8 @@ static void report_up(struct data *ts, int id,
 
 	valid = idev->users > 0;
 	if (valid)
-		input_mt_sync(idev);
+		input_mt_slot(idev, pointer->id);
+		input_mt_report_slot_state(idev, pointer->tool_type, false);
 	dev_dbg(dev, "event: UP%s%s %u\n",
 		valid ? " " : "#",
 		raw_tool_type == MXM_TOOL_FINGER ? "Finger" :
@@ -2252,6 +2252,8 @@ static int probe(struct i2c_client *client, const struct i2c_device_id *id)
 	__set_bit(EV_ABS, ts->input_dev->evbit);
 	__set_bit(EV_KEY, ts->input_dev->evbit);
 
+	input_mt_init_slots(this->input,
+			this->extents.n_fingers);
 	input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID,
 			0, MXM_TOUCH_COUNT_MAX, 0, 0);
 	ts->list_finger_ids = 0;
