@@ -16,6 +16,7 @@
 
 /include/ "msm8226-yukon_common.dtsi"
 /include/ "dsi-panel-tianchi.dtsi"
+/include/ "msm8226-yukon_tianchi-camera-sensor.dtsi"
 
 &soc {
 
@@ -323,8 +324,6 @@
 };
 
 &pm8226_chg {
-	status = "ok";
-
 	qcom,vddmax-mv = <4350>;
 	qcom,vddsafe-mv = <4400>;
 	qcom,ibatterm-ma = <150>;
@@ -341,30 +340,6 @@
 	qcom,ibatmax-cool-ma = <900>;
 	qcom,batt-hot-percentage = <25>;
 	qcom,duty-cycle-100p;
-
-	qcom,chgr@1000 {
-		status = "ok";
-	};
-
-	qcom,buck@1100 {
-		status = "ok";
-	};
-
-	qcom,bat-if@1200 {
-		status = "ok";
-	};
-
-	qcom,usb-chgpth@1300 {
-		status = "ok";
-	};
-
-	qcom,boost@1500 {
-		status = "ok";
-	};
-
-	qcom,chg-misc@1600 {
-		status = "ok";
-	};
 };
 
 &slim_msm {
@@ -384,11 +359,6 @@
 &bu52031nvx_hall_ic {
         status = "ok";
 };
-
-&mdss_mdp {
-        qcom,mdss-pref-prim-intf = "dsi";
-};
-
 
 &mdss_dsi0 {
 	qcom,dsi-pref-prim-pan = <&dsi_novatek_jdi>;
