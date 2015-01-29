@@ -171,7 +171,7 @@
 #define RGB_LED_EN_CTL(base)		(base + 0x46)
 #define RGB_LED_ATC_CTL(base)		(base + 0x47)
 
-#define RGB_MAX_LEVEL			LED_FULL
+#define RGB_MAX_LEVEL			511
 #define RGB_LED_ENABLE_RED		0x80
 #define RGB_LED_ENABLE_GREEN		0x40
 #define RGB_LED_ENABLE_BLUE		0x20
