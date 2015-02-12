@@ -57,7 +57,6 @@ struct mutex {
 	void			*spin_mlock;	/* Spinner MCS lock */
 #endif
 #ifdef CONFIG_DEBUG_MUTEXES
-	const char 		*name;
 	void			*magic;
 #endif
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
