@@ -1139,7 +1139,7 @@ static int __devexit mdss_dsi_ctrl_remove(struct platform_device *pdev)
 }
 
 
-int mdss_dsi_panel_power_detect(struct platform_device *pdev, int enable)
+void mdss_dsi_panel_power_detect(struct platform_device *pdev, int enable)
 {
 #ifdef CONFIG_MACH_SONY_RHINE
 	int ret;
@@ -1236,7 +1236,6 @@ int mdss_dsi_panel_power_detect(struct platform_device *pdev, int enable)
 		usleep_range(9000, 10000);
 		devm_regulator_put(vddio_vreg);
 	}
-	return 0;
 #endif
 }
 
