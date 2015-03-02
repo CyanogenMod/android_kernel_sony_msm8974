@@ -858,8 +858,11 @@ static int mdss_dsi_panel_change_fps_fpks_calc
 					TE_PAYLOAD_1(tec_cmds, tec_payload));
 		}
 
-		pr_debug("%s: fps change sequence\n", __func__);
-		mdss_dsi_panel_cmds_send(ctrl_pdata, &ctrl_pdata->fps_cmds);
+		if (!pinfo->lcdc.change_fps_susres_mode) {
+			pr_debug("%s: fps change sequence\n", __func__);
+			mdss_dsi_panel_cmds_send(ctrl_pdata,
+						&ctrl_pdata->fps_cmds);
+		}
 
 		pr_info("%s: change fpks=%d\n", __func__, dfpks);
 
@@ -2738,6 +2741,8 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		rc = of_property_read_u32(next,
 			"somc,chenge-fps-payload-num", &tmp);
 		pinfo->lcdc.chenge_fps_payload_num = !rc ? tmp : 0;
+		pinfo->lcdc.change_fps_susres_mode = of_property_read_bool(np,
+			"somc,change-fps-suspend-resume-mode");
 
 		spec_pdata->pwron_reset = of_property_read_bool(next,
 					"somc,panel-pwron-reset");
