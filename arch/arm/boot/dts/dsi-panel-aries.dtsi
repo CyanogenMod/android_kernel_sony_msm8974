@@ -349,6 +349,7 @@
 		somc,driver-ic-vfp = <6>;
 		somc,chenge-fps-cmds-num = <1>;
 		somc,chenge-fps-payload-num = <1>;
+		somc,change-fps-suspend-resume-mode;
 	};
 
 	dsi_novatek_sharp_720_cmd: somc,novatek_sharp_720p_cmd_panel {
@@ -695,6 +696,7 @@
 		somc,driver-ic-vfp = <6>;
 		somc,chenge-fps-cmds-num = <1>;
 		somc,chenge-fps-payload-num = <1>;
+		somc,change-fps-suspend-resume-mode;
 	};
 
 	dsi_default_gpio_0: somc,novatek_default_panel_0 {
@@ -801,6 +803,7 @@
 		somc,driver-ic-vfp = <6>;
 		somc,chenge-fps-cmds-num = <1>;
 		somc,chenge-fps-payload-num = <1>;
+		somc,change-fps-suspend-resume-mode;
 	};
 
 	dsi_default_gpio_1: somc,novatek_default_panel_1 {
@@ -907,5 +910,6 @@
 		somc,driver-ic-vfp = <6>;
 		somc,chenge-fps-cmds-num = <1>;
 		somc,chenge-fps-payload-num = <1>;
+		somc,change-fps-suspend-resume-mode;
 	};
 };
