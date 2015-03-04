@@ -11,7 +11,7 @@
  *
  */
 
-#define pr_fmt(fmt) "%s:%s " fmt, KBUILD_MODNAME, __func__
+#define pr_fmt(fmt) "%s: %s: " fmt, KBUILD_MODNAME, __func__
 
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -57,6 +57,7 @@ static uint32_t cpus_offlined;
 static DEFINE_MUTEX(core_control_mutex);
 static uint32_t wakeup_ms;
 static struct alarm thermal_rtc;
+static struct cpufreq_frequency_table *table;
 static struct kobject *tt_kobj;
 static struct kobject *cc_kobj;
 static struct work_struct timer_work;
@@ -76,7 +77,6 @@ static int limit_idx;
 static int limit_idx_low;
 static int limit_idx_high;
 static int max_tsens_num;
-static struct cpufreq_frequency_table *table;
 static uint32_t usefreq;
 static int freq_table_get;
 static bool vdd_rstr_enabled;
@@ -407,9 +407,7 @@ static int vdd_restriction_apply_voltage(struct rail *r, int level)
 /* Setting all rails the same mode */
 static int psm_set_mode_all(int mode)
 {
-	int i = 0;
-	int fail_cnt = 0;
-	int ret = 0;
+	int i = 0, fail_cnt = 0, ret = 0;
 
 	pr_debug("Requesting PMIC Mode: %d\n", mode);
 	for (i = 0; i < psm_rails_cnt; i++) {
@@ -444,10 +442,8 @@ static int vdd_rstr_en_show(
 static ssize_t vdd_rstr_en_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	int ret = 0;
-	int i = 0;
-	uint8_t en_cnt = 0;
-	uint8_t dis_cnt = 0;
+	int ret = 0, i = 0;
+	uint8_t en_cnt = 0, dis_cnt = 0;
 	uint32_t val = 0;
 	struct kernel_param kp;
 	struct vdd_rstr_enable *en = VDD_RSTR_ENABLE_FROM_ATTRIBS(attr);
@@ -539,8 +535,7 @@ static int vdd_rstr_reg_level_show(
 static ssize_t vdd_rstr_reg_level_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	int ret = 0;
-	int val = 0;
+	int ret = 0, val = 0;
 
 	struct rail *reg = VDD_RSTR_REG_LEVEL_FROM_ATTRIBS(attr);
 
@@ -633,8 +628,7 @@ static int ocr_reg_mode_show(struct kobject *kobj,
 static ssize_t ocr_reg_mode_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	int ret = 0;
-	int val = 0;
+	int ret = 0, val = 0;
 	struct psm_rail *reg = PSM_REG_MODE_FROM_ATTRIBS(attr);
 
 	if (!ocr_enabled)
@@ -677,8 +671,7 @@ static int psm_reg_mode_show(
 static ssize_t psm_reg_mode_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	int ret = 0;
-	int val = 0;
+	int ret = 0, val = 0;
 	struct psm_rail *reg = PSM_REG_MODE_FROM_ATTRIBS(attr);
 
 	mutex_lock(&psm_mutex);
@@ -710,9 +703,8 @@ done_psm_store:
 
 static int check_sensor_id(int sensor_id)
 {
-	int i = 0;
+	int i = 0, ret = 0;
 	bool hw_id_found = false;
-	int ret = 0;
 
 	for (i = 0; i < max_tsens_num; i++) {
 		if (sensor_id == tsens_id_map[i]) {
@@ -730,8 +722,7 @@ static int check_sensor_id(int sensor_id)
 
 static int create_sensor_id_map(void)
 {
-	int i = 0;
-	int ret = 0;
+	int i = 0, ret = 0;
 
 	tsens_id_map = kzalloc(sizeof(int) * max_tsens_num,
 			GFP_KERNEL);
@@ -764,11 +755,7 @@ fail:
 /* 1:enable, 0:disable */
 static int vdd_restriction_apply_all(int en)
 {
-	int i = 0;
-	int en_cnt = 0;
-	int dis_cnt = 0;
-	int fail_cnt = 0;
-	int ret = 0;
+	int i = 0, en_cnt = 0, dis_cnt = 0, fail_cnt = 0, ret = 0;
 
 	for (i = 0; i < rails_cnt; i++) {
 		if (rails[i].freq_req == 1 && freq_table_get)
@@ -807,8 +794,7 @@ static int vdd_restriction_apply_all(int en)
 
 static int msm_thermal_get_freq_table(void)
 {
-	int ret = 0;
-	int i = 0;
+	int ret = 0, i = 0;
 
 	table = cpufreq_frequency_get_table(0);
 	if (table == NULL) {
@@ -971,8 +957,8 @@ static int do_therm_reset(void)
 
 static void therm_reset_notify(struct therm_threshold *thresh_data)
 {
-	long temp;
 	int ret = 0;
+	long temp;
 
 	if (!therm_reset_enabled)
 		return;
@@ -1004,8 +990,7 @@ static void therm_reset_notify(struct therm_threshold *thresh_data)
 #ifdef CONFIG_SMP
 static void __ref do_core_control(long temp)
 {
-	int i = 0;
-	int ret = 0;
+	int i = 0, ret = 0;
 
 	if (!core_control_enabled)
 		return;
@@ -1054,8 +1039,8 @@ static void __ref do_core_control(long temp)
 /* Call with core_control_mutex locked */
 static int __ref update_offline_cores(int val)
 {
-	uint32_t cpu = 0;
 	int ret = 0;
+	uint32_t cpu = 0;
 
 	if (!core_control_enabled)
 		return 0;
@@ -1128,10 +1113,8 @@ static __ref int do_hotplug(void *data)
 
 static int do_ocr(void)
 {
+	int ret = 0, i = 0, j = 0, auto_cnt = 0;
 	long temp = 0;
-	int ret = 0;
-	int i = 0, j = 0;
-	int auto_cnt = 0;
 
 	if (!ocr_enabled)
 		return ret;
@@ -1189,10 +1172,8 @@ do_ocr_exit:
 
 static int do_vdd_restriction(void)
 {
+	int ret = 0, i = 0, dis_cnt = 0;
 	long temp = 0;
-	int ret = 0;
-	int i = 0;
-	int dis_cnt = 0;
 
 	if (!vdd_rstr_enabled)
 		return ret;
@@ -1242,10 +1223,8 @@ exit:
 
 static int do_psm(void)
 {
+	int ret = 0, i = 0, auto_cnt = 0;
 	long temp = 0;
-	int ret = 0;
-	int i = 0;
-	int auto_cnt = 0;
 
 	mutex_lock(&psm_mutex);
 	for (i = 0; i < max_tsens_num; i++) {
@@ -1984,8 +1963,7 @@ static ssize_t show_cc_enabled(struct kobject *kobj,
 static ssize_t __ref store_cc_enabled(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	int ret = 0;
-	int val = 0;
+	int ret = 0, val = 0;
 
 	ret = kstrtoint(buf, 10, &val);
 	if (ret) {
@@ -2023,8 +2001,7 @@ static ssize_t __ref store_cpus_offlined(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int ret = 0;
-	uint32_t val = 0;
-	uint32_t cpu;
+	uint32_t val = 0, cpu;
 
 	mutex_lock(&core_control_mutex);
 	ret = kstrtouint(buf, 10, &val);
@@ -2257,8 +2234,7 @@ int msm_thermal_init(struct msm_thermal_data *pdata)
 
 static int ocr_reg_init(struct platform_device *pdev)
 {
-	int ret = 0;
-	int i, j;
+	int ret = 0, i, j;
 
 	for (i = 0; i < ocr_rail_cnt; i++) {
 		/* Check if vdd_restriction has already initialized any
@@ -2293,8 +2269,7 @@ reg_init:
 
 static int vdd_restriction_reg_init(struct platform_device *pdev)
 {
-	int ret = 0;
-	int i;
+	int ret = 0, i;
 
 	for (i = 0; i < rails_cnt; i++) {
 		if (rails[i].freq_req == 1) {
@@ -2338,9 +2313,7 @@ static int vdd_restriction_reg_init(struct platform_device *pdev)
 
 static int psm_reg_init(struct platform_device *pdev)
 {
-	int ret = 0;
-	int i = 0;
-	int j = 0;
+	int ret = 0, i = 0, j = 0;
 
 	for (i = 0; i < psm_rails_cnt; i++) {
 		psm_rails[i].reg = rpm_regulator_get(&pdev->dev,
@@ -2418,8 +2391,7 @@ static int msm_thermal_add_vdd_rstr_nodes(void)
 	struct kobject *module_kobj = NULL;
 	struct kobject *vdd_rstr_kobj = NULL;
 	struct kobject *vdd_rstr_reg_kobj[MAX_RAILS] = {0};
-	int rc = 0;
-	int i = 0;
+	int rc = 0, i = 0;
 
 	if (!vdd_rstr_probed) {
 		vdd_rstr_nodes_called = true;
@@ -2500,8 +2472,7 @@ static int msm_thermal_add_ocr_nodes(void)
 	struct kobject *module_kobj = NULL;
 	struct kobject *ocr_kobj = NULL;
 	struct kobject *ocr_reg_kobj[MAX_RAILS] = {0};
-	int rc = 0;
-	int i = 0;
+	int rc = 0, i = 0;
 
 	if (!ocr_probed) {
 		ocr_nodes_called = true;
@@ -2574,8 +2545,7 @@ static int msm_thermal_add_psm_nodes(void)
 	struct kobject *module_kobj = NULL;
 	struct kobject *psm_kobj = NULL;
 	struct kobject *psm_reg_kobj[MAX_RAILS] = {0};
-	int rc = 0;
-	int i = 0;
+	int rc = 0, i = 0;
 
 	if (!psm_probed) {
 		psm_nodes_called = true;
@@ -2644,9 +2614,7 @@ psm_node_exit:
 static int probe_vdd_rstr(struct device_node *node,
 		struct msm_thermal_data *data, struct platform_device *pdev)
 {
-	int ret = 0;
-	int i = 0;
-	int arr_size;
+	int ret = 0, i = 0, arr_size;
 	char *key = NULL;
 	struct device_node *child_node = NULL;
 
@@ -2740,7 +2708,7 @@ read_node_fail:
 	vdd_rstr_probed = true;
 	if (ret) {
 		dev_info(&pdev->dev,
-		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+		"%s: Failed reading node=%s, key=%s. err=%d. KTM continues\n",
 			__func__, node->full_name, key, ret);
 		kfree(rails);
 		rails_cnt = 0;
@@ -2754,9 +2722,8 @@ static int get_efuse_temp_map(struct device_node *node,
 				int *efuse_values,
 				int *efuse_temp)
 {
-	uint32_t i, j, efuse_arr_cnt = 0;
+	uint32_t i, j, efuse_arr_cnt = 0, data[2 * MAX_EFUSE_VALUE];
 	int ret = 0, efuse_map_cnt = 0;
-	uint32_t data[2 * MAX_EFUSE_VALUE];
 
 	char *key = "qcom,efuse-temperature-map";
 	if (!of_get_property(node, key, &efuse_map_cnt)
@@ -2793,16 +2760,12 @@ static int probe_thermal_efuse_read(struct device_node *node,
 			struct platform_device *pdev)
 {
 	u64 efuse_bits;
-	int ret = 0;
-	int i = 0;
-	int efuse_map_cnt = 0;
-	int efuse_data_cnt = 0;
+	int ret = 0, i = 0, efuse_map_cnt = 0, efuse_data_cnt = 0;
 	char *key = NULL;
 	void __iomem *efuse_base = NULL;
 	uint32_t efuse_data[EFUSE_DATA_MAX] = {0};
 	uint32_t efuse_values[MAX_EFUSE_VALUE] = {0};
-	uint32_t efuse_temp[MAX_EFUSE_VALUE] = {0};
-	uint32_t default_temp = 0;
+	uint32_t efuse_temp[MAX_EFUSE_VALUE] = {0}, default_temp = 0;
 	uint8_t thermal_efuse_data = 0;
 
 	if (default_temp_limit_probed)
@@ -2900,7 +2863,7 @@ read_efuse_fail:
 	if (ret) {
 		if (!default_temp) {
 			dev_info(&pdev->dev,
-			"%s:Failed reading node=%s, key=%s. KTM continues\n",
+			"%s: Failed reading node=%s, key=%s. KTM continues\n",
 				__func__, node->full_name, key);
 		} else {
 			default_temp_limit_enabled = true;
@@ -2916,8 +2879,7 @@ read_efuse_exit:
 static int probe_ocr(struct device_node *node, struct msm_thermal_data *data,
 		struct platform_device *pdev)
 {
-	int ret = 0;
-	int j = 0;
+	int ret = 0, j = 0;
 	char *key = NULL;
 
 	if (ocr_probed) {
@@ -2959,7 +2921,7 @@ static int probe_ocr(struct device_node *node, struct msm_thermal_data *data,
 	if (ocr_rail_cnt) {
 		ret = ocr_reg_init(pdev);
 		if (ret) {
-			pr_info("%s:Failed to get regulators. KTM continues.\n",
+			pr_info("%s: Failed to get regulators. KTM continues.\n",
 					__func__);
 			goto read_ocr_fail;
 		}
@@ -2977,7 +2939,7 @@ read_ocr_fail:
 	ocr_probed = true;
 	if (ret) {
 		dev_info(&pdev->dev,
-			"%s:Failed reading node=%s, key=%s. KTM continues\n",
+			"%s: Failed reading node=%s, key=%s. KTM continues\n",
 			__func__, node->full_name, key);
 		if (ocr_rails)
 			kfree(ocr_rails);
@@ -2993,8 +2955,7 @@ read_ocr_exit:
 static int probe_psm(struct device_node *node, struct msm_thermal_data *data,
 		struct platform_device *pdev)
 {
-	int ret = 0;
-	int j = 0;
+	int ret = 0, j = 0;
 	char *key = NULL;
 
 	psm_rails = NULL;
@@ -3040,7 +3001,7 @@ read_node_fail:
 	psm_probed = true;
 	if (ret) {
 		dev_info(&pdev->dev,
-		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+		"%s: Failed reading node=%s, key=%s. err=%d. KTM continues\n",
 			__func__, node->full_name, key, ret);
 		kfree(psm_rails);
 		psm_rails_cnt = 0;
@@ -3054,9 +3015,8 @@ static int probe_cc(struct device_node *node, struct msm_thermal_data *data,
 		struct platform_device *pdev)
 {
 	char *key = NULL;
-	uint32_t cpu_cnt = 0;
+	uint32_t cpu_cnt = 0, cpu = 0;
 	int ret = 0;
-	uint32_t cpu = 0;
 
 	if (num_possible_cpus() > 1) {
 		core_control_enabled = 1;
@@ -3117,7 +3077,7 @@ read_node_fail:
 hotplug_node_fail:
 	if (ret) {
 		dev_info(&pdev->dev,
-		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+		"%s: Failed reading node=%s, key=%s. err=%d. KTM continues\n",
 			KBUILD_MODNAME, node->full_name, key, ret);
 		hotplug_enabled = 0;
 	}
@@ -3150,7 +3110,7 @@ static int probe_therm_reset(struct device_node *node,
 PROBE_RESET_EXIT:
 	if (ret) {
 		dev_info(&pdev->dev,
-		"%s:Failed reading node=%s, key=%s err=%d. KTM continues\n",
+		"%s: Failed reading node=%s, key=%s err=%d. KTM continues\n",
 			__func__, node->full_name, key, ret);
 		therm_reset_enabled = false;
 	}
@@ -3190,7 +3150,7 @@ static int probe_freq_mitigation(struct device_node *node,
 PROBE_FREQ_EXIT:
 	if (ret) {
 		dev_info(&pdev->dev,
-		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+		"%s: Failed reading node=%s, key=%s. err=%d. KTM continues\n",
 			__func__, node->full_name, key, ret);
 		freq_mitigation_enabled = 0;
 	}
@@ -3350,4 +3310,3 @@ int __init msm_thermal_late_init(void)
 	return 0;
 }
 late_initcall(msm_thermal_late_init);
-
