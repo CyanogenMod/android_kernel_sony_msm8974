@@ -1,6 +1,6 @@
 /* Qualcomm Crypto driver
  *
- * Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -39,13 +39,15 @@
 #include <crypto/authenc.h>
 #include <crypto/scatterwalk.h>
 #include <crypto/internal/hash.h>
+#include <crypto/internal/aead.h>
 
 #include <mach/scm.h>
 #include <linux/platform_data/qcom_crypto_device.h>
 #include <mach/msm_bus.h>
 #include <mach/qcrypto.h>
+#include <linux/fips_status.h>
+#include "qcryptoi.h"
 #include "qce.h"
-
 
 #define DEBUG_MAX_FNAME  16
 #define DEBUG_MAX_RW_BUF 2048
@@ -57,61 +59,87 @@
 
 #define QCRYPTO_HIGH_BANDWIDTH_TIMEOUT 1000
 
+/* are FIPS self tests done ?? */
+static bool is_fips_qcrypto_tests_done;
+
+enum qcrypto_bus_state {
+	BUS_NO_BANDWIDTH = 0,
+	BUS_HAS_BANDWIDTH,
+	BUS_BANDWIDTH_RELEASING,
+	BUS_BANDWIDTH_ALLOCATING,
+	BUS_SUSPENDED,
+	BUS_SUSPENDING,
+};
+
 struct crypto_stat {
-	u32 aead_sha1_aes_enc;
-	u32 aead_sha1_aes_dec;
-	u32 aead_sha1_des_enc;
-	u32 aead_sha1_des_dec;
-	u32 aead_sha1_3des_enc;
-	u32 aead_sha1_3des_dec;
-	u32 aead_ccm_aes_enc;
-	u32 aead_ccm_aes_dec;
-	u32 aead_op_success;
-	u32 aead_op_fail;
-	u32 aead_bad_msg;
-	u32 ablk_cipher_aes_enc;
-	u32 ablk_cipher_aes_dec;
-	u32 ablk_cipher_des_enc;
-	u32 ablk_cipher_des_dec;
-	u32 ablk_cipher_3des_enc;
-	u32 ablk_cipher_3des_dec;
-	u32 ablk_cipher_op_success;
-	u32 ablk_cipher_op_fail;
-	u32 sha1_digest;
-	u32 sha256_digest;
-	u32 sha_op_success;
-	u32 sha_op_fail;
-	u32 sha1_hmac_digest;
-	u32 sha256_hmac_digest;
-	u32 sha_hmac_op_success;
-	u32 sha_hmac_op_fail;
+	u64 aead_sha1_aes_enc;
+	u64 aead_sha1_aes_dec;
+	u64 aead_sha1_des_enc;
+	u64 aead_sha1_des_dec;
+	u64 aead_sha1_3des_enc;
+	u64 aead_sha1_3des_dec;
+	u64 aead_ccm_aes_enc;
+	u64 aead_ccm_aes_dec;
+	u64 aead_rfc4309_ccm_aes_enc;
+	u64 aead_rfc4309_ccm_aes_dec;
+	u64 aead_op_success;
+	u64 aead_op_fail;
+	u64 aead_bad_msg;
+	u64 ablk_cipher_aes_enc;
+	u64 ablk_cipher_aes_dec;
+	u64 ablk_cipher_des_enc;
+	u64 ablk_cipher_des_dec;
+	u64 ablk_cipher_3des_enc;
+	u64 ablk_cipher_3des_dec;
+	u64 ablk_cipher_op_success;
+	u64 ablk_cipher_op_fail;
+	u64 sha1_digest;
+	u64 sha256_digest;
+	u64 sha_op_success;
+	u64 sha_op_fail;
+	u64 sha1_hmac_digest;
+	u64 sha256_hmac_digest;
+	u64 sha_hmac_op_success;
+	u64 sha_hmac_op_fail;
 };
 static struct crypto_stat _qcrypto_stat;
 static struct dentry *_debug_dent;
 static char _debug_read_buf[DEBUG_MAX_RW_BUF];
+static bool _qcrypto_init_assign;
 struct crypto_priv;
 struct crypto_engine {
 	struct list_head elist;
 	void *qce; /* qce handle */
 	struct platform_device *pdev; /* platform device */
 	struct crypto_async_request *req; /* current active request */
+	struct qcrypto_resp_ctx *arsp;    /* rsp associcated with req */
+	int res;                          /* execution result */
 	struct crypto_priv *pcp;
 	struct tasklet_struct done_tasklet;
 	uint32_t  bus_scale_handle;
 	struct crypto_queue req_queue;	/*
 					 * request queue for those requests
-					 * that have this engine assgined
+					 * that have this engine assigned
 					 * waiting to be executed
 					 */
-	u32 total_req;
-	u32 err_req;
+	u64 total_req;
+	u64 err_req;
 	u32 unit;
-	int res; /* execution result */
+	u32 ce_device;
 	unsigned int signature;
-	uint32_t high_bw_req_count;
-	bool     high_bw_req;
-	struct timer_list bw_scale_down_timer;
-	struct work_struct low_bw_req_ws;
+
+	enum qcrypto_bus_state bw_state;
+	bool   high_bw_req;
+	struct timer_list bw_reaper_timer;
+	struct work_struct bw_reaper_ws;
+	struct work_struct bw_allocate_ws;
+
+	/* engine execution sequence number */
+	u32    active_seq;
+	/* last QCRYPTO_HIGH_BANDWIDTH_TIMEOUT active_seq */
+	u32    last_active_seq;
+
+	bool   check_flag;
 };
 
 struct crypto_priv {
@@ -121,7 +149,7 @@ struct crypto_priv {
 	/* CE features/algorithms supported by HW engine*/
 	struct ce_hw_support ce_support;
 
-	/* the lock protects queue and req*/
+	/* the lock protects crypto queue and req */
 	spinlock_t lock;
 
 	/* list of  registered algorithms */
@@ -135,7 +163,13 @@ struct crypto_priv {
 	struct list_head engine_list; /* list of  qcrypto engines */
 	int32_t total_units;   /* total units of engines */
 	struct mutex engine_lock;
+
 	struct crypto_engine *next_engine; /* next assign engine */
+	struct crypto_queue req_queue;	/*
+					 * request queue for those requests
+					 * that waiting for an available
+					 * engine.
+					 */
 };
 static struct crypto_priv qcrypto_dev;
 static struct crypto_engine *_qcrypto_static_assign_engine(
@@ -168,6 +202,29 @@ static int qcrypto_scm_cmd(int resource, int cmd, int *response)
 #else
 	return 0;
 #endif
+}
+
+static struct crypto_engine *_qrypto_find_pengine_device(struct crypto_priv *cp,
+			 unsigned int device)
+{
+	struct crypto_engine *entry = NULL;
+	unsigned long flags;
+
+	spin_lock_irqsave(&cp->lock, flags);
+	list_for_each_entry(entry, &cp->engine_list, elist) {
+		if (entry->ce_device == device)
+			break;
+	}
+	spin_unlock_irqrestore(&cp->lock, flags);
+
+	if (((entry != NULL) && (entry->ce_device != device)) ||
+		(entry == NULL)) {
+		pr_err("Device node for CE device %d NOT FOUND!!\n",
+				device);
+		return NULL;
+	}
+
+	return entry;
 }
 
 static void qcrypto_unlock_ce(struct work_struct *work)
@@ -231,7 +288,14 @@ struct qcrypto_alg {
 /* max of AES_BLOCK_SIZE, DES3_EDE_BLOCK_SIZE */
 #define QCRYPTO_MAX_IV_LENGTH	16
 
+#define	QCRYPTO_CCM4309_NONCE_LEN	3
+
 struct qcrypto_cipher_ctx {
+	struct list_head rsp_queue;     /* response queue */
+	struct crypto_engine *pengine;  /* fixed engine assigned to this tfm */
+	struct crypto_priv *cp;
+	unsigned int flags;
+
 	u8 auth_key[QCRYPTO_MAX_KEY_SIZE];
 	u8 iv[QCRYPTO_MAX_IV_LENGTH];
 
@@ -241,13 +305,20 @@ struct qcrypto_cipher_ctx {
 	unsigned int authsize;
 	unsigned int auth_key_len;
 
-	struct crypto_priv *cp;
-	unsigned int flags;
-	struct crypto_engine *pengine;  /* fixed engine assigned */
+	u8 ccm4309_nonce[QCRYPTO_CCM4309_NONCE_LEN];
+};
+
+struct qcrypto_resp_ctx {
+	struct list_head list;
+	struct crypto_async_request *async_req; /* async req */
+	int res;                                /* execution result */
 };
 
 struct qcrypto_cipher_req_ctx {
+	struct qcrypto_resp_ctx rsp_entry;/* rsp entry. */
+	struct crypto_engine *pengine;  /* engine assigned to this request */
 	u8 *iv;
+	u8 rfc4309_iv[QCRYPTO_MAX_IV_LENGTH];
 	unsigned int ivsize;
 	int  aead;
 	struct scatterlist asg;		/* Formatted associated data sg  */
@@ -270,6 +341,8 @@ struct qcrypto_cipher_req_ctx {
 #define SHA_MAX_STATE_SIZE	(SHA256_DIGEST_SIZE / sizeof(u32))
 #define SHA_MAX_DIGEST_SIZE	 SHA256_DIGEST_SIZE
 
+#define	MSM_QCRYPTO_REQ_QUEUE_LENGTH 50
+
 static uint8_t  _std_init_vector_sha1_uint8[] =   {
 	0x67, 0x45, 0x23, 0x01, 0xEF, 0xCD, 0xAB, 0x89,
 	0x98, 0xBA, 0xDC, 0xFE, 0x10, 0x32, 0x54, 0x76,
@@ -285,18 +358,21 @@ static uint8_t _std_init_vector_sha256_uint8[] = {
 };
 
 struct qcrypto_sha_ctx {
+	struct list_head rsp_queue;     /* response queue */
+	struct crypto_engine *pengine;  /* fixed engine assigned to this tfm */
+	struct crypto_priv *cp;
+	unsigned int flags;
 	enum qce_hash_alg_enum  alg;
 	uint32_t		diglen;
 	uint32_t		authkey_in_len;
 	uint8_t			authkey[SHA_MAX_BLOCK_SIZE];
 	struct ahash_request *ahash_req;
 	struct completion ahash_req_complete;
-	struct crypto_priv *cp;
-	unsigned int flags;
-	struct crypto_engine *pengine;  /* fixed engine assigned */
 };
 
 struct qcrypto_sha_req_ctx {
+	struct qcrypto_resp_ctx rsp_entry;/* rsp entry. */
+	struct crypto_engine *pengine;  /* engine assigned to this request */
 
 	struct scatterlist *src;
 	uint32_t nbytes;
@@ -379,7 +455,7 @@ static void qcrypto_ce_set_bus(struct crypto_engine *pengine,
 {
 	int ret = 0;
 
-	if (high_bw_req && pengine->high_bw_req == false) {
+	if (high_bw_req) {
 		pm_stay_awake(&pengine->pdev->dev);
 		ret = qce_enable_clk(pengine->qce);
 		if (ret) {
@@ -394,8 +470,10 @@ static void qcrypto_ce_set_bus(struct crypto_engine *pengine,
 			qce_disable_clk(pengine->qce);
 			goto clk_err;
 		}
-		pengine->high_bw_req = true;
-	} else if (high_bw_req == false && pengine->high_bw_req == true) {
+
+
+	} else {
+
 		ret = msm_bus_scale_client_update_request(
 				pengine->bus_scale_handle, 0);
 		if (ret) {
@@ -413,7 +491,6 @@ static void qcrypto_ce_set_bus(struct crypto_engine *pengine,
 						__func__);
 			goto clk_err;
 		}
-		pengine->high_bw_req = false;
 		pm_relax(&pengine->pdev->dev);
 	}
 	return;
@@ -423,54 +500,109 @@ clk_err:
 
 }
 
-static void qcrypto_bw_scale_down_timer_callback(unsigned long data)
+static void qcrypto_bw_reaper_timer_callback(unsigned long data)
 {
 	struct crypto_engine *pengine = (struct crypto_engine *)data;
 
-	schedule_work(&pengine->low_bw_req_ws);
+	schedule_work(&pengine->bw_reaper_ws);
 
 	return;
 }
 
 static void qcrypto_bw_set_timeout(struct crypto_engine *pengine)
 {
-	del_timer_sync(&(pengine->bw_scale_down_timer));
-	pengine->bw_scale_down_timer.data =
+	pengine->bw_reaper_timer.data =
 			(unsigned long)(pengine);
-	pengine->bw_scale_down_timer.expires = jiffies +
+	pengine->bw_reaper_timer.expires = jiffies +
 			msecs_to_jiffies(QCRYPTO_HIGH_BANDWIDTH_TIMEOUT);
-	add_timer(&(pengine->bw_scale_down_timer));
+	mod_timer(&(pengine->bw_reaper_timer),
+		pengine->bw_reaper_timer.expires);
 }
 
-static void qcrypto_ce_bw_scaling_req(struct crypto_engine *pengine,
-				 bool high_bw_req)
+static void qcrypto_ce_bw_allocate_req(struct crypto_engine *pengine)
 {
-	mutex_lock(&pengine->pcp->engine_lock);
-	if (high_bw_req) {
-		if (pengine->high_bw_req_count == 0)
-			qcrypto_ce_set_bus(pengine, true);
-		pengine->high_bw_req_count++;
-	} else {
-		pengine->high_bw_req_count--;
-		if (pengine->high_bw_req_count == 0)
-			qcrypto_bw_set_timeout(pengine);
-	}
-	mutex_unlock(&pengine->pcp->engine_lock);
-}
-
-static void qcrypto_low_bw_req_work(struct work_struct *work)
-{
-	struct crypto_engine *pengine = container_of(work,
-				struct crypto_engine, low_bw_req_ws);
-
-	mutex_lock(&pengine->pcp->engine_lock);
-	if (pengine->high_bw_req_count == 0)
-		qcrypto_ce_set_bus(pengine, false);
-	mutex_unlock(&pengine->pcp->engine_lock);
+	schedule_work(&pengine->bw_allocate_ws);
 }
 
 static int _start_qcrypto_process(struct crypto_priv *cp,
 					struct crypto_engine *pengine);
+
+static void qcrypto_bw_allocate_work(struct work_struct *work)
+{
+	struct  crypto_engine *pengine = container_of(work,
+				struct crypto_engine, bw_allocate_ws);
+	unsigned long flags;
+	struct crypto_priv *cp = pengine->pcp;
+
+	spin_lock_irqsave(&cp->lock, flags);
+	pengine->bw_state = BUS_BANDWIDTH_ALLOCATING;
+	spin_unlock_irqrestore(&cp->lock, flags);
+
+	qcrypto_ce_set_bus(pengine, true);
+	qcrypto_bw_set_timeout(pengine);
+	spin_lock_irqsave(&cp->lock, flags);
+	pengine->bw_state = BUS_HAS_BANDWIDTH;
+	pengine->high_bw_req = false;
+	pengine->active_seq++;
+	pengine->check_flag = true;
+	spin_unlock_irqrestore(&cp->lock, flags);
+	_start_qcrypto_process(cp, pengine);
+};
+
+static void qcrypto_bw_reaper_work(struct work_struct *work)
+{
+	struct  crypto_engine *pengine = container_of(work,
+				struct crypto_engine, bw_reaper_ws);
+	struct crypto_priv *cp = pengine->pcp;
+	unsigned long flags;
+	u32    active_seq;
+	bool restart = false;
+
+	spin_lock_irqsave(&cp->lock, flags);
+	active_seq = pengine->active_seq;
+	if (pengine->bw_state == BUS_HAS_BANDWIDTH &&
+		(active_seq == pengine->last_active_seq)) {
+
+		/* check if engine is stuck */
+		if (pengine->req) {
+			if (pengine->check_flag)
+				dev_warn(&pengine->pdev->dev,
+				"The engine appears to be stuck seq %d req %p.\n",
+				active_seq, pengine->req);
+			pengine->check_flag = false;
+			goto ret;
+		}
+		if (cp->platform_support.bus_scale_table == NULL)
+			goto ret;
+		pengine->bw_state = BUS_BANDWIDTH_RELEASING;
+		spin_unlock_irqrestore(&cp->lock, flags);
+
+		qcrypto_ce_set_bus(pengine, false);
+
+		spin_lock_irqsave(&cp->lock, flags);
+
+		if (pengine->high_bw_req == true) {
+			/* we got request while we are disabling clock */
+			pengine->bw_state = BUS_BANDWIDTH_ALLOCATING;
+			spin_unlock_irqrestore(&cp->lock, flags);
+
+			qcrypto_ce_set_bus(pengine, true);
+
+			spin_lock_irqsave(&cp->lock, flags);
+			pengine->bw_state = BUS_HAS_BANDWIDTH;
+			pengine->high_bw_req = false;
+			restart = true;
+		} else
+			pengine->bw_state = BUS_NO_BANDWIDTH;
+	}
+ret:
+	pengine->last_active_seq = active_seq;
+	spin_unlock_irqrestore(&cp->lock, flags);
+	if (restart)
+		_start_qcrypto_process(cp, pengine);
+	if (pengine->bw_state != BUS_NO_BANDWIDTH)
+		qcrypto_bw_set_timeout(pengine);
+}
 
 static int qcrypto_count_sg(struct scatterlist *sg, int nbytes)
 {
@@ -558,6 +690,12 @@ static int _qcrypto_cipher_cra_init(struct crypto_tfm *tfm)
 	struct qcrypto_alg *q_alg;
 	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
 
+	/* IF FIPS tests not passed, return error */
+	if (((g_fips140_status == FIPS140_STATUS_FAIL) ||
+		(g_fips140_status == FIPS140_STATUS_PASS_CRYPTO)) &&
+		is_fips_qcrypto_tests_done)
+		return -ENXIO;
+
 	q_alg = container_of(alg, struct qcrypto_alg, cipher_alg);
 	ctx->flags = 0;
 
@@ -566,11 +704,13 @@ static int _qcrypto_cipher_cra_init(struct crypto_tfm *tfm)
 
 	/* random first IV */
 	get_random_bytes(ctx->iv, QCRYPTO_MAX_IV_LENGTH);
-	ctx->pengine = _qcrypto_static_assign_engine(ctx->cp);
-	if (ctx->pengine == NULL)
-		return -ENODEV;
-	if (ctx->cp->platform_support.bus_scale_table != NULL)
-		qcrypto_ce_bw_scaling_req(ctx->pengine, true);
+	if (_qcrypto_init_assign) {
+		ctx->pengine = _qcrypto_static_assign_engine(ctx->cp);
+		if (ctx->pengine == NULL)
+			return -ENODEV;
+	} else
+		ctx->pengine = NULL;
+	INIT_LIST_HEAD(&ctx->rsp_queue);
 	return 0;
 };
 
@@ -583,16 +723,24 @@ static int _qcrypto_ahash_cra_init(struct crypto_tfm *tfm)
 	struct qcrypto_alg *q_alg = container_of(alg, struct qcrypto_alg,
 								sha_alg);
 
+	/* IF FIPS tests not passed, return error */
+	if (((g_fips140_status == FIPS140_STATUS_FAIL) ||
+		(g_fips140_status == FIPS140_STATUS_PASS_CRYPTO)) &&
+		is_fips_qcrypto_tests_done)
+		return -ENXIO;
+
 	crypto_ahash_set_reqsize(ahash, sizeof(struct qcrypto_sha_req_ctx));
 	/* update context with ptr to cp */
 	sha_ctx->cp = q_alg->cp;
 	sha_ctx->flags = 0;
 	sha_ctx->ahash_req = NULL;
-	sha_ctx->pengine = _qcrypto_static_assign_engine(sha_ctx->cp);
-	if (sha_ctx->pengine == NULL)
-		return -ENODEV;
-	if (sha_ctx->cp->platform_support.bus_scale_table != NULL)
-		qcrypto_ce_bw_scaling_req(sha_ctx->pengine, true);
+	if (_qcrypto_init_assign) {
+		sha_ctx->pengine = _qcrypto_static_assign_engine(sha_ctx->cp);
+		if (sha_ctx->pengine == NULL)
+			return -ENODEV;
+	} else
+		sha_ctx->pengine = NULL;
+	INIT_LIST_HEAD(&sha_ctx->rsp_queue);
 	return 0;
 };
 
@@ -600,13 +748,12 @@ static void _qcrypto_ahash_cra_exit(struct crypto_tfm *tfm)
 {
 	struct qcrypto_sha_ctx *sha_ctx = crypto_tfm_ctx(tfm);
 
+	if (!list_empty(&sha_ctx->rsp_queue))
+		pr_err("_qcrypto_ahash_cra_exit: requests still outstanding");
 	if (sha_ctx->ahash_req != NULL) {
 		ahash_request_free(sha_ctx->ahash_req);
 		sha_ctx->ahash_req = NULL;
 	}
-	if (sha_ctx->pengine &&
-			sha_ctx->cp->platform_support.bus_scale_table != NULL)
-		qcrypto_ce_bw_scaling_req(sha_ctx->pengine, false);
 };
 
 
@@ -655,16 +802,16 @@ static void _qcrypto_cra_ablkcipher_exit(struct crypto_tfm *tfm)
 {
 	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	if (ctx->pengine && ctx->cp->platform_support.bus_scale_table != NULL)
-		qcrypto_ce_bw_scaling_req(ctx->pengine, false);
+	if (!list_empty(&ctx->rsp_queue))
+		pr_err("_qcrypto__cra_ablkcipher_exit: requests still outstanding");
 };
 
 static void _qcrypto_cra_aead_exit(struct crypto_tfm *tfm)
 {
 	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	if (ctx->pengine && ctx->cp->platform_support.bus_scale_table != NULL)
-		qcrypto_ce_bw_scaling_req(ctx->pengine, false);
+	if (!list_empty(&ctx->rsp_queue))
+		pr_err("_qcrypto__cra_aead_exit: requests still outstanding");
 };
 
 static int _disp_stats(int id)
@@ -677,112 +824,117 @@ static int _disp_stats(int id)
 
 	pstat = &_qcrypto_stat;
 	len = scnprintf(_debug_read_buf, DEBUG_MAX_RW_BUF - 1,
-			"\nQualcomm crypto accelerator %d Statistics:\n",
+			"\nQualcomm crypto accelerator %d Statistics\n",
 				id + 1);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK AES CIPHER encryption   : %d\n",
+			"   ABLK AES CIPHER encryption          : %llu\n",
 					pstat->ablk_cipher_aes_enc);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK AES CIPHER decryption   : %d\n",
+			"   ABLK AES CIPHER decryption          : %llu\n",
 					pstat->ablk_cipher_aes_dec);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK DES CIPHER encryption   : %d\n",
+			"   ABLK DES CIPHER encryption          : %llu\n",
 					pstat->ablk_cipher_des_enc);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK DES CIPHER decryption   : %d\n",
+			"   ABLK DES CIPHER decryption          : %llu\n",
 					pstat->ablk_cipher_des_dec);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK 3DES CIPHER encryption  : %d\n",
+			"   ABLK 3DES CIPHER encryption         : %llu\n",
 					pstat->ablk_cipher_3des_enc);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK 3DES CIPHER decryption  : %d\n",
+			"   ABLK 3DES CIPHER decryption         : %llu\n",
 					pstat->ablk_cipher_3des_dec);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK CIPHER operation success: %d\n",
+			"   ABLK CIPHER operation success       : %llu\n",
 					pstat->ablk_cipher_op_success);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   ABLK CIPHER operation fail   : %d\n",
+			"   ABLK CIPHER operation fail          : %llu\n",
 					pstat->ablk_cipher_op_fail);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD SHA1-AES encryption      : %d\n",
+			"   AEAD SHA1-AES encryption            : %llu\n",
 					pstat->aead_sha1_aes_enc);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD SHA1-AES decryption      : %d\n",
+			"   AEAD SHA1-AES decryption            : %llu\n",
 					pstat->aead_sha1_aes_dec);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD SHA1-DES encryption      : %d\n",
+			"   AEAD SHA1-DES encryption            : %llu\n",
 					pstat->aead_sha1_des_enc);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD SHA1-DES decryption      : %d\n",
+			"   AEAD SHA1-DES decryption            : %llu\n",
 					pstat->aead_sha1_des_dec);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD SHA1-3DES encryption     : %d\n",
+			"   AEAD SHA1-3DES encryption           : %llu\n",
 					pstat->aead_sha1_3des_enc);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD SHA1-3DES decryption     : %d\n",
+			"   AEAD SHA1-3DES decryption           : %llu\n",
 					pstat->aead_sha1_3des_dec);
 
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD CCM-AES encryption     : %d\n",
+			"   AEAD CCM-AES encryption             : %llu\n",
 					pstat->aead_ccm_aes_enc);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD CCM-AES decryption     : %d\n",
+			"   AEAD CCM-AES decryption             : %llu\n",
 					pstat->aead_ccm_aes_dec);
-
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD operation success       : %d\n",
+			"   AEAD RFC4309-CCM-AES encryption     : %llu\n",
+					pstat->aead_rfc4309_ccm_aes_enc);
+	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
+			"   AEAD RFC4309-CCM-AES decryption     : %llu\n",
+					pstat->aead_rfc4309_ccm_aes_dec);
+	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
+			"   AEAD operation success              : %llu\n",
 					pstat->aead_op_success);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD operation fail          : %d\n",
+			"   AEAD operation fail                 : %llu\n",
 					pstat->aead_op_fail);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   AEAD bad message             : %d\n",
+			"   AEAD bad message                    : %llu\n",
 					pstat->aead_bad_msg);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA1 digest			 : %d\n",
+			"   SHA1 digest                         : %llu\n",
 					pstat->sha1_digest);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA256 digest		 : %d\n",
+			"   SHA256 digest                       : %llu\n",
 					pstat->sha256_digest);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA  operation fail          : %d\n",
+			"   SHA  operation fail                 : %llu\n",
 					pstat->sha_op_fail);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA  operation success          : %d\n",
+			"   SHA  operation success              : %llu\n",
 					pstat->sha_op_success);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA1 HMAC digest			 : %d\n",
+			"   SHA1 HMAC digest                    : %llu\n",
 					pstat->sha1_hmac_digest);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA256 HMAC digest		 : %d\n",
+			"   SHA256 HMAC digest                  : %llu\n",
 					pstat->sha256_hmac_digest);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA HMAC operation fail          : %d\n",
+			"   SHA HMAC operation fail             : %llu\n",
 					pstat->sha_hmac_op_fail);
 	len += scnprintf(_debug_read_buf + len, DEBUG_MAX_RW_BUF - len - 1,
-			"   SHA HMAC operation success          : %d\n",
+			"   SHA HMAC operation success          : %llu\n",
 					pstat->sha_hmac_op_success);
 	spin_lock_irqsave(&cp->lock, flags);
 	list_for_each_entry(pe, &cp->engine_list, elist) {
 		len += snprintf(
 			_debug_read_buf + len,
 			DEBUG_MAX_RW_BUF - len - 1,
-			"   Engine %d Req                : %d\n",
+			"   Engine %4d Req                     : %llu\n",
 			pe->unit,
 			pe->total_req
 		);
 		len += snprintf(
 			_debug_read_buf + len,
 			DEBUG_MAX_RW_BUF - len - 1,
-			"   Engine %d Req Error          : %d\n",
+			"   Engine %4d Req Error               : %llu\n",
 			pe->unit,
 			pe->err_req
 		);
@@ -809,8 +961,9 @@ static void _qcrypto_remove_engine(struct crypto_engine *pengine)
 	cp->total_units--;
 
 	tasklet_kill(&pengine->done_tasklet);
-	cancel_work_sync(&pengine->low_bw_req_ws);
-	del_timer_sync(&pengine->bw_scale_down_timer);
+	cancel_work_sync(&pengine->bw_reaper_ws);
+	cancel_work_sync(&pengine->bw_allocate_ws);
+	del_timer_sync(&pengine->bw_reaper_timer);
 	device_init_wakeup(&pengine->pdev->dev, false);
 
 	if (pengine->bus_scale_handle != 0)
@@ -826,7 +979,7 @@ static void _qcrypto_remove_engine(struct crypto_engine *pengine)
 		if (q_alg->alg_type == QCRYPTO_ALG_SHA)
 			crypto_unregister_ahash(&q_alg->sha_alg);
 		list_del(&q_alg->entry);
-		kfree(q_alg);
+		kzfree(q_alg);
 	}
 }
 
@@ -845,7 +998,7 @@ static int _qcrypto_remove(struct platform_device *pdev)
 	mutex_unlock(&cp->engine_lock);
 	if (pengine->qce)
 		qce_close(pengine->qce);
-	kfree(pengine);
+	kzfree(pengine);
 	return 0;
 }
 
@@ -984,27 +1137,73 @@ static int _qcrypto_setkey_3des(struct crypto_ablkcipher *cipher, const u8 *key,
 	return 0;
 };
 
+static void _qcrypto_tfm_complete(struct crypto_priv *cp, u32 type,
+					 void *tfm_ctx)
+{
+	unsigned long flags;
+	struct qcrypto_resp_ctx *arsp;
+	struct list_head *plist;
+	struct crypto_async_request *areq;
+
+	switch (type) {
+	case CRYPTO_ALG_TYPE_AHASH:
+		plist = &((struct qcrypto_sha_ctx *) tfm_ctx)->rsp_queue;
+		break;
+	case CRYPTO_ALG_TYPE_ABLKCIPHER:
+	case CRYPTO_ALG_TYPE_AEAD:
+	default:
+		plist = &((struct qcrypto_cipher_ctx *) tfm_ctx)->rsp_queue;
+		break;
+	}
+again:
+	spin_lock_irqsave(&cp->lock, flags);
+	if (list_empty(plist)) {
+		arsp = NULL; /* nothing to do */
+	} else {
+		arsp = list_first_entry(plist,
+				struct  qcrypto_resp_ctx, list);
+		if (arsp->res == -EINPROGRESS)
+			arsp = NULL;  /* still in progress */
+		else
+			list_del(&arsp->list); /* request is complete */
+	}
+	spin_unlock_irqrestore(&cp->lock, flags);
+	if (arsp) {
+		areq = arsp->async_req;
+		areq->complete(areq, arsp->res);
+		goto again;
+	}
+}
+
 static void req_done(unsigned long data)
 {
 	struct crypto_async_request *areq;
 	struct crypto_engine *pengine = (struct crypto_engine *)data;
 	struct crypto_priv *cp;
 	unsigned long flags;
+	struct qcrypto_resp_ctx *arsp;
 	int res;
+	u32 type = 0;
+	void *tfm_ctx = NULL;
 
 	cp = pengine->pcp;
 	spin_lock_irqsave(&cp->lock, flags);
 	areq = pengine->req;
-	pengine->req = NULL;
-	res = pengine->res;
-	spin_unlock_irqrestore(&cp->lock, flags);
-	if (areq)
-		areq->complete(areq, res);
-	if (res)
-		pengine->err_req++;
-	_start_qcrypto_process(cp, pengine);
-};
 
+	arsp = pengine->arsp;
+	res = pengine->res;
+	pengine->req = NULL;
+	pengine->arsp = NULL;
+	if (areq) {
+		type = crypto_tfm_alg_type(areq->tfm);
+		tfm_ctx = crypto_tfm_ctx(areq->tfm);
+		arsp->res = res;
+	}
+	spin_unlock_irqrestore(&cp->lock, flags);
+	_start_qcrypto_process(cp, pengine);
+	if (areq)
+		_qcrypto_tfm_complete(cp, type, tfm_ctx);
+}
 
 static void _qce_ahash_complete(void *cookie, unsigned char *digest,
 		unsigned char *authdata, int ret)
@@ -1021,7 +1220,7 @@ static void _qce_ahash_complete(void *cookie, unsigned char *digest,
 
 	pstat = &_qcrypto_stat;
 
-	pengine = sha_ctx->pengine;
+	pengine = rctx->pengine;
 #ifdef QCRYPTO_DEBUG
 	dev_info(&pengine->pdev->dev, "_qce_ahash_complete: %p ret %d\n",
 				areq, ret);
@@ -1067,10 +1266,12 @@ static void _qce_ablk_cipher_complete(void *cookie, unsigned char *icb,
 	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(areq->base.tfm);
 	struct crypto_priv *cp = ctx->cp;
 	struct crypto_stat *pstat;
+	struct qcrypto_cipher_req_ctx *rctx;
 	struct crypto_engine *pengine;
 
 	pstat = &_qcrypto_stat;
-	pengine = ctx->pengine;
+	rctx = ablkcipher_request_ctx(areq);
+	pengine = rctx->pengine;
 #ifdef QCRYPTO_DEBUG
 	dev_info(&pengine->pdev->dev, "_qce_ablk_cipher_complete: %p ret %d\n",
 				areq, ret);
@@ -1101,7 +1302,7 @@ static void _qce_ablk_cipher_complete(void *cookie, unsigned char *icb,
 		if (bytes != areq->nbytes)
 			pr_warn("bytes copied=0x%x bytes to copy= 0x%x", bytes,
 								areq->nbytes);
-		kfree(rctx->data);
+		kzfree(rctx->data);
 	}
 
 	if (cp->platform_support.ce_shared)
@@ -1122,8 +1323,8 @@ static void _qce_aead_complete(void *cookie, unsigned char *icv,
 	struct crypto_engine *pengine;
 
 	pstat = &_qcrypto_stat;
-	pengine = ctx->pengine;
 	rctx = aead_request_ctx(areq);
+	pengine = rctx->pengine;
 
 	if (rctx->mode == QCE_MODE_CCM) {
 		if (cp->ce_support.aligned_only)  {
@@ -1148,7 +1349,7 @@ static void _qce_aead_complete(void *cookie, unsigned char *icv,
 			if (bytes != nbytes)
 				pr_warn("bytes copied=0x%x bytes to copy= 0x%x",
 						bytes, nbytes);
-			kfree(rctx->data);
+			kzfree(rctx->data);
 		}
 		kzfree(rctx->assoc);
 		areq->assoc = rctx->assoc_sg;
@@ -1182,7 +1383,7 @@ static void _qce_aead_complete(void *cookie, unsigned char *icv,
 			if (bytes != nbytes)
 				pr_warn("bytes copied=0x%x bytes to copy= 0x%x",
 						bytes, nbytes);
-			kfree(rctx->data);
+			kzfree(rctx->data);
 		}
 
 		if (ret == 0) {
@@ -1272,6 +1473,12 @@ static int qcrypto_aead_ccm_format_adata(struct qce_req *qreq, uint32_t alen,
 	uint32_t bytes = 0;
 	uint32_t num_sg = 0;
 
+	if (alen == 0) {
+		qreq->assoc = NULL;
+		qreq->assoclen = 0;
+		return 0;
+	}
+
 	qreq->assoc = kzalloc((alen + 0x64), GFP_ATOMIC);
 	if (!qreq->assoc) {
 		pr_err("qcrypto Memory allocation of adata FAIL, error %ld\n",
@@ -1321,6 +1528,7 @@ static int _qcrypto_process_ablkcipher(struct crypto_engine *pengine,
 	req = container_of(async_req, struct ablkcipher_request, base);
 	cipher_ctx = crypto_tfm_ctx(async_req->tfm);
 	rctx = ablkcipher_request_ctx(req);
+	rctx->pengine = pengine;
 	tfm = crypto_ablkcipher_reqtfm(req);
 	if (pengine->pcp->ce_support.aligned_only) {
 		uint32_t bytes = 0;
@@ -1384,6 +1592,7 @@ static int _qcrypto_process_ahash(struct crypto_engine *pengine,
 				struct ahash_request, base);
 	rctx = ahash_request_ctx(req);
 	sha_ctx = crypto_tfm_ctx(async_req->tfm);
+	rctx->pengine = pengine;
 
 	sreq.qce_cb = _qce_ahash_complete;
 	sreq.digest =  &rctx->digest[0];
@@ -1439,6 +1648,7 @@ static int _qcrypto_process_aead(struct  crypto_engine *pengine,
 	struct crypto_aead *aead = crypto_aead_reqtfm(req);
 
 	rctx = aead_request_ctx(req);
+	rctx->pengine = pengine;
 	cipher_ctx = crypto_tfm_ctx(async_req->tfm);
 
 	qreq.op = QCE_REQ_AEAD;
@@ -1455,7 +1665,10 @@ static int _qcrypto_process_aead(struct  crypto_engine *pengine,
 	qreq.authkey = cipher_ctx->auth_key;
 	qreq.authklen = cipher_ctx->auth_key_len;
 	qreq.authsize = crypto_aead_authsize(aead);
-	qreq.ivsize =  crypto_aead_ivsize(aead);
+	if (qreq.mode == QCE_MODE_CCM)
+		qreq.ivsize =  AES_BLOCK_SIZE;
+	else
+		qreq.ivsize =  crypto_aead_ivsize(aead);
 	qreq.flags = cipher_ctx->flags;
 
 	if (qreq.mode == QCE_MODE_CCM) {
@@ -1483,12 +1696,12 @@ static int _qcrypto_process_aead(struct  crypto_engine *pengine,
 			rctx->orig_src = req->src;
 			rctx->orig_dst = req->dst;
 
-			if ((MAX_ALIGN_SIZE*2 > ULONG_MAX - req->assoclen) ||
-				((MAX_ALIGN_SIZE*2 + req->assoclen) >
-						ULONG_MAX - qreq.authsize) ||
-				((MAX_ALIGN_SIZE*2 + req->assoclen +
+			if ((MAX_ALIGN_SIZE*2 > UINT_MAX - qreq.assoclen) ||
+				((MAX_ALIGN_SIZE*2 + qreq.assoclen) >
+						UINT_MAX - qreq.authsize) ||
+				((MAX_ALIGN_SIZE*2 + qreq.assoclen +
 						qreq.authsize) >
-						ULONG_MAX - req->cryptlen)) {
+						UINT_MAX - req->cryptlen)) {
 				pr_err("Integer overflow on aead req length.\n");
 				return -EINVAL;
 			}
@@ -1502,8 +1715,9 @@ static int _qcrypto_process_aead(struct  crypto_engine *pengine,
 				kzfree(qreq.assoc);
 				return -ENOMEM;
 			}
-
-			memcpy((char *)rctx->data, qreq.assoc, qreq.assoclen);
+			if (qreq.assoclen)
+				memcpy((char *)rctx->data, qreq.assoc,
+						 qreq.assoclen);
 
 			num_sg = qcrypto_count_sg(req->src, req->cryptlen);
 			bytes = qcrypto_sg_copy_to_buffer(req->src, num_sg,
@@ -1649,28 +1863,101 @@ static int _start_qcrypto_process(struct crypto_priv *cp,
 				struct crypto_engine *pengine)
 {
 	struct crypto_async_request *async_req = NULL;
-	struct crypto_async_request *backlog = NULL;
+	struct crypto_async_request *backlog_eng = NULL;
+	struct crypto_async_request *backlog_cp = NULL;
 	unsigned long flags;
 	u32 type;
 	int ret = 0;
 	struct crypto_stat *pstat;
+	void *tfm_ctx;
+	struct qcrypto_cipher_req_ctx *cipher_rctx;
+	struct qcrypto_sha_req_ctx *ahash_rctx;
+	struct ablkcipher_request *ablkcipher_req;
+	struct ahash_request *ahash_req;
+	struct aead_request *aead_req;
+	struct qcrypto_resp_ctx *arsp;
 
 	pstat = &_qcrypto_stat;
 
 again:
 	spin_lock_irqsave(&cp->lock, flags);
-	if (pengine->req == NULL) {
-		backlog = crypto_get_backlog(&pengine->req_queue);
-		async_req = crypto_dequeue_request(&pengine->req_queue);
-		pengine->req = async_req;
+	if (pengine->req) {
+		spin_unlock_irqrestore(&cp->lock, flags);
+		return 0;
 	}
-	spin_unlock_irqrestore(&cp->lock, flags);
-	if (!async_req)
-		return ret;
-	if (backlog)
-		backlog->complete(backlog, -EINPROGRESS);
-	type = crypto_tfm_alg_type(async_req->tfm);
 
+	backlog_eng = crypto_get_backlog(&pengine->req_queue);
+
+	/* make sure it is in high bandwidth state */
+	if (pengine->bw_state != BUS_HAS_BANDWIDTH) {
+		spin_unlock_irqrestore(&cp->lock, flags);
+		return 0;
+	}
+
+	/* try to get request from request queue of the engine first */
+	async_req = crypto_dequeue_request(&pengine->req_queue);
+	if (!async_req) {
+		/*
+		 * if no request from the engine,
+		 * try to  get from request queue of driver
+		 */
+		backlog_cp = crypto_get_backlog(&cp->req_queue);
+		async_req = crypto_dequeue_request(&cp->req_queue);
+		if (!async_req) {
+			spin_unlock_irqrestore(&cp->lock, flags);
+			return 0;
+		}
+	}
+
+	/* add associated rsp entry to tfm response queue */
+	type = crypto_tfm_alg_type(async_req->tfm);
+	tfm_ctx = crypto_tfm_ctx(async_req->tfm);
+	switch (type) {
+	case CRYPTO_ALG_TYPE_AHASH:
+		ahash_req = container_of(async_req,
+			struct ahash_request, base);
+		ahash_rctx = ahash_request_ctx(ahash_req);
+		arsp = &ahash_rctx->rsp_entry;
+		list_add_tail(
+			&arsp->list,
+			&((struct qcrypto_sha_ctx *)tfm_ctx)
+				->rsp_queue);
+		break;
+	case CRYPTO_ALG_TYPE_ABLKCIPHER:
+		ablkcipher_req = container_of(async_req,
+			struct ablkcipher_request, base);
+		cipher_rctx = ablkcipher_request_ctx(ablkcipher_req);
+		arsp = &cipher_rctx->rsp_entry;
+		list_add_tail(
+			&arsp->list,
+			&((struct qcrypto_sha_ctx *)tfm_ctx)
+				->rsp_queue);
+		break;
+	case CRYPTO_ALG_TYPE_AEAD:
+	default:
+		aead_req = container_of(async_req,
+			struct aead_request, base);
+		cipher_rctx = aead_request_ctx(aead_req);
+		arsp = &cipher_rctx->rsp_entry;
+		list_add_tail(
+			&arsp->list,
+			&((struct qcrypto_sha_ctx *)tfm_ctx)
+				->rsp_queue);
+		break;
+	}
+
+	arsp->res = -EINPROGRESS;
+	arsp->async_req = async_req;
+	pengine->req = async_req;
+	pengine->arsp = arsp;
+	pengine->active_seq++;
+	pengine->check_flag = true;
+
+	spin_unlock_irqrestore(&cp->lock, flags);
+	if (backlog_eng)
+		backlog_eng->complete(backlog_eng, -EINPROGRESS);
+	if (backlog_cp)
+		backlog_cp->complete(backlog_cp, -EINPROGRESS);
 	switch (type) {
 	case CRYPTO_ALG_TYPE_ABLKCIPHER:
 		ret = _qcrypto_process_ablkcipher(pengine, async_req);
@@ -1686,9 +1973,11 @@ again:
 	};
 	pengine->total_req++;
 	if (ret) {
+		arsp->res = ret;
 		pengine->err_req++;
 		spin_lock_irqsave(&cp->lock, flags);
 		pengine->req = NULL;
+		pengine->arsp = NULL;
 		spin_unlock_irqrestore(&cp->lock, flags);
 
 		if (type == CRYPTO_ALG_TYPE_ABLKCIPHER)
@@ -1699,11 +1988,22 @@ again:
 			else
 				pstat->aead_op_fail++;
 
-		async_req->complete(async_req, ret);
+		_qcrypto_tfm_complete(cp, type, tfm_ctx);
 		goto again;
 	};
 	return ret;
-};
+}
+
+static struct crypto_engine *_avail_eng(struct crypto_priv *cp)
+{
+	struct crypto_engine *pe = NULL;
+
+	list_for_each_entry(pe, &cp->engine_list, elist) {
+		if (pe->req == NULL)
+			return pe;
+	}
+	return NULL;
+}
 
 static int _qcrypto_queue_req(struct crypto_priv *cp,
 				struct crypto_engine *pengine,
@@ -1719,10 +2019,41 @@ static int _qcrypto_queue_req(struct crypto_priv *cp,
 	}
 
 	spin_lock_irqsave(&cp->lock, flags);
-	ret = crypto_enqueue_request(&pengine->req_queue, req);
-	spin_unlock_irqrestore(&cp->lock, flags);
-	_start_qcrypto_process(cp, pengine);
 
+	if (pengine) {
+		ret = crypto_enqueue_request(&pengine->req_queue, req);
+	} else {
+		ret = crypto_enqueue_request(&cp->req_queue, req);
+		pengine = _avail_eng(cp);
+	}
+	if (pengine) {
+		switch (pengine->bw_state) {
+		case BUS_NO_BANDWIDTH:
+			if (pengine->high_bw_req == false) {
+				qcrypto_ce_bw_allocate_req(pengine);
+				pengine->high_bw_req = true;
+			}
+			pengine = NULL;
+			break;
+		case BUS_HAS_BANDWIDTH:
+			break;
+		case BUS_BANDWIDTH_RELEASING:
+			pengine->high_bw_req = true;
+			pengine = NULL;
+			break;
+		case BUS_BANDWIDTH_ALLOCATING:
+			pengine = NULL;
+			break;
+		case BUS_SUSPENDED:
+		case BUS_SUSPENDING:
+		default:
+			pengine = NULL;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cp->lock, flags);
+	if (pengine)
+		_start_qcrypto_process(cp, pengine);
 	return ret;
 }
 
@@ -1842,6 +2173,29 @@ static int _qcrypto_aead_encrypt_aes_ccm(struct aead_request *req)
 	rctx->iv = req->iv;
 
 	pstat->aead_ccm_aes_enc++;
+	return _qcrypto_queue_req(cp, ctx->pengine, &req->base);
+}
+
+static int _qcrypto_aead_rfc4309_enc_aes_ccm(struct aead_request *req)
+{
+	struct qcrypto_cipher_req_ctx *rctx;
+	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct crypto_priv *cp = ctx->cp;
+	struct crypto_stat *pstat;
+
+	pstat = &_qcrypto_stat;
+
+	rctx = aead_request_ctx(req);
+	rctx->aead = 1;
+	rctx->alg = CIPHER_ALG_AES;
+	rctx->dir = QCE_ENCRYPT;
+	rctx->mode = QCE_MODE_CCM;
+	memset(rctx->rfc4309_iv, 0, sizeof(rctx->rfc4309_iv));
+	rctx->rfc4309_iv[0] = 3; /* L -1 */
+	memcpy(&rctx->rfc4309_iv[1], ctx->ccm4309_nonce, 3);
+	memcpy(&rctx->rfc4309_iv[4], req->iv, 8);
+	rctx->iv = rctx->rfc4309_iv;
+	pstat->aead_rfc4309_ccm_aes_enc++;
 	return _qcrypto_queue_req(cp, ctx->pengine, &req->base);
 }
 
@@ -2136,6 +2490,27 @@ static int _qcrypto_aead_decrypt_aes_ccm(struct aead_request *req)
 	return _qcrypto_queue_req(cp, ctx->pengine, &req->base);
 }
 
+static int _qcrypto_aead_rfc4309_dec_aes_ccm(struct aead_request *req)
+{
+	struct qcrypto_cipher_req_ctx *rctx;
+	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct crypto_priv *cp = ctx->cp;
+	struct crypto_stat *pstat;
+
+	pstat = &_qcrypto_stat;
+	rctx = aead_request_ctx(req);
+	rctx->aead = 1;
+	rctx->alg = CIPHER_ALG_AES;
+	rctx->dir = QCE_DECRYPT;
+	rctx->mode = QCE_MODE_CCM;
+	memset(rctx->rfc4309_iv, 0, sizeof(rctx->rfc4309_iv));
+	rctx->rfc4309_iv[0] = 3; /* L -1 */
+	memcpy(&rctx->rfc4309_iv[1], ctx->ccm4309_nonce, 3);
+	memcpy(&rctx->rfc4309_iv[4], req->iv, 8);
+	rctx->iv = rctx->rfc4309_iv;
+	pstat->aead_rfc4309_ccm_aes_dec++;
+	return _qcrypto_queue_req(cp, ctx->pengine, &req->base);
+}
 static int _qcrypto_aead_setauthsize(struct crypto_aead *authenc,
 				unsigned int authsize)
 {
@@ -2165,6 +2540,24 @@ static int _qcrypto_aead_ccm_setauthsize(struct crypto_aead *authenc,
 	ctx->authsize = authsize;
 	return 0;
 }
+
+static int _qcrypto_aead_rfc4309_ccm_setauthsize(struct crypto_aead *authenc,
+				  unsigned int authsize)
+{
+	struct qcrypto_cipher_ctx *ctx = crypto_aead_ctx(authenc);
+
+	switch (authsize) {
+	case 8:
+	case 12:
+	case 16:
+		break;
+	default:
+		return -EINVAL;
+	}
+	ctx->authsize = authsize;
+	return 0;
+}
+
 
 static int _qcrypto_aead_setkey(struct crypto_aead *tfm, const u8 *key,
 			unsigned int keylen)
@@ -2230,6 +2623,21 @@ static int _qcrypto_aead_ccm_setkey(struct crypto_aead *aead, const u8 *key,
 
 	return 0;
 }
+
+static int _qcrypto_aead_rfc4309_ccm_setkey(struct crypto_aead *aead,
+				 const u8 *key, unsigned int key_len)
+{
+	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
+	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
+	int ret;
+
+	if (key_len < QCRYPTO_CCM4309_NONCE_LEN)
+		return -EINVAL;
+	key_len -= QCRYPTO_CCM4309_NONCE_LEN;
+	memcpy(ctx->ccm4309_nonce, key + key_len,  QCRYPTO_CCM4309_NONCE_LEN);
+	ret = _qcrypto_aead_ccm_setkey(aead, key, key_len);
+	return ret;
+};
 
 static int _qcrypto_aead_encrypt_aes_cbc(struct aead_request *req)
 {
@@ -2782,7 +3190,7 @@ static int _sha_update(struct ahash_request  *req, uint32_t sha_block_size)
 						rctx->trailing_buf_len);
 			memcpy((rctx->data2 + rctx->trailing_buf_len),
 					rctx->data, req->src->length);
-			kfree(rctx->data);
+			kzfree(rctx->data);
 			rctx->data = rctx->data2;
 			sg_set_buf(&rctx->sg[0], rctx->data,
 					(rctx->trailing_buf_len +
@@ -2970,7 +3378,7 @@ static int _sha_hmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 		INIT_COMPLETION(sha_ctx->ahash_req_complete);
 	}
 
-	kfree(in_buf);
+	kzfree(in_buf);
 	ahash_request_free(ahash_req);
 
 	return ret;
@@ -3246,6 +3654,69 @@ static int _qcrypto_prefix_alg_cra_name(char cra_name[], unsigned int size)
 	strlcpy(cra_name, new_cra_name, CRYPTO_MAX_ALG_NAME);
 	return 0;
 }
+
+/*
+ * Fill up fips_selftest_data structure
+ */
+
+static void _qcrypto_fips_selftest_d(struct fips_selftest_data *selftest_d,
+					struct ce_hw_support *ce_support,
+					char *prefix)
+{
+	strlcpy(selftest_d->algo_prefix, prefix, CRYPTO_MAX_ALG_NAME);
+	selftest_d->prefix_ahash_algo = ce_support->use_sw_ahash_algo;
+	selftest_d->prefix_hmac_algo = ce_support->use_sw_hmac_algo;
+	selftest_d->prefix_aes_xts_algo = ce_support->use_sw_aes_xts_algo;
+	selftest_d->prefix_aes_cbc_ecb_ctr_algo =
+		ce_support->use_sw_aes_cbc_ecb_ctr_algo;
+	selftest_d->prefix_aead_algo = ce_support->use_sw_aead_algo;
+	selftest_d->ce_device = ce_support->ce_device;
+}
+
+int qcrypto_cipher_set_device(struct ablkcipher_request *req, unsigned int dev)
+{
+	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct crypto_priv *cp = ctx->cp;
+	struct crypto_engine *pengine = NULL;
+
+	pengine = _qrypto_find_pengine_device(cp, dev);
+	if (pengine == NULL)
+		return -ENODEV;
+	ctx->pengine = pengine;
+
+	return 0;
+};
+EXPORT_SYMBOL(qcrypto_cipher_set_device);
+
+int qcrypto_aead_set_device(struct aead_request *req, unsigned int dev)
+{
+	struct qcrypto_cipher_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct crypto_priv *cp = ctx->cp;
+	struct crypto_engine *pengine = NULL;
+
+	pengine = _qrypto_find_pengine_device(cp, dev);
+	if (pengine == NULL)
+		return -ENODEV;
+	ctx->pengine = pengine;
+
+	return 0;
+};
+EXPORT_SYMBOL(qcrypto_aead_set_device);
+
+int qcrypto_ahash_set_device(struct ahash_request *req, unsigned int dev)
+{
+	struct qcrypto_sha_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct crypto_priv *cp = ctx->cp;
+	struct crypto_engine *pengine = NULL;
+
+	pengine = _qrypto_find_pengine_device(cp, dev);
+	if (pengine == NULL)
+		return -ENODEV;
+	ctx->pengine = pengine;
+
+	return 0;
+};
+EXPORT_SYMBOL(qcrypto_ahash_set_device);
 
 int qcrypto_cipher_set_flag(struct ablkcipher_request *req, unsigned int flags)
 {
@@ -3762,12 +4233,37 @@ static struct crypto_alg _qcrypto_aead_ccm_algo = {
 	.cra_u		= {
 		.aead = {
 			.ivsize         = AES_BLOCK_SIZE,
-			.maxauthsize    = SHA1_DIGEST_SIZE,
+			.maxauthsize    = AES_BLOCK_SIZE,
 			.setkey = _qcrypto_aead_ccm_setkey,
 			.setauthsize = _qcrypto_aead_ccm_setauthsize,
 			.encrypt = _qcrypto_aead_encrypt_aes_ccm,
 			.decrypt = _qcrypto_aead_decrypt_aes_ccm,
 			.geniv = "<built-in>",
+		}
+	}
+};
+
+static struct crypto_alg _qcrypto_aead_rfc4309_ccm_algo = {
+	.cra_name	= "rfc4309(ccm(aes))",
+	.cra_driver_name = "qcrypto-rfc4309-aes-ccm",
+	.cra_priority	= 300,
+	.cra_flags	= CRYPTO_ALG_TYPE_AEAD | CRYPTO_ALG_ASYNC,
+	.cra_blocksize  = 1,
+	.cra_ctxsize	= sizeof(struct qcrypto_cipher_ctx),
+	.cra_alignmask	= 0,
+	.cra_type	= &crypto_nivaead_type,
+	.cra_module	= THIS_MODULE,
+	.cra_init	= _qcrypto_cra_aead_init,
+	.cra_exit	= _qcrypto_cra_aead_exit,
+	.cra_u		= {
+		.aead = {
+			.ivsize         = 8,
+			.maxauthsize    = 16,
+			.setkey = _qcrypto_aead_rfc4309_ccm_setkey,
+			.setauthsize = _qcrypto_aead_rfc4309_ccm_setauthsize,
+			.encrypt = _qcrypto_aead_rfc4309_enc_aes_ccm,
+			.decrypt = _qcrypto_aead_rfc4309_dec_aes_ccm,
+			.geniv = "seqiv",
 		}
 	}
 };
@@ -3783,6 +4279,10 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 	struct crypto_engine *pengine;
 	unsigned long flags;
 
+	/* For FIPS140-2 Power on self tests */
+	struct fips_selftest_data selftest_d;
+	char prefix[10] = "";
+
 	pengine = kzalloc(sizeof(*pengine), GFP_KERNEL);
 	if (!pengine) {
 		pr_err("qcrypto Memory allocation of q_alg FAIL, error %ld\n",
@@ -3793,7 +4293,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 	/* open qce */
 	handle = qce_open(pdev, &rc);
 	if (handle == NULL) {
-		kfree(pengine);
+		kzfree(pengine);
 		platform_set_drvdata(pdev, NULL);
 		return rc;
 	}
@@ -3803,18 +4303,21 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 	pengine->pcp = cp;
 	pengine->pdev = pdev;
 	pengine->req = NULL;
+	pengine->signature = 0xdeadbeef;
 
-	pengine->high_bw_req_count = 0;
+	init_timer(&(pengine->bw_reaper_timer));
+	INIT_WORK(&pengine->bw_reaper_ws, qcrypto_bw_reaper_work);
+	pengine->bw_reaper_timer.function =
+			qcrypto_bw_reaper_timer_callback;
+	INIT_WORK(&pengine->bw_allocate_ws, qcrypto_bw_allocate_work);
 	pengine->high_bw_req = false;
-	init_timer(&(pengine->bw_scale_down_timer));
-	INIT_WORK(&pengine->low_bw_req_ws, qcrypto_low_bw_req_work);
-	pengine->bw_scale_down_timer.function =
-			qcrypto_bw_scale_down_timer_callback;
-
+	pengine->active_seq = 0;
+	pengine->last_active_seq = 0;
+	pengine->check_flag = false;
 	device_init_wakeup(&pengine->pdev->dev, true);
 
 	tasklet_init(&pengine->done_tasklet, req_done, (unsigned long)pengine);
-	crypto_init_queue(&pengine->req_queue, 50);
+	crypto_init_queue(&pengine->req_queue, MSM_QCRYPTO_REQ_QUEUE_LENGTH);
 
 	mutex_lock(&cp->engine_lock);
 	cp->total_units++;
@@ -3837,6 +4340,9 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 					msm_bus_cl_get_pdata(pdev);
 		if (!cp->platform_support.bus_scale_table)
 			pr_warn("bus_scale_table is NULL\n");
+
+		pengine->ce_device = cp->ce_support.ce_device;
+
 	} else {
 		platform_support =
 			(struct msm_ce_hw_support *)pdev->dev.platform_data;
@@ -3849,7 +4355,9 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 				platform_support->bus_scale_table;
 		cp->platform_support.sha_hmac = platform_support->sha_hmac;
 	}
+
 	pengine->bus_scale_handle = 0;
+
 	if (cp->platform_support.bus_scale_table != NULL) {
 		pengine->bus_scale_handle =
 			msm_bus_scale_register_client(
@@ -3861,11 +4369,14 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 			rc =  -ENOMEM;
 			goto err;
 		}
+		pengine->bw_state = BUS_NO_BANDWIDTH;
+	} else {
+		pengine->bw_state = BUS_HAS_BANDWIDTH;
 	}
 
 	if (cp->total_units != 1) {
 		mutex_unlock(&cp->engine_lock);
-		return 0;
+		goto fips_selftest;
 	}
 
 	/* register crypto cipher algorithms the device supports */
@@ -3886,6 +4397,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev,
 					"The algorithm name %s is too long.\n",
 					q_alg->cipher_alg.cra_name);
+				kfree(q_alg);
 				goto err;
 			}
 		}
@@ -3893,7 +4405,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 		if (rc) {
 			dev_err(&pdev->dev, "%s alg registration failed\n",
 					q_alg->cipher_alg.cra_driver_name);
-			kfree(q_alg);
+			kzfree(q_alg);
 		} else {
 			list_add_tail(&q_alg->entry, &cp->alg_list);
 			dev_info(&pdev->dev, "%s\n",
@@ -3919,6 +4431,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev,
 					"The algorithm name %s is too long.\n",
 					q_alg->cipher_alg.cra_name);
+				kfree(q_alg);
 				goto err;
 			}
 		}
@@ -3926,7 +4439,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 		if (rc) {
 			dev_err(&pdev->dev, "%s alg registration failed\n",
 					q_alg->cipher_alg.cra_driver_name);
-			kfree(q_alg);
+			kzfree(q_alg);
 		} else {
 			list_add_tail(&q_alg->entry, &cp->alg_list);
 			dev_info(&pdev->dev, "%s\n",
@@ -3955,6 +4468,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev,
 					"The algorithm name %s is too long.\n",
 					q_alg->sha_alg.halg.base.cra_name);
+				kfree(q_alg);
 				goto err;
 			}
 		}
@@ -3962,7 +4476,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 		if (rc) {
 			dev_err(&pdev->dev, "%s alg registration failed\n",
 				q_alg->sha_alg.halg.base.cra_driver_name);
-			kfree(q_alg);
+			kzfree(q_alg);
 		} else {
 			list_add_tail(&q_alg->entry, &cp->alg_list);
 			dev_info(&pdev->dev, "%s\n",
@@ -3991,6 +4505,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 					dev_err(&pdev->dev,
 						"The algorithm name %s is too long.\n",
 						q_alg->cipher_alg.cra_name);
+					kfree(q_alg);
 					goto err;
 				}
 			}
@@ -4029,6 +4544,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 					dev_err(&pdev->dev,
 					     "The algorithm name %s is too long.\n",
 					     q_alg->sha_alg.halg.base.cra_name);
+					kfree(q_alg);
 					goto err;
 				}
 			}
@@ -4037,7 +4553,7 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev,
 				"%s alg registration failed\n",
 				q_alg->sha_alg.halg.base.cra_driver_name);
-				kfree(q_alg);
+				kzfree(q_alg);
 			} else {
 				list_add_tail(&q_alg->entry, &cp->alg_list);
 				dev_info(&pdev->dev, "%s\n",
@@ -4065,6 +4581,37 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev,
 						"The algorithm name %s is too long.\n",
 						q_alg->cipher_alg.cra_name);
+				kfree(q_alg);
+				goto err;
+			}
+		}
+		rc = crypto_register_alg(&q_alg->cipher_alg);
+		if (rc) {
+			dev_err(&pdev->dev, "%s alg registration failed\n",
+					q_alg->cipher_alg.cra_driver_name);
+			kzfree(q_alg);
+		} else {
+			list_add_tail(&q_alg->entry, &cp->alg_list);
+			dev_info(&pdev->dev, "%s\n",
+					q_alg->cipher_alg.cra_driver_name);
+		}
+
+		q_alg = _qcrypto_cipher_alg_alloc(cp,
+					&_qcrypto_aead_rfc4309_ccm_algo);
+		if (IS_ERR(q_alg)) {
+			rc = PTR_ERR(q_alg);
+			goto err;
+		}
+
+		if (cp->ce_support.use_sw_aes_ccm_algo) {
+			rc = _qcrypto_prefix_alg_cra_name(
+					q_alg->cipher_alg.cra_name,
+					strlen(q_alg->cipher_alg.cra_name));
+			if (rc) {
+				dev_err(&pdev->dev,
+						"The algorithm name %s is too long.\n",
+						q_alg->cipher_alg.cra_name);
+				kfree(q_alg);
 				goto err;
 			}
 		}
@@ -4081,22 +4628,70 @@ static int  _qcrypto_probe(struct platform_device *pdev)
 	}
 
 	mutex_unlock(&cp->engine_lock);
+
+fips_selftest:
+	/*
+	* FIPS140-2 Known Answer Tests :
+	* IN case of any failure, do not Init the module
+	*/
+	is_fips_qcrypto_tests_done = false;
+
+	if (g_fips140_status != FIPS140_STATUS_NA) {
+
+		_qcrypto_prefix_alg_cra_name(prefix, 0);
+		_qcrypto_fips_selftest_d(&selftest_d, &cp->ce_support, prefix);
+		if (_fips_qcrypto_sha_selftest(&selftest_d) ||
+			_fips_qcrypto_cipher_selftest(&selftest_d) ||
+			_fips_qcrypto_aead_selftest(&selftest_d)) {
+			pr_err("qcrypto: FIPS140-2 Known Answer Tests : Failed\n");
+			panic("SYSTEM CAN NOT BOOT!!!");
+			rc = -1;
+			goto err;
+		} else
+			pr_info("qcrypto: FIPS140-2 Known Answer Tests: Successful\n");
+		if (g_fips140_status != FIPS140_STATUS_PASS)
+			g_fips140_status = FIPS140_STATUS_PASS_CRYPTO;
+
+	} else
+		pr_info("qcrypto: FIPS140-2 Known Answer Tests: Skipped\n");
+
+	is_fips_qcrypto_tests_done = true;
+
 	return 0;
 err:
 	_qcrypto_remove_engine(pengine);
 	mutex_unlock(&cp->engine_lock);
 	if (pengine->qce)
 		qce_close(pengine->qce);
-	kfree(pengine);
+	kzfree(pengine);
 	return rc;
 };
 
+static int _qcrypto_engine_in_use(struct crypto_engine *pengine)
+{
+	struct crypto_priv *cp = pengine->pcp;
+
+	if (pengine->req || pengine->req_queue.qlen || cp->req_queue.qlen)
+		return 1;
+	return 0;
+}
+
+static void _qcrypto_do_suspending(struct crypto_engine *pengine)
+{
+	struct crypto_priv *cp = pengine->pcp;
+
+	if (cp->platform_support.bus_scale_table == NULL)
+		return;
+	del_timer_sync(&pengine->bw_reaper_timer);
+	qcrypto_ce_set_bus(pengine, false);
+}
 
 static int  _qcrypto_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	int ret = 0;
 	struct crypto_engine *pengine;
 	struct crypto_priv *cp;
+	unsigned long flags;
 
 	pengine = platform_get_drvdata(pdev);
 	if (!pengine)
@@ -4109,81 +4704,79 @@ static int  _qcrypto_suspend(struct platform_device *pdev, pm_message_t state)
 	cp = pengine->pcp;
 	if (!cp->ce_support.clk_mgmt_sus_res)
 		return 0;
-
-	mutex_lock(&cp->engine_lock);
-
-	if (pengine->high_bw_req) {
-		del_timer_sync(&(pengine->bw_scale_down_timer));
-		ret = msm_bus_scale_client_update_request(
-				pengine->bus_scale_handle, 0);
-		if (ret) {
-			dev_err(&pdev->dev, "%s Unable to set to low bandwidth\n",
-					__func__);
-			mutex_unlock(&cp->engine_lock);
-			return ret;
+	spin_lock_irqsave(&cp->lock, flags);
+	switch (pengine->bw_state) {
+	case BUS_NO_BANDWIDTH:
+		if (pengine->high_bw_req == false)
+			pengine->bw_state = BUS_SUSPENDED;
+		else
+			ret = -EBUSY;
+		break;
+	case BUS_HAS_BANDWIDTH:
+		if (_qcrypto_engine_in_use(pengine)) {
+			ret = -EBUSY;
+		} else {
+			pengine->bw_state = BUS_SUSPENDING;
+			spin_unlock_irqrestore(&cp->lock, flags);
+			_qcrypto_do_suspending(pengine);
+			spin_lock_irqsave(&cp->lock, flags);
+			pengine->bw_state = BUS_SUSPENDED;
 		}
-		ret = qce_disable_clk(pengine->qce);
-		if (ret) {
-			pr_err("%s Unable disable clk\n", __func__);
-			ret = msm_bus_scale_client_update_request(
-				pengine->bus_scale_handle, 1);
-			if (ret)
-				dev_err(&pdev->dev,
-					"%s Unable to set to high bandwidth\n",
-					__func__);
-			mutex_unlock(&cp->engine_lock);
-			return ret;
-		}
+		break;
+	case BUS_BANDWIDTH_RELEASING:
+	case BUS_BANDWIDTH_ALLOCATING:
+	case BUS_SUSPENDED:
+	case BUS_SUSPENDING:
+	default:
+			ret = -EBUSY;
+			break;
 	}
 
-	mutex_unlock(&cp->engine_lock);
-	return 0;
+	spin_unlock_irqrestore(&cp->lock, flags);
+	if (ret)
+		return ret;
+	else {
+		if (qce_pm_table.suspend)
+			qce_pm_table.suspend(pengine->qce);
+		return 0;
+	}
 }
 
 static int  _qcrypto_resume(struct platform_device *pdev)
 {
-	int ret = 0;
 	struct crypto_engine *pengine;
 	struct crypto_priv *cp;
+	unsigned long flags;
+	int ret = 0;
 
 	pengine = platform_get_drvdata(pdev);
 
 	if (!pengine)
 		return -EINVAL;
-
 	cp = pengine->pcp;
 	if (!cp->ce_support.clk_mgmt_sus_res)
 		return 0;
+	spin_lock_irqsave(&cp->lock, flags);
+	if (pengine->bw_state == BUS_SUSPENDED) {
+		spin_unlock_irqrestore(&cp->lock, flags);
+		if (qce_pm_table.resume)
+			qce_pm_table.resume(pengine->qce);
 
-	mutex_lock(&cp->engine_lock);
-	if (pengine->high_bw_req) {
-		ret = qce_enable_clk(pengine->qce);
-		if (ret) {
-			dev_err(&pdev->dev, "%s Unable to enable clk\n",
-				__func__);
-			mutex_unlock(&cp->engine_lock);
-			return ret;
+		spin_lock_irqsave(&cp->lock, flags);
+		pengine->bw_state = BUS_NO_BANDWIDTH;
+		pengine->active_seq++;
+		pengine->check_flag = false;
+		if (cp->req_queue.qlen || pengine->req_queue.qlen) {
+			if (pengine->high_bw_req == false) {
+				qcrypto_ce_bw_allocate_req(pengine);
+				pengine->high_bw_req = true;
+			}
 		}
-		ret = msm_bus_scale_client_update_request(
-				pengine->bus_scale_handle, 1);
-		if (ret) {
-			dev_err(&pdev->dev,
-				"%s Unable to set to high bandwidth\n",
-				__func__);
-			qce_disable_clk(pengine->qce);
-			mutex_unlock(&cp->engine_lock);
-			return ret;
-		}
-		pengine->bw_scale_down_timer.data =
-					(unsigned long)(pengine);
-		pengine->bw_scale_down_timer.expires = jiffies +
-			msecs_to_jiffies(QCRYPTO_HIGH_BANDWIDTH_TIMEOUT);
-		add_timer(&(pengine->bw_scale_down_timer));
-	}
+	} else
+		ret = -EBUSY;
 
-	mutex_unlock(&cp->engine_lock);
-
-	return 0;
+	spin_unlock_irqrestore(&cp->lock, flags);
+	return ret;
 }
 
 static struct of_device_id qcrypto_match[] = {
@@ -4296,6 +4889,7 @@ static int __init _qcrypto_init(void)
 	pcp->ce_lock_count = 0;
 	pcp->platform_support.bus_scale_table = NULL;
 	pcp->next_engine = NULL;
+	crypto_init_queue(&pcp->req_queue, MSM_QCRYPTO_REQ_QUEUE_LENGTH);
 	return platform_driver_register(&_qualcomm_crypto);
 }
 
