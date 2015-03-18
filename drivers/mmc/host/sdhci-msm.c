@@ -1468,8 +1468,7 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	else
 		pdata->mpm_sdiowakeup_int = -1;
 
-	if (of_property_read_bool(np, "qcom,wakeup-on-idle"))
-		msm_host->mmc->wakeup_on_idle = true;
+	msm_host->mmc->wakeup_on_idle = true;
 
 	return pdata;
 out:
