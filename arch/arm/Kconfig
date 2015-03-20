@@ -1623,6 +1623,13 @@ config SCHED_MC
 	  making when dealing with multi-core CPU chips at a cost of slightly
 	  increased overhead in some places. If unsure say N here.
 
+config APQ_HOTPLUG
+	bool "Multicore hotplug driver"
+	depends on FB_MSM_MDSS
+	default y
+	help
+	  Hotplug CPUs on suspend/resume
+
 config SCHED_SMT
 	bool "SMT scheduler support"
 	depends on ARM_CPU_TOPOLOGY
