@@ -21,7 +21,7 @@
 			SYNC_FILE_RANGE_WAIT_AFTER)
 
 #ifdef CONFIG_FSYNC_CONTROL
-extern bool fsynccontrol_fsync_enabled();
+extern bool fsynccontrol_fsync_enabled(void);
 #endif
 
 /*
