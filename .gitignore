@@ -87,3 +87,6 @@ GTAGS
 
 # CAF files
 arch/arm/mach-msm/smd_rpc_sym.c
+
+# Local files
+*.sh
