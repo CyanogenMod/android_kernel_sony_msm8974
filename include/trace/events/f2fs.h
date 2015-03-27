@@ -72,6 +72,7 @@
 #define show_cpreason(type)						\
 	__print_symbolic(type,						\
 		{ CP_UMOUNT,	"Umount" },				\
+		{ CP_FASTBOOT,	"Fastboot" },				\
 		{ CP_SYNC,	"Sync" },				\
 		{ CP_DISCARD,	"Discard" })
 
@@ -148,14 +149,14 @@ DEFINE_EVENT(f2fs__inode, f2fs_sync_file_enter,
 
 TRACE_EVENT(f2fs_sync_file_exit,
 
-	TP_PROTO(struct inode *inode, bool need_cp, int datasync, int ret),
+	TP_PROTO(struct inode *inode, int need_cp, int datasync, int ret),
 
 	TP_ARGS(inode, need_cp, datasync, ret),
 
 	TP_STRUCT__entry(
 		__field(dev_t,	dev)
 		__field(ino_t,	ino)
-		__field(bool,	need_cp)
+		__field(int,	need_cp)
 		__field(int,	datasync)
 		__field(int,	ret)
 	),
@@ -190,7 +191,7 @@ TRACE_EVENT(f2fs_sync_fs,
 
 	TP_fast_assign(
 		__entry->dev	= sb->s_dev;
-		__entry->dirty	= F2FS_SB(sb)->s_dirty;
+		__entry->dirty	= is_sbi_flag_set(F2FS_SB(sb), SBI_IS_DIRTY);
 		__entry->wait	= wait;
 	),
 
@@ -985,14 +986,15 @@ TRACE_EVENT(f2fs_issue_discard,
 
 TRACE_EVENT(f2fs_issue_flush,
 
-	TP_PROTO(struct super_block *sb, bool nobarrier, bool flush_merge),
+	TP_PROTO(struct super_block *sb, unsigned int nobarrier,
+					unsigned int flush_merge),
 
 	TP_ARGS(sb, nobarrier, flush_merge),
 
 	TP_STRUCT__entry(
 		__field(dev_t,	dev)
-		__field(bool, nobarrier)
-		__field(bool, flush_merge)
+		__field(unsigned int, nobarrier)
+		__field(unsigned int, flush_merge)
 	),
 
 	TP_fast_assign(
@@ -1006,6 +1008,140 @@ TRACE_EVENT(f2fs_issue_flush,
 		__entry->nobarrier ? "skip (nobarrier)" : "issue",
 		__entry->flush_merge ? " with flush_merge" : "")
 );
+
+TRACE_EVENT(f2fs_lookup_extent_tree_start,
+
+	TP_PROTO(struct inode *inode, unsigned int pgofs),
+
+	TP_ARGS(inode, pgofs),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(ino_t,	ino)
+		__field(unsigned int, pgofs)
+	),
+
+	TP_fast_assign(
+		__entry->dev = inode->i_sb->s_dev;
+		__entry->ino = inode->i_ino;
+		__entry->pgofs = pgofs;
+	),
+
+	TP_printk("dev = (%d,%d), ino = %lu, pgofs = %u",
+		show_dev_ino(__entry),
+		__entry->pgofs)
+);
+
+TRACE_EVENT_CONDITION(f2fs_lookup_extent_tree_end,
+
+	TP_PROTO(struct inode *inode, unsigned int pgofs,
+						struct extent_node *en),
+
+	TP_ARGS(inode, pgofs, en),
+
+	TP_CONDITION(en),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(ino_t,	ino)
+		__field(unsigned int, pgofs)
+		__field(unsigned int, fofs)
+		__field(u32, blk)
+		__field(unsigned int, len)
+	),
+
+	TP_fast_assign(
+		__entry->dev = inode->i_sb->s_dev;
+		__entry->ino = inode->i_ino;
+		__entry->pgofs = pgofs;
+		__entry->fofs = en->ei.fofs;
+		__entry->blk = en->ei.blk;
+		__entry->len = en->ei.len;
+	),
+
+	TP_printk("dev = (%d,%d), ino = %lu, pgofs = %u, "
+		"ext_info(fofs: %u, blk: %u, len: %u)",
+		show_dev_ino(__entry),
+		__entry->pgofs,
+		__entry->fofs,
+		__entry->blk,
+		__entry->len)
+);
+
+TRACE_EVENT(f2fs_update_extent_tree,
+
+	TP_PROTO(struct inode *inode, unsigned int pgofs, block_t blkaddr),
+
+	TP_ARGS(inode, pgofs, blkaddr),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(ino_t,	ino)
+		__field(unsigned int, pgofs)
+		__field(u32, blk)
+	),
+
+	TP_fast_assign(
+		__entry->dev = inode->i_sb->s_dev;
+		__entry->ino = inode->i_ino;
+		__entry->pgofs = pgofs;
+		__entry->blk = blkaddr;
+	),
+
+	TP_printk("dev = (%d,%d), ino = %lu, pgofs = %u, blkaddr = %u",
+		show_dev_ino(__entry),
+		__entry->pgofs,
+		__entry->blk)
+);
+
+TRACE_EVENT(f2fs_shrink_extent_tree,
+
+	TP_PROTO(struct f2fs_sb_info *sbi, unsigned int node_cnt,
+						unsigned int tree_cnt),
+
+	TP_ARGS(sbi, node_cnt, tree_cnt),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(unsigned int, node_cnt)
+		__field(unsigned int, tree_cnt)
+	),
+
+	TP_fast_assign(
+		__entry->dev = sbi->sb->s_dev;
+		__entry->node_cnt = node_cnt;
+		__entry->tree_cnt = tree_cnt;
+	),
+
+	TP_printk("dev = (%d,%d), shrunk: node_cnt = %u, tree_cnt = %u",
+		show_dev(__entry),
+		__entry->node_cnt,
+		__entry->tree_cnt)
+);
+
+TRACE_EVENT(f2fs_destroy_extent_tree,
+
+	TP_PROTO(struct inode *inode, unsigned int node_cnt),
+
+	TP_ARGS(inode, node_cnt),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(ino_t,	ino)
+		__field(unsigned int, node_cnt)
+	),
+
+	TP_fast_assign(
+		__entry->dev = inode->i_sb->s_dev;
+		__entry->ino = inode->i_ino;
+		__entry->node_cnt = node_cnt;
+	),
+
+	TP_printk("dev = (%d,%d), ino = %lu, destroyed: node_cnt = %u",
+		show_dev_ino(__entry),
+		__entry->node_cnt)
+);
+
 #endif /* _TRACE_F2FS_H */
 
  /* This part must be outside protection */
