@@ -288,6 +288,7 @@ config ARCH_MSM8974
 	select KRAIT_REGULATOR
 	select ENABLE_VMALLOC_SAVINGS
 	select HAVE_NMI_WATCHDOG if MSM_WATCHDOG_V2
+	select HAS_MACH_MEMUTILS
 
 config ARCH_APQ8084
 	bool "APQ8084"
@@ -530,6 +531,7 @@ config ARCH_MSM8226
 	select MSM_RPM_STATS_LOG
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
 	select ENABLE_VMALLOC_SAVINGS
+	select HAS_MACH_MEMUTILS
 
 config ARCH_MSMSAMARIUM
 	bool "MSMSAMARIUM"
@@ -3218,4 +3220,10 @@ config MSM_MODEM_SUBSYSTEM_RESTART_MONITOR
 	help
 	  This option enables a module which can notify user-space
 	  applications of modem subsystem power up/down event via uevent.
+
+config HAS_MACH_MEMUTILS
+	default n
+	bool "Motorola MSM memcpy enhancements"
+	help
+	Faster memcpy performance for Krait
 endif
