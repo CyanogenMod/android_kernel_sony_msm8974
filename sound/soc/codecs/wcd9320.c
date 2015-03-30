@@ -43,6 +43,10 @@
 #include "wcd9xxx-resmgr.h"
 #include "wcd9xxx-common.h"
 
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+#include "sound_control_3_gpl.h"
+#endif
+
 #define TAIKO_MAD_SLIMBUS_TX_PORT 12
 #define TAIKO_MAD_AUDIO_FIRMWARE_PATH "wcd9320/wcd9320_mad_audio.bin"
 #define TAIKO_VALIDATE_RX_SBPORT_RANGE(port) ((port >= 16) && (port <= 22))
@@ -76,6 +80,13 @@ static struct afe_param_slimbus_slave_port_cfg taiko_slimbus_slave_port_cfg = {
 	.data_format = 0,
 	.num_channels = 1
 };
+
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+struct snd_soc_codec *fauxsound_codec_ptr;
+EXPORT_SYMBOL(fauxsound_codec_ptr);
+unsigned int wcd9xxx_hw_revision;
+EXPORT_SYMBOL(wcd9xxx_hw_revision);
+#endif
 
 static struct afe_param_cdc_reg_cfg audio_reg_cfg[] = {
 	{
@@ -4187,12 +4198,6 @@ static int taiko_volatile(struct snd_soc_codec *ssc, unsigned int reg)
 	return 0;
 }
 
-#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-extern int snd_hax_reg_access(unsigned int);
-extern unsigned int snd_hax_cache_read(unsigned int);
-extern void snd_hax_cache_write(unsigned int, unsigned int);
-#endif
-
 #ifndef CONFIG_SOUND_CONTROL_HAX_3_GPL 
 static
 #endif
@@ -4252,13 +4257,13 @@ int taiko_write(struct snd_soc_codec *codec, unsigned int reg,
 
 #ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
 	if (!snd_hax_reg_access(reg)) {
-		if (!((val = snd_hax_cache_read(reg)) != -1)) {
+		if (!(val = snd_hax_cache_read(reg) != -1))
 			val = wcd9xxx_reg_read_safe(codec->control_data, reg);
-		}
 	} else {
 		snd_hax_cache_write(reg, value);
 		val = value;
         }
+
 	return wcd9xxx_reg_write(&wcd9xxx->core_res, reg, val);
 #else
 	return wcd9xxx_reg_write(&wcd9xxx->core_res, reg, value);
@@ -6851,13 +6856,6 @@ static struct regulator *taiko_codec_find_regulator(struct snd_soc_codec *codec,
 	return NULL;
 }
 
-#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-struct snd_soc_codec *fauxsound_codec_ptr;
-EXPORT_SYMBOL(fauxsound_codec_ptr);
-int wcd9xxx_hw_revision;
-EXPORT_SYMBOL(wcd9xxx_hw_revision);
-#endif
-
 static int taiko_codec_probe(struct snd_soc_codec *codec)
 {
 	struct wcd9xxx *control;
@@ -6872,8 +6870,8 @@ static int taiko_codec_probe(struct snd_soc_codec *codec)
 	struct wcd9xxx_core_resource *core_res;
 
 #ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-	pr_info("taiko codec probe...\n");
 	fauxsound_codec_ptr = codec;
+	pr_info("taiko codec probed\n");
 #endif
 
 	codec->control_data = dev_get_drvdata(codec->dev->parent);

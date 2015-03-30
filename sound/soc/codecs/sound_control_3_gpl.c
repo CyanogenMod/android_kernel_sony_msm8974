@@ -22,99 +22,101 @@
 #include <linux/mfd/wcd9xxx/core.h>
 #include <linux/mfd/wcd9xxx/wcd9320_registers.h>
 
+#include "sound_control_3_gpl.h"
+
 #define SOUND_CONTROL_MAJOR_VERSION	3
-#define SOUND_CONTROL_MINOR_VERSION	6
+#define SOUND_CONTROL_MINOR_VERSION	7
+#define REG_SZ				25
 
-extern struct snd_soc_codec *fauxsound_codec_ptr;
-extern int wcd9xxx_hw_revision;
+static int snd_ctrl_locked;
+static int snd_rec_ctrl_locked;
 
-static int snd_ctrl_locked = 0;
-static int snd_rec_ctrl_locked = 0;
+static struct kobject *sound_control_kobj;
 
 unsigned int taiko_read(struct snd_soc_codec *codec, unsigned int reg);
 int taiko_write(struct snd_soc_codec *codec, unsigned int reg,
 		unsigned int value);
 
-#define REG_SZ	25
 static unsigned int cached_regs[] = {6, 6, 0, 0, 0, 0, 0, 0, 0, 0,
-			    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-			    0, 0, 0, 0, 0 };
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0 };
 
 static unsigned int *cache_select(unsigned int reg)
 {
 	unsigned int *out = NULL;
 
         switch (reg) {
-                case TAIKO_A_RX_HPH_L_GAIN:
-			out = &cached_regs[0];
-			break;
-                case TAIKO_A_RX_HPH_R_GAIN:
-			out = &cached_regs[1];
-			break;
-                case TAIKO_A_CDC_RX1_VOL_CTL_B2_CTL:
-			out = &cached_regs[4];
-			break;
-                case TAIKO_A_CDC_RX2_VOL_CTL_B2_CTL:
-			out = &cached_regs[5];
-			break;
-                case TAIKO_A_CDC_RX3_VOL_CTL_B2_CTL:
-			out = &cached_regs[6];
-			break;
-                case TAIKO_A_CDC_RX4_VOL_CTL_B2_CTL:
-			out = &cached_regs[7];
-			break;
-                case TAIKO_A_CDC_RX5_VOL_CTL_B2_CTL:
-			out = &cached_regs[8];
-			break;
-                case TAIKO_A_CDC_RX6_VOL_CTL_B2_CTL:
-			out = &cached_regs[9];
-			break;
-                case TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL:
-			out = &cached_regs[10];
-			break;
-                case TAIKO_A_CDC_TX1_VOL_CTL_GAIN:
-			out = &cached_regs[11];
-			break;
-                case TAIKO_A_CDC_TX2_VOL_CTL_GAIN:
-			out = &cached_regs[12];
-			break;
-                case TAIKO_A_CDC_TX3_VOL_CTL_GAIN:
-			out = &cached_regs[13];
-			break;
-                case TAIKO_A_CDC_TX4_VOL_CTL_GAIN:
-			out = &cached_regs[14];
-			break;
-                case TAIKO_A_CDC_TX5_VOL_CTL_GAIN:
-			out = &cached_regs[15];
-			break;
-                case TAIKO_A_CDC_TX6_VOL_CTL_GAIN:
-			out = &cached_regs[16];
-			break;
-                case TAIKO_A_CDC_TX7_VOL_CTL_GAIN:
-			out = &cached_regs[17];
-			break;
-                case TAIKO_A_CDC_TX8_VOL_CTL_GAIN:
-			out = &cached_regs[18];
-			break;
-                case TAIKO_A_CDC_TX9_VOL_CTL_GAIN:
-			out = &cached_regs[19];
-			break;
-                case TAIKO_A_CDC_TX10_VOL_CTL_GAIN:
-			out = &cached_regs[20];
-			break;
-		case TAIKO_A_RX_LINE_1_GAIN:
-			out = &cached_regs[21];
-			break;
-		case TAIKO_A_RX_LINE_2_GAIN:
-			out = &cached_regs[22];
-			break;
-		case TAIKO_A_RX_LINE_3_GAIN:
-			out = &cached_regs[23];
-			break;
-		case TAIKO_A_RX_LINE_4_GAIN:
-			out = &cached_regs[24];
-			break;
-        }
+	case TAIKO_A_RX_HPH_L_GAIN:
+		out = &cached_regs[0];
+		break;
+	case TAIKO_A_RX_HPH_R_GAIN:
+		out = &cached_regs[1];
+		break;
+	case TAIKO_A_CDC_RX1_VOL_CTL_B2_CTL:
+		out = &cached_regs[4];
+		break;
+	case TAIKO_A_CDC_RX2_VOL_CTL_B2_CTL:
+		out = &cached_regs[5];
+		break;
+	case TAIKO_A_CDC_RX3_VOL_CTL_B2_CTL:
+		out = &cached_regs[6];
+		break;
+	case TAIKO_A_CDC_RX4_VOL_CTL_B2_CTL:
+		out = &cached_regs[7];
+		break;
+	case TAIKO_A_CDC_RX5_VOL_CTL_B2_CTL:
+		out = &cached_regs[8];
+		break;
+	case TAIKO_A_CDC_RX6_VOL_CTL_B2_CTL:
+		out = &cached_regs[9];
+		break;
+	case TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL:
+		out = &cached_regs[10];
+		break;
+	case TAIKO_A_CDC_TX1_VOL_CTL_GAIN:
+		out = &cached_regs[11];
+		break;
+	case TAIKO_A_CDC_TX2_VOL_CTL_GAIN:
+		out = &cached_regs[12];
+		break;
+	case TAIKO_A_CDC_TX3_VOL_CTL_GAIN:
+		out = &cached_regs[13];
+		break;
+	case TAIKO_A_CDC_TX4_VOL_CTL_GAIN:
+		out = &cached_regs[14];
+		break;
+	case TAIKO_A_CDC_TX5_VOL_CTL_GAIN:
+		out = &cached_regs[15];
+		break;
+	case TAIKO_A_CDC_TX6_VOL_CTL_GAIN:
+		out = &cached_regs[16];
+		break;
+	case TAIKO_A_CDC_TX7_VOL_CTL_GAIN:
+		out = &cached_regs[17];
+		break;
+	case TAIKO_A_CDC_TX8_VOL_CTL_GAIN:
+		out = &cached_regs[18];
+		break;
+	case TAIKO_A_CDC_TX9_VOL_CTL_GAIN:
+		out = &cached_regs[19];
+		break;
+	case TAIKO_A_CDC_TX10_VOL_CTL_GAIN:
+		out = &cached_regs[20];
+		break;
+	case TAIKO_A_RX_LINE_1_GAIN:
+		out = &cached_regs[21];
+		break;
+	case TAIKO_A_RX_LINE_2_GAIN:
+		out = &cached_regs[22];
+		break;
+	case TAIKO_A_RX_LINE_3_GAIN:
+		out = &cached_regs[23];
+		break;
+	case TAIKO_A_RX_LINE_4_GAIN:
+		out = &cached_regs[24];
+		break;
+	}
+
 	return out;
 }
 
@@ -141,43 +143,44 @@ int snd_hax_reg_access(unsigned int reg)
 	int ret = 1;
 
 	switch (reg) {
-		case TAIKO_A_RX_HPH_L_GAIN:
-		case TAIKO_A_RX_HPH_R_GAIN:
-		case TAIKO_A_RX_HPH_L_STATUS:
-		case TAIKO_A_RX_HPH_R_STATUS:
-			if (snd_ctrl_locked > 1)
-				ret = 0;
-			break;
-		case TAIKO_A_CDC_RX1_VOL_CTL_B2_CTL:
-		case TAIKO_A_CDC_RX2_VOL_CTL_B2_CTL:
-		case TAIKO_A_CDC_RX3_VOL_CTL_B2_CTL:
-		case TAIKO_A_CDC_RX4_VOL_CTL_B2_CTL:
-		case TAIKO_A_CDC_RX5_VOL_CTL_B2_CTL:
-		case TAIKO_A_CDC_RX6_VOL_CTL_B2_CTL:
-		case TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL:
-		case TAIKO_A_RX_LINE_1_GAIN:
-		case TAIKO_A_RX_LINE_2_GAIN:
-		case TAIKO_A_RX_LINE_3_GAIN:
-		case TAIKO_A_RX_LINE_4_GAIN:
-			if (snd_ctrl_locked > 0)
-				ret = 0;
-			break;
-		case TAIKO_A_CDC_TX1_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX2_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX3_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX4_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX5_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX6_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX7_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX8_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX9_VOL_CTL_GAIN:
-		case TAIKO_A_CDC_TX10_VOL_CTL_GAIN:
-			if (snd_rec_ctrl_locked > 0)
-				ret = 0;
-			break;
-		default:
-			break;
+	case TAIKO_A_RX_HPH_L_GAIN:
+	case TAIKO_A_RX_HPH_R_GAIN:
+	case TAIKO_A_RX_HPH_L_STATUS:
+	case TAIKO_A_RX_HPH_R_STATUS:
+		if (snd_ctrl_locked > 1)
+			ret = 0;
+		break;
+	case TAIKO_A_CDC_RX1_VOL_CTL_B2_CTL:
+	case TAIKO_A_CDC_RX2_VOL_CTL_B2_CTL:
+	case TAIKO_A_CDC_RX3_VOL_CTL_B2_CTL:
+	case TAIKO_A_CDC_RX4_VOL_CTL_B2_CTL:
+	case TAIKO_A_CDC_RX5_VOL_CTL_B2_CTL:
+	case TAIKO_A_CDC_RX6_VOL_CTL_B2_CTL:
+	case TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL:
+	case TAIKO_A_RX_LINE_1_GAIN:
+	case TAIKO_A_RX_LINE_2_GAIN:
+	case TAIKO_A_RX_LINE_3_GAIN:
+	case TAIKO_A_RX_LINE_4_GAIN:
+		if (snd_ctrl_locked > 0)
+			ret = 0;
+		break;
+	case TAIKO_A_CDC_TX1_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX2_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX3_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX4_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX5_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX6_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX7_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX8_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX9_VOL_CTL_GAIN:
+	case TAIKO_A_CDC_TX10_VOL_CTL_GAIN:
+		if (snd_rec_ctrl_locked > 0)
+			ret = 0;
+		break;
+	default:
+		break;
 	}
+
 	return ret;
 }
 EXPORT_SYMBOL(snd_hax_reg_access);
@@ -188,17 +191,16 @@ static bool calc_checksum(unsigned int a, unsigned int b, unsigned int c)
 
 	chksum = ~((a & 0xff) + (b & 0xff));
 
-	if (chksum == (c & 0xff)) {
+	if (chksum == (c & 0xff))
 		return true;
-	} else {
+	else
 		return false;
-	}
 }
 
 static ssize_t cam_mic_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-        return sprintf(buf, "%u\n",
+	return sprintf(buf, "%u\n",
 		taiko_read(fauxsound_codec_ptr,
 			TAIKO_A_CDC_TX6_VOL_CTL_GAIN));
 
@@ -215,6 +217,7 @@ static ssize_t cam_mic_gain_store(struct kobject *kobj,
 		taiko_write(fauxsound_codec_ptr,
 			TAIKO_A_CDC_TX6_VOL_CTL_GAIN, lval);
 	}
+
 	return count;
 }
 
@@ -237,6 +240,7 @@ static ssize_t mic_gain_store(struct kobject *kobj,
 		taiko_write(fauxsound_codec_ptr,
 			TAIKO_A_CDC_TX7_VOL_CTL_GAIN, lval);
 	}
+
 	return count;
 
 }
@@ -244,7 +248,7 @@ static ssize_t mic_gain_store(struct kobject *kobj,
 static ssize_t speaker_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-        return sprintf(buf, "%u %u\n",
+	return sprintf(buf, "%u %u\n",
 			taiko_read(fauxsound_codec_ptr,
 				TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL),
 			taiko_read(fauxsound_codec_ptr,
@@ -328,21 +332,22 @@ static ssize_t headphone_pa_gain_store(struct kobject *kobj,
 	out = (status & 0x0f) | (rval << 4);
 	taiko_write(fauxsound_codec_ptr, TAIKO_A_RX_HPH_R_STATUS, out);
 	}
+
 	return count;
 }
 
 static unsigned int selected_reg = 0xdeadbeef;
 
 static ssize_t sound_reg_select_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf, size_t count)
+		struct kobj_attribute *attr, const char *buf, size_t count)
 {
-        sscanf(buf, "%u", &selected_reg);
+	sscanf(buf, "%u", &selected_reg);
 
 	return count;
 }
 
 static ssize_t sound_reg_read_show(struct kobject *kobj,
-                struct kobj_attribute *attr, char *buf)
+					struct kobj_attribute *attr, char *buf)
 {
 	if (selected_reg == 0xdeadbeef)
 		return -1;
@@ -352,20 +357,21 @@ static ssize_t sound_reg_read_show(struct kobject *kobj,
 }
 
 static ssize_t sound_reg_write_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf, size_t count)
+		struct kobj_attribute *attr, const char *buf, size_t count)
 {
-        unsigned int out, chksum;
+	unsigned int out, chksum;
 
 	sscanf(buf, "%u %u", &out, &chksum);
 	if (calc_checksum(out, 0, chksum)) {
 		if (selected_reg != 0xdeadbeef)
 			taiko_write(fauxsound_codec_ptr, selected_reg, out);
 	}
+
 	return count;
 }
 
-static ssize_t sound_control_hw_revision_show (struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
+static ssize_t sound_control_hw_revision_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf, "hw_revision: %i\n", wcd9xxx_hw_revision);
 }
@@ -379,7 +385,7 @@ static ssize_t sound_control_version_show(struct kobject *kobj,
 }
 
 static ssize_t sound_control_locked_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf, size_t count)
+		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int inp;
 
@@ -391,13 +397,13 @@ static ssize_t sound_control_locked_store(struct kobject *kobj,
 }
 
 static ssize_t sound_control_locked_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
+					struct kobj_attribute *attr, char *buf)
 {
-        return sprintf(buf, "%d\n", snd_ctrl_locked);
+	return sprintf(buf, "%d\n", snd_ctrl_locked);
 }
 
 static ssize_t sound_control_rec_locked_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf, size_t count)
+		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int inp;
 
@@ -409,9 +415,9 @@ static ssize_t sound_control_rec_locked_store(struct kobject *kobj,
 }
 
 static ssize_t sound_control_rec_locked_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
+					struct kobj_attribute *attr, char *buf)
 {
-        return sprintf(buf, "%d\n", snd_rec_ctrl_locked);
+	return sprintf(buf, "%d\n", snd_rec_ctrl_locked);
 }
 
 static struct kobj_attribute sound_reg_sel_attribute =
@@ -484,8 +490,7 @@ static struct kobj_attribute sound_hw_revision_attribute =
 		0444,
 		sound_control_hw_revision_show, NULL);
 
-static struct attribute *sound_control_attrs[] =
-	{
+static struct attribute *sound_control_attrs[] = {
 		&cam_mic_gain_attribute.attr,
 		&mic_gain_attribute.attr,
 		&speaker_gain_attribute.attr,
@@ -499,36 +504,33 @@ static struct attribute *sound_control_attrs[] =
 		&sound_hw_revision_attribute.attr,
 		&sound_control_version_attribute.attr,
 		NULL,
-	};
+};
 
-static struct attribute_group sound_control_attr_group =
-	{
+static struct attribute_group sound_control_attr_group = {
 		.attrs = sound_control_attrs,
-	};
-
-static struct kobject *sound_control_kobj;
+};
 
 static int sound_control_init(void)
 {
-	int sysfs_result;
+	int ret;
 
 	sound_control_kobj =
 		kobject_create_and_add("sound_control_3", kernel_kobj);
 
 	if (!sound_control_kobj) {
-		pr_err("%s sound_control_kobj create failed!\n",
-			__FUNCTION__);
+		pr_err("%s: sound_control_kobj create failed!\n", __func__);
 		return -ENOMEM;
-        }
+	}
 
-	sysfs_result = sysfs_create_group(sound_control_kobj,
+	ret = sysfs_create_group(sound_control_kobj,
 			&sound_control_attr_group);
 
-	if (sysfs_result) {
-		pr_info("%s sysfs create failed!\n", __FUNCTION__);
+	if (ret) {
+		pr_info("%s: sysfs create failed!\n", __func__);
 		kobject_put(sound_control_kobj);
 	}
-	return sysfs_result;
+
+	return ret;
 }
 
 static void sound_control_exit(void)
@@ -542,4 +544,3 @@ module_exit(sound_control_exit);
 MODULE_LICENSE("GPL and additional rights");
 MODULE_AUTHOR("Paul Reioux <reioux@gmail.com>");
 MODULE_DESCRIPTION("Sound Control Module 3.x");
-
