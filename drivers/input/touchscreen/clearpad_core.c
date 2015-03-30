@@ -31,12 +31,12 @@
 #include <linux/uaccess.h>
 #endif
 #include <linux/sched.h>
+#ifdef CONFIG_ARM
+#include <asm/mach-types.h>
+#endif
 #ifdef CONFIG_FB
 #include <linux/notifier.h>
 #include <linux/fb.h>
-#endif
-#ifdef CONFIG_ARM
-#include <asm/mach-types.h>
 #endif
 
 #define SYN_CLEARPAD_VENDOR		0x1
@@ -567,11 +567,7 @@ struct clearpad_t {
 	int irq;
 	int irq_mask;
 
-#ifdef CONFIG_FB
-	struct notifier_block fb_notif;
-	struct work_struct notify_resume;
-	struct work_struct notify_suspend;
-#endif
+	int screen_status;
 
 	char fwname[SYN_STRING_LENGTH + 1];
 	char result_info[SYN_STRING_LENGTH + 1];
@@ -599,14 +595,19 @@ struct clearpad_t {
 	u32 por_delay_after;
 	u32 reset_count;
 	const char *reset_cause;
+
+#ifdef CONFIG_FB
+	struct notifier_block fb_notif;
+	struct work_struct notify_resume;
+	struct work_struct notify_suspend;
+#endif
 };
 
 static void clearpad_funcarea_initialize(struct clearpad_t *this);
 static void clearpad_reset_power(struct clearpad_t *this,
 					   const char *cause);
-
-static int clearpad_resume(struct device *dev);
-static int clearpad_suspend(struct device *dev);
+static void clearpad_resume(struct device *dev);
+static void clearpad_suspend(struct device *dev);
 
 static char *clearpad_s(u8 *array, size_t size)
 {
@@ -1012,8 +1013,12 @@ static int clearpad_set_cover_window(struct clearpad_t *this)
 	rc = clearpad_put(SYNF(this, F51_CUSTOM,
 			CTRL, 0x02), this->cover.win_left >> 8);
 	if (rc)
-		dev_err(&this->pdev->dev, "failed to set cover window");
+		goto exit;
+
+	rc = clearpad_set_cover_status(this);
 exit:
+	if (rc)
+		dev_err(&this->pdev->dev, "failed to set cover window");
 	return rc;
 }
 
@@ -3585,6 +3590,10 @@ static ssize_t clearpad_state_show(struct device *dev,
 	else if (!strncmp(attr->attr.name, __stringify(glove), PAGE_SIZE))
 		snprintf(buf, PAGE_SIZE,
 			"%d", this->glove.enabled);
+	else if (!strncmp(attr->attr.name, __stringify(screen_status),
+								PAGE_SIZE))
+		snprintf(buf, PAGE_SIZE,
+			"%d", this->screen_status);
 	else if (!strncmp(attr->attr.name, __stringify(charger_status),
 								PAGE_SIZE))
 		snprintf(buf, PAGE_SIZE,
@@ -3963,6 +3972,35 @@ exit:
 	return rc ? rc : size;
 }
 
+static ssize_t clearpad_screen_status_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	struct clearpad_t *this = dev_get_drvdata(dev);
+
+	dev_dbg(&this->pdev->dev, "%s: start\n", __func__);
+
+	LOCK(this);
+
+	sscanf(buf, "%d", &this->screen_status);
+	dev_dbg(&this->pdev->dev, "%s: screen_status = %d\n", __func__,
+				this->screen_status);
+
+	if (this->screen_status) {
+		if (!(this->active & SYN_ACTIVE_POWER))
+			clearpad_resume(&this->pdev->dev);
+	} else {
+		if (this->active & SYN_ACTIVE_POWER)
+			clearpad_suspend(&this->pdev->dev);
+	}
+
+	UNLOCK(this);
+
+	clearpad_set_power(this);
+
+	return strnlen(buf, PAGE_SIZE);
+}
+
 static ssize_t clearpad_charger_status_store(struct device *dev,
 		struct device_attribute *attr,
 		const char *buf, size_t size)
@@ -4126,6 +4164,8 @@ static struct device_attribute clearpad_sysfs_attrs[] = {
 				clearpad_pen_enabled_store),
 	__ATTR(glove, S_IRUGO | S_IWUSR, clearpad_state_show,
 				clearpad_glove_enabled_store),
+	__ATTR(screen_status, S_IRUGO | S_IWUSR, clearpad_state_show,
+				clearpad_screen_status_store),
 	__ATTR(charger_status, S_IRUGO | S_IWUSR, clearpad_state_show,
 				clearpad_charger_status_store),
 	__ATTR(pca, S_IRUGO | S_IWUSR, clearpad_pca_show,
@@ -4337,13 +4377,11 @@ static void clearpad_input_ev_init(struct clearpad_t *this)
 	}
 }
 
-static int clearpad_suspend(struct device *dev)
+static void clearpad_suspend(struct device *dev)
 {
 	struct clearpad_t *this = dev_get_drvdata(dev);
-	int rc = 0;
 	bool go_suspend;
 
-	LOCK(this);
 	go_suspend = (this->task != SYN_TASK_NO_SUSPEND);
 	if (go_suspend)
 		this->active |= SYN_STANDBY;
@@ -4352,21 +4390,13 @@ static int clearpad_suspend(struct device *dev)
 
 	LOG_STAT(this, "active: %x (task: %s)\n",
 		 this->active, clearpad_task_name[this->task]);
-	UNLOCK(this);
-
-	rc = clearpad_set_power(this);
-	if (rc && this->reset_count >= SYN_RETRY_NUM_OF_RESET)
-		rc = 0; /* stop retry of recovery */
-	return rc;
 }
 
-static int clearpad_resume(struct device *dev)
+static void clearpad_resume(struct device *dev)
 {
 	struct clearpad_t *this = dev_get_drvdata(dev);
-	int rc = 0;
 	bool go_resume;
 
-	LOCK(this);
 	go_resume = !!(this->active & (SYN_STANDBY | SYN_STANDBY_AFTER_TASK));
 	if (go_resume)
 		this->active &= ~(SYN_STANDBY | SYN_STANDBY_AFTER_TASK);
@@ -4375,12 +4405,6 @@ static int clearpad_resume(struct device *dev)
 		 this->active, clearpad_task_name[this->task]);
 
 	clearpad_funcarea_invalidate_all(this);
-	UNLOCK(this);
-
-	rc = clearpad_set_power(this);
-	if (rc && this->reset_count >= SYN_RETRY_NUM_OF_RESET)
-		rc = 0; /* stop retry of recovery */
-	return rc;
 }
 
 static int clearpad_pm_suspend(struct device *dev)
@@ -4398,12 +4422,16 @@ static int clearpad_pm_suspend(struct device *dev)
 	this->dev_busy = true;
 	spin_unlock_irqrestore(&this->slock, flags);
 
-#ifdef CONFIG_FB
-	if (this->active & SYN_ACTIVE_POWER)
-#endif
-		rc = clearpad_suspend(&this->pdev->dev);
-	if (rc)
-		return rc;
+	if (this->active & SYN_ACTIVE_POWER) {
+		clearpad_suspend(&this->pdev->dev);
+		rc = clearpad_set_power(this);
+		if (rc) {
+			if (this->reset_count >= SYN_RETRY_NUM_OF_RESET)
+				rc = 0; /* stop retry of recovery */
+			else
+				return rc;
+		}
+	}
 
 	if (device_may_wakeup(dev)) {
 		enable_irq_wake(this->irq);
@@ -4435,11 +4463,6 @@ static int clearpad_pm_resume(struct device *dev)
 		rc = clearpad_process_irq(this);
 	}
 
-#ifdef CONFIG_FB
-	if (irq_pending)
-#endif
-	(void)(rc ? rc : clearpad_resume(&this->pdev->dev));
-
 	return 0;
 }
 
@@ -4459,8 +4482,14 @@ static void notify_resume(struct work_struct *work)
 	struct clearpad_t *this = container_of(work,
 			struct clearpad_t, notify_resume);
 
+	LOCK(this);
+
 	if (!(this->active & SYN_ACTIVE_POWER))
 		clearpad_resume(&this->pdev->dev);
+
+	UNLOCK(this);
+
+	clearpad_set_power(this);
 }
 
 static void notify_suspend(struct work_struct *work)
@@ -4468,8 +4497,14 @@ static void notify_suspend(struct work_struct *work)
 	struct clearpad_t *this = container_of(work,
 			struct clearpad_t, notify_suspend);
 
+	LOCK(this);
+
 	if (this->active & SYN_ACTIVE_POWER)
 		clearpad_suspend(&this->pdev->dev);
+
+	UNLOCK(this);
+
+	clearpad_set_power(this);
 }
 
 static int fb_notifier_callback(struct notifier_block *self,
@@ -4487,13 +4522,12 @@ static int fb_notifier_callback(struct notifier_block *self,
 			cancel_work_sync(&this->notify_suspend);
 			cancel_work_sync(&this->notify_resume);
 			schedule_work(&this->notify_resume);
-		} else if (*blank == FB_BLANK_POWERDOWN) {
+		} else if (*blank != FB_BLANK_UNBLANK) {
 			cancel_work_sync(&this->notify_resume);
 			cancel_work_sync(&this->notify_suspend);
 			schedule_work(&this->notify_suspend);
 		}
 	}
-
 	return 0;
 }
 #endif
