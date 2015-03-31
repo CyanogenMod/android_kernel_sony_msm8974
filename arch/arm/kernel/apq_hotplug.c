@@ -23,7 +23,7 @@
 
 static struct notifier_block apq_hotplug_lcd_notif;
 
-static void __cpuinit __apq_hotplug_suspend(void)
+static inline void offline_all(void)
 {
 	unsigned int cpu;
 
@@ -33,7 +33,7 @@ static void __cpuinit __apq_hotplug_suspend(void)
 	}
 }
 
-static void __cpuinit __apq_hotplug_resume(void)
+static inline void online_all(void)
 {
 	unsigned int cpu;
 
@@ -43,7 +43,18 @@ static void __cpuinit __apq_hotplug_resume(void)
 	}
 }
 
-static int __cpuinit apq_hotplug_lcd_notifier_callback(struct notifier_block *this,
+static void __apq_hotplug_suspend(void)
+{
+	offline_all();
+}
+
+static void __apq_hotplug_resume(void)
+{
+	online_all();
+}
+
+static int __cpuinit apq_hotplug_lcd_notifier_callback(
+					struct notifier_block *this,
 					unsigned long event, void *data)
 {
 	switch (event) {
