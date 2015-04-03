@@ -2521,8 +2521,10 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			&(pinfo->rst_seq_len),
 			"qcom,mdss-dsi-reset-sequence");
 
+#ifdef CONFIG_MACH_SONY_AMAMI_ROW
 		mdss_dsi_parse_dcs_cmds(next, &spec_pdata->einit_cmds,
 			"somc,mdss-dsi-early-init-command", NULL);
+#endif
 
 		mdss_dsi_parse_dcs_cmds(next, &spec_pdata->init_cmds,
 			"somc,mdss-dsi-init-command", NULL);
@@ -2611,19 +2613,6 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			&spec_pdata->cabc_early_on_cmds,
 			"somc,mdss-dsi-cabc-early-on-command", NULL);
 
-		mdss_dsi_parse_dcs_cmds(next,
-			&spec_pdata->cabc_on_cmds,
-			"somc,mdss-dsi-cabc-on-command", NULL);
-
-		if (id_data)
-			mdss_dsi_parse_dcs_cmds(next,
-				&spec_pdata->cabc_off_cmds[DETECTED_CMDS],
-				"somc,mdss-dsi-cabc-off-command", NULL);
-		else
-			mdss_dsi_parse_dcs_cmds(next,
-				&spec_pdata->cabc_off_cmds[DEFAULT_CMDS],
-				"somc,mdss-dsi-cabc-off-command", NULL);
-
 		if (id_data)
 			mdss_dsi_parse_dcs_cmds(next,
 				&spec_pdata->cabc_late_off_cmds[DETECTED_CMDS],
@@ -2633,9 +2622,11 @@ static int mdss_panel_parse_dt(struct device_node *np,
 				&spec_pdata->cabc_late_off_cmds[DEFAULT_CMDS],
 				"somc,mdss-dsi-cabc-late-off-command", NULL);
 
+#ifdef CONFIG_MACH_SONY_HONAMI_ROW
 		mdss_dsi_parse_dcs_cmds(next,
 			&spec_pdata->cabc_deferred_on_cmds,
 			"somc,mdss-dsi-cabc-deferred-on-command", NULL);
+#endif
 
 		rc = of_property_read_u32(next,
 			"somc,mdss-dsi-cabc-enabled", &tmp);
@@ -2663,9 +2654,6 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			&spec_pdata->off_seq.seq_b_num);
 		rc = of_property_read_u32(next, "somc,pw-down-period", &tmp);
 		spec_pdata->down_period = !rc ? tmp : 0;
-
-		mdss_dsi_parse_dcs_cmds(next, &ctrl_pdata->fps_cmds,
-			"somc,chenge-fps-command", NULL);
 		rc = of_property_read_u32(next,
 			"somc,fps_default", &tmp);
 		pinfo->lcdc.fps_default = !rc ? tmp : 0x8E;
