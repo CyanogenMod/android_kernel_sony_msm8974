@@ -39,8 +39,9 @@
 		battery@b {
 			compatible = "ti,bq28400-battery";
 			reg = <0xb>;
+			/* Normal temperature range is from 0 to 40°C */
 			ti,temp-cold = <2>; /* degree celsius */
-			ti,temp-hot = <43>; /* degree celsius */
+			ti,temp-hot = <40>; /* degree celsius */
 		};
 
 		charger@2b {
