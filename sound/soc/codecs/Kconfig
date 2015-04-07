@@ -444,7 +444,7 @@ config SND_SOC_WM9713
 
 config SND_SOC_TFA98XX
 	tristate
-
+	depends on !MACH_SONY_TOGARI_ROW
 # Amp
 config SND_SOC_LM4857
 	tristate
