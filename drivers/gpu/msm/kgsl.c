@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -64,14 +64,8 @@ struct kgsl_dma_buf_meta {
 	struct sg_table *table;
 };
 
-static void kgsl_put_process_private(struct kgsl_device *device,
-			 struct kgsl_process_private *private);
-
 static void kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry);
 
-static void
-kgsl_put_process_private(struct kgsl_device *device,
-			 struct kgsl_process_private *private);
 /**
  * kgsl_trace_issueibcmds() - Call trace_issueibcmds by proxy
  * device: KGSL device
@@ -111,51 +105,107 @@ void kgsl_trace_regwrite(struct kgsl_device *device, unsigned int offset,
 }
 EXPORT_SYMBOL(kgsl_trace_regwrite);
 
-int kgsl_memfree_hist_init(void)
-{
-	void *base;
+/*
+ * The memfree list contains the last N blocks of memory that have been freed.
+ * On a GPU fault we walk the list to see if the faulting address had been
+ * recently freed and print out a message to that effect
+ */
 
-	base = kzalloc(KGSL_MEMFREE_HIST_SIZE, GFP_KERNEL);
-	kgsl_driver.memfree_hist.base_hist_rb = base;
-	if (base == NULL)
-		return -ENOMEM;
-	kgsl_driver.memfree_hist.size = KGSL_MEMFREE_HIST_SIZE;
-	kgsl_driver.memfree_hist.wptr = base;
+#define MEMFREE_ENTRIES 512
+
+static DEFINE_SPINLOCK(memfree_lock);
+
+struct memfree_entry {
+	unsigned long gpuaddr;
+	unsigned long size;
+	pid_t pid;
+	unsigned int flags;
+};
+
+static struct {
+	struct memfree_entry *list;
+	int head;
+	int tail;
+} memfree;
+
+static int kgsl_memfree_init(void)
+{
+	memfree.list = kzalloc(MEMFREE_ENTRIES * sizeof(struct memfree_entry),
+		GFP_KERNEL);
+
+	return (memfree.list) ? 0 : -ENOMEM;
+}
+
+static void kgsl_memfree_exit(void)
+{
+	kfree(memfree.list);
+	memset(&memfree, 0, sizeof(memfree));
+}
+
+int kgsl_memfree_find_entry(pid_t pid, unsigned long *gpuaddr,
+	unsigned long *size, unsigned int *flags)
+{
+	int ptr;
+
+	if (memfree.list == NULL)
+		return 0;
+
+	spin_lock(&memfree_lock);
+
+	ptr = memfree.head - 1;
+	if (ptr < 0)
+		ptr = MEMFREE_ENTRIES - 1;
+
+	/* Walk backwards through the list looking for the last match  */
+	while (ptr != memfree.tail) {
+		struct memfree_entry *entry = &memfree.list[ptr];
+
+		if ((entry->pid == pid) &&
+			(*gpuaddr >= entry->gpuaddr &&
+			 *gpuaddr < (entry->gpuaddr + entry->size))) {
+			*gpuaddr = entry->gpuaddr;
+			*flags = entry->flags;
+			*size = entry->size;
+
+			spin_unlock(&memfree_lock);
+			return 1;
+		}
+
+		ptr = ptr - 1;
+
+		if (ptr < 0)
+			ptr = MEMFREE_ENTRIES - 1;
+	}
+
+	spin_unlock(&memfree_lock);
 	return 0;
 }
 
-void kgsl_memfree_hist_exit(void)
+static void kgsl_memfree_add(pid_t pid, unsigned int gpuaddr,
+		unsigned int size, int flags)
+
 {
-	kfree(kgsl_driver.memfree_hist.base_hist_rb);
-	kgsl_driver.memfree_hist.base_hist_rb = NULL;
-}
+	struct memfree_entry *entry;
 
-void kgsl_memfree_hist_set_event(unsigned int pid, unsigned int gpuaddr,
-			unsigned int size, int flags)
-{
-	struct kgsl_memfree_hist_elem *p;
-
-	void *base = kgsl_driver.memfree_hist.base_hist_rb;
-	int rbsize = kgsl_driver.memfree_hist.size;
-
-	if (base == NULL)
+	if (memfree.list == NULL)
 		return;
 
-	mutex_lock(&kgsl_driver.memfree_hist_mutex);
-	p = kgsl_driver.memfree_hist.wptr;
-	p->pid = pid;
-	p->gpuaddr = gpuaddr;
-	p->size = size;
-	p->flags = flags;
+	spin_lock(&memfree_lock);
 
-	kgsl_driver.memfree_hist.wptr++;
-	if ((void *)kgsl_driver.memfree_hist.wptr >= base+rbsize) {
-		kgsl_driver.memfree_hist.wptr =
-			(struct kgsl_memfree_hist_elem *)base;
-	}
-	mutex_unlock(&kgsl_driver.memfree_hist_mutex);
+	entry = &memfree.list[memfree.head];
+
+	entry->pid = pid;
+	entry->gpuaddr = gpuaddr;
+	entry->size = size;
+	entry->flags = flags;
+
+	memfree.head = (memfree.head + 1) % MEMFREE_ENTRIES;
+
+	if (memfree.head == memfree.tail)
+		memfree.tail = (memfree.tail + 1) % MEMFREE_ENTRIES;
+
+	spin_unlock(&memfree_lock);
 }
-
 
 /* kgsl_get_mem_entry - get the mem_entry structure for the specified object
  * @device - Pointer to the device structure
@@ -352,8 +402,8 @@ kgsl_mem_entry_attach_process(struct kgsl_mem_entry *entry,
 {
 	int ret;
 	struct kgsl_process_private *process = dev_priv->process_priv;
-	
-	ret = kref_get_unless_zero(&process->refcount);
+
+	ret = kgsl_process_private_get(process);
 	if (!ret)
 		return -EBADF;
 
@@ -392,7 +442,7 @@ kgsl_mem_entry_attach_process(struct kgsl_mem_entry *entry,
 	return ret;
 
 err_put_proc_priv:
-	kgsl_put_process_private(dev_priv->device, process);
+	kgsl_process_private_put(process);
 	return ret;
 }
 
@@ -415,10 +465,37 @@ static void kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry)
 
 	entry->priv->stats[entry->memtype].cur -= entry->memdesc.size;
 	spin_unlock(&entry->priv->mem_lock);
-	kgsl_put_process_private(entry->dev_priv->device, entry->priv);
+	kgsl_process_private_put(entry->priv);
 
 	entry->priv = NULL;
 }
+
+/**
+ * kgsl_context_dump() - dump information about a draw context
+ * @device: KGSL device that owns the context
+ * @context: KGSL context to dump information about
+ *
+ * Dump specific information about the context to the kernel log.  Used for
+ * fence timeout callbacks
+ */
+void kgsl_context_dump(struct kgsl_context *context)
+{
+	struct kgsl_device *device;
+
+	if (_kgsl_context_get(context) == 0)
+		return;
+
+	device = context->device;
+
+	if (kgsl_context_detached(context)) {
+		dev_err(device->dev, "  context[%d]: context detached\n",
+			context->id);
+	} else if (device->ftbl->drawctxt_dump != NULL)
+		device->ftbl->drawctxt_dump(device, context);
+
+	kgsl_context_put(context);
+}
+EXPORT_SYMBOL(kgsl_context_dump);
 
 /**
  * kgsl_context_init() - helper to initialize kgsl_context members
@@ -473,7 +550,7 @@ int kgsl_context_init(struct kgsl_device_private *dev_priv,
 	 * the context is destroyed. This will also prevent the pagetable
 	 * from being destroyed
 	 */
-	if (!kref_get_unless_zero(&dev_priv->process_priv->refcount))
+	if (!kgsl_process_private_get(dev_priv->process_priv))
 		goto fail_free_id;
 	context->device = dev_priv->device;
 	context->dev_priv = dev_priv;
@@ -563,13 +640,19 @@ kgsl_context_destroy(struct kref *kref)
 
 	write_lock(&device->context_lock);
 	if (context->id != KGSL_CONTEXT_INVALID) {
+
+		/* Clear the timestamps in the memstore during destroy */
+		kgsl_sharedmem_writel(device, &device->memstore,
+			KGSL_MEMSTORE_OFFSET(context->id, soptimestamp), 0);
+		kgsl_sharedmem_writel(device, &device->memstore,
+			KGSL_MEMSTORE_OFFSET(context->id, eoptimestamp), 0);
+
 		idr_remove(&device->context_idr, context->id);
 		context->id = KGSL_CONTEXT_INVALID;
 	}
 	write_unlock(&device->context_lock);
 	kgsl_sync_timeline_destroy(context);
-	kgsl_put_process_private(device,
-				context->proc_priv);
+	kgsl_process_private_put(context->proc_priv);
 
 	device->ftbl->drawctxt_destroy(context);
 }
@@ -811,9 +894,8 @@ static void kgsl_destroy_process_private(struct kref *kref)
 	return;
 }
 
-static void
-kgsl_put_process_private(struct kgsl_device *device,
-			 struct kgsl_process_private *private)
+void
+kgsl_process_private_put(struct kgsl_process_private *private)
 {
 	mutex_lock(&kgsl_driver.process_mutex);
 
@@ -828,13 +910,32 @@ kgsl_put_process_private(struct kgsl_device *device,
 }
 
 /**
- * find_process_private() - Helper function to search for process private
- * @cur_dev_priv: Pointer to device private structure which contains pointers
- * to device and process_private structs.
+ * kgsl_process_private_find() - Find the process associated with the specified
+ * name
+ * @name: pid_t of the process to search for
+ * Return the process struct for the given ID.
+ */
+struct kgsl_process_private *kgsl_process_private_find(pid_t pid)
+{
+	struct kgsl_process_private *p, *private = NULL;
+
+	mutex_lock(&kgsl_driver.process_mutex);
+	list_for_each_entry(p, &kgsl_driver.process_list, list) {
+		if (p->pid == pid) {
+			if (kgsl_process_private_get(p))
+				private = p;
+			break;
+		}
+	}
+	mutex_unlock(&kgsl_driver.process_mutex);
+	return private;
+}
+
+/**
+ * kgsl_process_private_new() - Helper function to search for process private
  * Returns: Pointer to the found/newly created private struct
  */
-static struct kgsl_process_private *
-kgsl_find_process_private(struct kgsl_device_private *cur_dev_priv)
+static struct kgsl_process_private *kgsl_process_private_new(void)
 {
 	struct kgsl_process_private *private;
 
@@ -842,18 +943,16 @@ kgsl_find_process_private(struct kgsl_device_private *cur_dev_priv)
 	mutex_lock(&kgsl_driver.process_mutex);
 	list_for_each_entry(private, &kgsl_driver.process_list, list) {
 		if (private->pid == task_tgid_nr(current)) {
-			kref_get(&private->refcount);
+			if (!kgsl_process_private_get(private))
+				private = NULL;
 			goto done;
 		}
 	}
 
 	/* no existing process private found for this dev_priv, create one */
 	private = kzalloc(sizeof(struct kgsl_process_private), GFP_KERNEL);
-	if (private == NULL) {
-		KGSL_DRV_ERR(cur_dev_priv->device, "kzalloc(%d) failed\n",
-			sizeof(struct kgsl_process_private));
+	if (private == NULL)
 		goto done;
-	}
 
 	kref_init(&private->refcount);
 
@@ -875,11 +974,11 @@ done:
  * NULL if pagetable creation for this process private obj failed.
  */
 static struct kgsl_process_private *
-kgsl_get_process_private(struct kgsl_device_private *cur_dev_priv)
+kgsl_get_process_private(struct kgsl_device *device)
 {
 	struct kgsl_process_private *private;
 
-	private = kgsl_find_process_private(cur_dev_priv);
+	private = kgsl_process_private_new();
 
 	if (!private)
 		return NULL;
@@ -894,15 +993,15 @@ kgsl_get_process_private(struct kgsl_device_private *cur_dev_priv)
 
 	if ((!private->pagetable) && kgsl_mmu_enabled()) {
 		unsigned long pt_name;
-		struct kgsl_mmu *mmu = &cur_dev_priv->device->mmu;
 
 		pt_name = task_tgid_nr(current);
-		private->pagetable = kgsl_mmu_getpagetable(mmu, pt_name);
+		private->pagetable =
+			kgsl_mmu_getpagetable(&device->mmu, pt_name);
 		if (private->pagetable == NULL)
 			goto error;
 	}
 
-	if (kgsl_process_init_sysfs(cur_dev_priv->device, private))
+	if (kgsl_process_init_sysfs(device, private))
 		goto error;
 	if (kgsl_process_init_debugfs(private))
 		goto error;
@@ -915,7 +1014,7 @@ done:
 
 error:
 	mutex_unlock(&private->process_private_mutex);
-	kgsl_put_process_private(cur_dev_priv->device, private);
+	kgsl_process_private_put(private);
 	return NULL;
 }
 
@@ -1009,7 +1108,7 @@ static int kgsl_release(struct inode *inodep, struct file *filep)
 
 	kfree(dev_priv);
 
-	kgsl_put_process_private(device, private);
+	kgsl_process_private_put(private);
 
 	pm_runtime_put(device->parentdev);
 	return result;
@@ -1099,7 +1198,7 @@ static int kgsl_open(struct inode *inodep, struct file *filep)
 	 * after the first start so that the global pagetable mappings
 	 * are set up before we create the per-process pagetable.
 	 */
-	dev_priv->process_priv = kgsl_get_process_private(dev_priv);
+	dev_priv->process_priv = kgsl_get_process_private(device);
 	if (dev_priv->process_priv ==  NULL) {
 		result = -ENOMEM;
 		goto err_stop;
@@ -1406,7 +1505,6 @@ static long _device_waittimestamp(struct kgsl_device_private *dev_priv,
 				      kgsl_readtimestamp(device, context,
 							KGSL_TIMESTAMP_RETIRED),
 				      result);
-
 	return result;
 }
 
@@ -1415,9 +1513,14 @@ static long kgsl_ioctl_device_waittimestamp(struct kgsl_device_private
 						void *data)
 {
 	struct kgsl_device_waittimestamp *param = data;
+	struct kgsl_device *device = dev_priv->device;
+	long result = -EINVAL;
 
-	return _device_waittimestamp(dev_priv, NULL,
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
+	result = _device_waittimestamp(dev_priv, NULL,
 			param->timestamp, param->timeout);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
+	return result;
 }
 
 static long kgsl_ioctl_device_waittimestamp_ctxtid(struct kgsl_device_private
@@ -1426,8 +1529,10 @@ static long kgsl_ioctl_device_waittimestamp_ctxtid(struct kgsl_device_private
 {
 	struct kgsl_device_waittimestamp_ctxtid *param = data;
 	struct kgsl_context *context;
+	struct kgsl_device *device = dev_priv->device;
 	long result = -EINVAL;
 
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 	context = kgsl_context_get_owner(dev_priv, param->context_id);
 
 	if (context)
@@ -1435,6 +1540,7 @@ static long kgsl_ioctl_device_waittimestamp_ctxtid(struct kgsl_device_private
 			param->timestamp, param->timeout);
 
 	kgsl_context_put(context);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 	return result;
 }
 
@@ -1474,6 +1580,90 @@ struct kgsl_cmdbatch_sync_event {
 	struct kgsl_device *device;
 	struct kref refcount;
 };
+
+void kgsl_dump_syncpoints(struct kgsl_device *device,
+	struct kgsl_cmdbatch *cmdbatch)
+{
+	struct kgsl_cmdbatch_sync_event *event;
+
+	/* Print all the pending sync objects */
+	list_for_each_entry(event, &cmdbatch->synclist, node) {
+
+		switch (event->type) {
+		case KGSL_CMD_SYNCPOINT_TYPE_TIMESTAMP: {
+			unsigned int retired;
+
+			 retired = kgsl_readtimestamp(event->device,
+				event->context, KGSL_TIMESTAMP_RETIRED);
+
+			dev_err(device->dev,
+				"  [timestamp] context %d timestamp %d (retired %d)\n",
+				event->context->id, event->timestamp,
+				retired);
+			break;
+		}
+		case KGSL_CMD_SYNCPOINT_TYPE_FENCE:
+			if (event->handle)
+				dev_err(device->dev, "  fence: [%p] %s\n",
+					event->handle->fence,
+					event->handle->name);
+			else
+				dev_err(device->dev, "  fence: invalid\n");
+			break;
+		}
+	}
+}
+
+static void _kgsl_cmdbatch_timer(unsigned long data)
+{
+	struct kgsl_device *device;
+	struct kgsl_cmdbatch *cmdbatch = (struct kgsl_cmdbatch *) data;
+	struct kgsl_cmdbatch_sync_event *event;
+
+	if (cmdbatch == NULL || cmdbatch->context == NULL)
+		return;
+
+	spin_lock(&cmdbatch->lock);
+	if (list_empty(&cmdbatch->synclist))
+		goto done;
+
+	device = cmdbatch->context->device;
+
+	dev_err(device->dev,
+		"kgsl: possible gpu syncpoint deadlock for context %d timestamp %d\n",
+		cmdbatch->context->id, cmdbatch->timestamp);
+	dev_err(device->dev, " Active sync points:\n");
+
+	/* Print all the pending sync objects */
+	list_for_each_entry(event, &cmdbatch->synclist, node) {
+		switch (event->type) {
+		case KGSL_CMD_SYNCPOINT_TYPE_TIMESTAMP: {
+			unsigned int retired;
+
+			retired = kgsl_readtimestamp(event->device,
+				event->context, KGSL_TIMESTAMP_RETIRED);
+
+			dev_err(device->dev,
+				"  [timestamp] context %d timestamp %d (retired %d)\n",
+				event->context->id, event->timestamp, retired);
+			break;
+		}
+		case KGSL_CMD_SYNCPOINT_TYPE_FENCE:
+			if (event->handle && event->handle->fence) {
+				set_bit(CMDBATCH_FLAG_FENCE_LOG,
+					&cmdbatch->priv);
+				kgsl_sync_fence_log(event->handle->fence);
+				clear_bit(CMDBATCH_FLAG_FENCE_LOG,
+					&cmdbatch->priv);
+			} else
+				dev_err(device->dev, "  fence: invalid\n");
+			break;
+		}
+	}
+
+done:
+	spin_unlock(&cmdbatch->lock);
+}
 
 /**
  * kgsl_cmdbatch_sync_event_destroy() - Destroy a sync event object
@@ -1549,6 +1739,10 @@ static void kgsl_cmdbatch_sync_expire(struct kgsl_device *device,
 	sched = list_empty(&event->cmdbatch->synclist) ? 1 : 0;
 	spin_unlock(&event->cmdbatch->lock);
 
+	/* If the list is empty delete the canary timer */
+	if (sched)
+		del_timer_sync(&event->cmdbatch->timer);
+
 	/*
 	 * if this is the last event in the list then tell
 	 * the GPU device that the cmdbatch can be submitted
@@ -1572,6 +1766,9 @@ static void kgsl_cmdbatch_sync_func(struct kgsl_device *device, void *priv,
 {
 	struct kgsl_cmdbatch_sync_event *event = priv;
 
+	trace_syncpoint_timestamp_expire(event->cmdbatch,
+		event->context, event->timestamp);
+
 	kgsl_cmdbatch_sync_expire(device, event);
 	kgsl_context_put(event->context);
 	/* Put events that have signaled */
@@ -1591,10 +1788,12 @@ void kgsl_cmdbatch_destroy(struct kgsl_cmdbatch *cmdbatch)
 	struct kgsl_cmdbatch_sync_event *event, *tmp;
 	LIST_HEAD(cancel_synclist);
 
-	/*
-	 * Empty the synclist before canceling events
-	 */
+	/* Zap the canary timer */
+	del_timer_sync(&cmdbatch->timer);
+
 	spin_lock(&cmdbatch->lock);
+
+	/* Empty the synclist before canceling events */
 	list_splice_init(&cmdbatch->synclist, &cancel_synclist);
 	spin_unlock(&cmdbatch->lock);
 
@@ -1636,6 +1835,9 @@ EXPORT_SYMBOL(kgsl_cmdbatch_destroy);
 static void kgsl_cmdbatch_sync_fence_func(void *priv)
 {
 	struct kgsl_cmdbatch_sync_event *event = priv;
+
+	trace_syncpoint_fence_expire(event->cmdbatch,
+		event->handle ? event->handle->name : "unknown");
 
 	kgsl_cmdbatch_sync_expire(event->device, event);
 	/* Put events that have signaled */
@@ -1695,9 +1897,10 @@ static int kgsl_cmdbatch_add_sync_fence(struct kgsl_device *device,
 	event->handle = kgsl_sync_fence_async_wait(sync->fd,
 		kgsl_cmdbatch_sync_fence_func, event);
 
-
 	if (IS_ERR_OR_NULL(event->handle)) {
 		int ret = PTR_ERR(event->handle);
+
+		event->handle = NULL;
 
 		/* Failed to add the event to the async callback */
 		kgsl_cmdbatch_sync_event_put(event);
@@ -1711,8 +1914,17 @@ static int kgsl_cmdbatch_add_sync_fence(struct kgsl_device *device,
 		/* Event no longer needed by this function */
 		kgsl_cmdbatch_sync_event_put(event);
 
+		/*
+		 * If ret == 0 the fence was already signaled - print a trace
+		 * message so we can track that
+		 */
+		if (ret == 0)
+			trace_syncpoint_fence_expire(cmdbatch, "signaled");
+
 		return ret;
 	}
+
+	trace_syncpoint_fence(cmdbatch, event->handle->name);
 
 	/*
 	 * Event was successfully added to the synclist, the async
@@ -1773,6 +1985,7 @@ static int kgsl_cmdbatch_add_sync_timestamp(struct kgsl_device *device,
 	event->cmdbatch = cmdbatch;
 	event->context = context;
 	event->timestamp = sync->timestamp;
+	event->device = device;
 
 	/*
 	 * Two krefs are required to support events. The first kref is for
@@ -1801,6 +2014,8 @@ static int kgsl_cmdbatch_add_sync_timestamp(struct kgsl_device *device,
 
 		kgsl_cmdbatch_put(cmdbatch);
 		kfree(event);
+	} else {
+		trace_syncpoint_timestamp(cmdbatch, context, sync->timestamp);
 	}
 
 done:
@@ -1907,6 +2122,10 @@ static struct kgsl_cmdbatch *kgsl_cmdbatch_create(struct kgsl_device *device,
 	cmdbatch->ibcount = (flags & KGSL_CONTEXT_SYNC) ? 0 : numibs;
 	cmdbatch->context = context;
 	cmdbatch->flags = flags & ~KGSL_CONTEXT_SUBMIT_IB_LIST;
+
+	/* Add a timer to help debug sync deadlocks */
+	setup_timer(&cmdbatch->timer, _kgsl_cmdbatch_timer,
+		(unsigned long) cmdbatch);
 
 	return cmdbatch;
 }
@@ -2092,8 +2311,11 @@ free_cmdbatch:
 	 * -EPROTO is a "success" error - it just tells the user that the
 	 * context had previously faulted
 	 */
-	if (result && result != -EPROTO)
+	if (result && result != -EPROTO) {
+		kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 		kgsl_cmdbatch_destroy(cmdbatch);
+		kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
+	}
 
 done:
 	kgsl_context_put(context);
@@ -2144,8 +2366,11 @@ free_cmdbatch:
 	 * -EPROTO is a "success" error - it just tells the user that the
 	 * context had previously faulted
 	 */
-	if (result && result != -EPROTO)
+	if (result && result != -EPROTO) {
+		kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 		kgsl_cmdbatch_destroy(cmdbatch);
+		kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
+	}
 
 done:
 	kgsl_context_put(context);
@@ -2170,9 +2395,14 @@ static long kgsl_ioctl_cmdstream_readtimestamp(struct kgsl_device_private
 						void *data)
 {
 	struct kgsl_cmdstream_readtimestamp *param = data;
+	struct kgsl_device *device = dev_priv->device;
+	long result = -EINVAL;
 
-	return _cmdstream_readtimestamp(dev_priv, NULL,
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
+	result = _cmdstream_readtimestamp(dev_priv, NULL,
 			param->type, &param->timestamp);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
+	return result;
 }
 
 static long kgsl_ioctl_cmdstream_readtimestamp_ctxtid(struct kgsl_device_private
@@ -2180,9 +2410,11 @@ static long kgsl_ioctl_cmdstream_readtimestamp_ctxtid(struct kgsl_device_private
 						void *data)
 {
 	struct kgsl_cmdstream_readtimestamp_ctxtid *param = data;
+	struct kgsl_device *device = dev_priv->device;
 	struct kgsl_context *context;
 	long result = -EINVAL;
 
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 	context = kgsl_context_get_owner(dev_priv, param->context_id);
 
 	if (context)
@@ -2190,6 +2422,7 @@ static long kgsl_ioctl_cmdstream_readtimestamp_ctxtid(struct kgsl_device_private
 			param->type, &param->timestamp);
 
 	kgsl_context_put(context);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 	return result;
 }
 
@@ -2241,9 +2474,14 @@ static long kgsl_ioctl_cmdstream_freememontimestamp(struct kgsl_device_private
 						    void *data)
 {
 	struct kgsl_cmdstream_freememontimestamp *param = data;
+	struct kgsl_device *device = dev_priv->device;
+	long result = -EINVAL;
 
-	return _cmdstream_freememontimestamp(dev_priv, param->gpuaddr,
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
+	result = _cmdstream_freememontimestamp(dev_priv, param->gpuaddr,
 			NULL, param->timestamp, param->type);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
+	return result;
 }
 
 static long kgsl_ioctl_cmdstream_freememontimestamp_ctxtid(
@@ -2253,13 +2491,16 @@ static long kgsl_ioctl_cmdstream_freememontimestamp_ctxtid(
 {
 	struct kgsl_cmdstream_freememontimestamp_ctxtid *param = data;
 	struct kgsl_context *context;
+	struct kgsl_device *device = dev_priv->device;
 	long result = -EINVAL;
 
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 	context = kgsl_context_get_owner(dev_priv, param->context_id);
 	if (context)
 		result = _cmdstream_freememontimestamp(dev_priv, param->gpuaddr,
 			context, param->timestamp, param->type);
 	kgsl_context_put(context);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 	return result;
 }
 
@@ -2271,6 +2512,7 @@ static long kgsl_ioctl_drawctxt_create(struct kgsl_device_private *dev_priv,
 	struct kgsl_context *context = NULL;
 	struct kgsl_device *device = dev_priv->device;
 
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 	context = device->ftbl->drawctxt_create(dev_priv, &param->flags);
 	if (IS_ERR(context)) {
 		result = PTR_ERR(context);
@@ -2279,6 +2521,7 @@ static long kgsl_ioctl_drawctxt_create(struct kgsl_device_private *dev_priv,
 	trace_kgsl_context_create(dev_priv->device, context, param->flags);
 	param->drawctxt_id = context->id;
 done:
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 	return result;
 }
 
@@ -2286,18 +2529,44 @@ static long kgsl_ioctl_drawctxt_destroy(struct kgsl_device_private *dev_priv,
 					unsigned int cmd, void *data)
 {
 	struct kgsl_drawctxt_destroy *param = data;
+	struct kgsl_device *device = dev_priv->device;
 	struct kgsl_context *context;
 	long result;
 
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 	context = kgsl_context_get_owner(dev_priv, param->drawctxt_id);
 
 	result = kgsl_context_detach(context);
 
 	kgsl_context_put(context);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 	return result;
 }
 
-static long kgsl_ioctl_sharedmem_free(struct kgsl_device_private *dev_priv,
+static long _sharedmem_free_entry(struct kgsl_mem_entry *entry)
+{
+	if (!kgsl_mem_entry_set_pend(entry)) {
+		kgsl_mem_entry_put(entry);
+		return -EBUSY;
+	}
+
+	trace_kgsl_mem_free(entry);
+
+	kgsl_memfree_add(entry->priv->pid, entry->memdesc.gpuaddr,
+		entry->memdesc.size, entry->memdesc.flags);
+
+	/*
+	 * First kgsl_mem_entry_put is for the reference that we took in
+	 * this function when calling kgsl_sharedmem_find, second one is
+	 * to free the memory since this is a free ioctl
+	 */
+	kgsl_mem_entry_put(entry);
+	kgsl_mem_entry_put(entry);
+
+	return 0;
+}
+
+long kgsl_ioctl_sharedmem_free(struct kgsl_device_private *dev_priv,
 					unsigned int cmd, void *data)
 {
 	struct kgsl_sharedmem_free *param = data;
@@ -2310,29 +2579,11 @@ static long kgsl_ioctl_sharedmem_free(struct kgsl_device_private *dev_priv,
 				param->gpuaddr);
 		return -EINVAL;
 	}
-	if (!kgsl_mem_entry_set_pend(entry)) {
-		kgsl_mem_entry_put(entry);
-		return -EBUSY;
-	}
 
-	trace_kgsl_mem_free(entry);
-
-	kgsl_memfree_hist_set_event(entry->priv->pid,
-				    entry->memdesc.gpuaddr,
-				    entry->memdesc.size,
-				    entry->memdesc.flags);
-
-	/*
-	 * First kgsl_mem_entry_put is for the reference that we took in
-	 * this function when calling kgsl_sharedmem_find, second one is
-	 * to free the memory since this is a free ioctl
-	 */
-	kgsl_mem_entry_put(entry);
-	kgsl_mem_entry_put(entry);
-	return 0;
+	return _sharedmem_free_entry(entry);
 }
 
-static long kgsl_ioctl_gpumem_free_id(struct kgsl_device_private *dev_priv,
+long kgsl_ioctl_gpumem_free_id(struct kgsl_device_private *dev_priv,
 					unsigned int cmd, void *data)
 {
 	struct kgsl_gpumem_free_id *param = data;
@@ -2346,26 +2597,7 @@ static long kgsl_ioctl_gpumem_free_id(struct kgsl_device_private *dev_priv,
 		return -EINVAL;
 	}
 
-	if (!kgsl_mem_entry_set_pend(entry)) {
-		kgsl_mem_entry_put(entry);
-		return -EBUSY;
-	}
-
-	trace_kgsl_mem_free(entry);
-
-	kgsl_memfree_hist_set_event(entry->priv->pid,
-				    entry->memdesc.gpuaddr,
-				    entry->memdesc.size,
-				    entry->memdesc.flags);
-
-	/*
-	 * First kgsl_mem_entry_put is for the reference that we took in
-	 * this function when calling kgsl_sharedmem_find_id, second one is
-	 * to free the memory since this is a free ioctl
-	 */
-	kgsl_mem_entry_put(entry);
-	kgsl_mem_entry_put(entry);
-	return 0;
+	return _sharedmem_free_entry(entry);
 }
 
 static struct vm_area_struct *kgsl_get_vma_from_start_addr(unsigned int addr)
@@ -3060,6 +3292,9 @@ kgsl_ioctl_sharedmem_flush_cache(struct kgsl_device_private *dev_priv,
 	return ret;
 }
 
+/* The largest allowable alignment for a GPU object is 32MB */
+#define KGSL_MAX_ALIGN (32 * SZ_1M)
+
 /*
  * The common parts of kgsl_ioctl_gpumem_alloc and kgsl_ioctl_gpumem_alloc_id.
  */
@@ -3086,11 +3321,13 @@ _gpumem_alloc(struct kgsl_device_private *dev_priv,
 	/* Cap the alignment bits to the highest number we can handle */
 
 	align = (flags & KGSL_MEMALIGN_MASK) >> KGSL_MEMALIGN_SHIFT;
-	if (align >= 32) {
-		KGSL_CORE_ERR("Alignment too big, restricting to 2^31\n");
+	if (align >= ilog2(KGSL_MAX_ALIGN)) {
+		KGSL_CORE_ERR("Alignment too large; restricting to %dK\n",
+			KGSL_MAX_ALIGN >> 10);
 
 		flags &= ~KGSL_MEMALIGN_MASK;
-		flags |= (31 << KGSL_MEMALIGN_SHIFT) & KGSL_MEMALIGN_MASK;
+		flags |= (ilog2(KGSL_MAX_ALIGN) << KGSL_MEMALIGN_SHIFT) &
+			KGSL_MEMALIGN_MASK;
 	}
 
 	entry = kgsl_mem_entry_create();
@@ -3376,78 +3613,65 @@ static long kgsl_ioctl_timestamp_event(struct kgsl_device_private *dev_priv,
 typedef long (*kgsl_ioctl_func_t)(struct kgsl_device_private *,
 	unsigned int, void *);
 
-#define KGSL_IOCTL_FUNC(_cmd, _func, _flags) \
+#define KGSL_IOCTL_FUNC(_cmd, _func) \
 	[_IOC_NR((_cmd))] = \
-		{ .cmd = (_cmd), .func = (_func), .flags = (_flags) }
+		{ .cmd = (_cmd), .func = (_func) }
 
-#define KGSL_IOCTL_LOCK		BIT(0)
 
 static const struct {
 	unsigned int cmd;
 	kgsl_ioctl_func_t func;
-	unsigned int flags;
 } kgsl_ioctl_funcs[] = {
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_DEVICE_GETPROPERTY,
-			kgsl_ioctl_device_getproperty,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_device_getproperty),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_DEVICE_WAITTIMESTAMP,
-			kgsl_ioctl_device_waittimestamp,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_device_waittimestamp),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID,
-			kgsl_ioctl_device_waittimestamp_ctxtid,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_device_waittimestamp_ctxtid),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_RINGBUFFER_ISSUEIBCMDS,
-			kgsl_ioctl_rb_issueibcmds, 0),
+			kgsl_ioctl_rb_issueibcmds),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_SUBMIT_COMMANDS,
-			kgsl_ioctl_submit_commands, 0),
+			kgsl_ioctl_submit_commands),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_CMDSTREAM_READTIMESTAMP,
-			kgsl_ioctl_cmdstream_readtimestamp,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_cmdstream_readtimestamp),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID,
-			kgsl_ioctl_cmdstream_readtimestamp_ctxtid,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_cmdstream_readtimestamp_ctxtid),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP,
-			kgsl_ioctl_cmdstream_freememontimestamp,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_cmdstream_freememontimestamp),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_CMDSTREAM_FREEMEMONTIMESTAMP_CTXTID,
-			kgsl_ioctl_cmdstream_freememontimestamp_ctxtid,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_cmdstream_freememontimestamp_ctxtid),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_DRAWCTXT_CREATE,
-			kgsl_ioctl_drawctxt_create,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_drawctxt_create),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_DRAWCTXT_DESTROY,
-			kgsl_ioctl_drawctxt_destroy,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_drawctxt_destroy),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_MAP_USER_MEM,
-			kgsl_ioctl_map_user_mem, 0),
+			kgsl_ioctl_map_user_mem),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_SHAREDMEM_FROM_PMEM,
-			kgsl_ioctl_map_user_mem, 0),
+			kgsl_ioctl_map_user_mem),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_SHAREDMEM_FREE,
-			kgsl_ioctl_sharedmem_free, 0),
+			kgsl_ioctl_sharedmem_free),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_SHAREDMEM_FLUSH_CACHE,
-			kgsl_ioctl_sharedmem_flush_cache, 0),
+			kgsl_ioctl_sharedmem_flush_cache),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_GPUMEM_ALLOC,
-			kgsl_ioctl_gpumem_alloc, 0),
+			kgsl_ioctl_gpumem_alloc),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_CFF_SYNCMEM,
-			kgsl_ioctl_cff_syncmem, 0),
+			kgsl_ioctl_cff_syncmem),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_CFF_USER_EVENT,
-			kgsl_ioctl_cff_user_event, 0),
+			kgsl_ioctl_cff_user_event),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_TIMESTAMP_EVENT,
-			kgsl_ioctl_timestamp_event,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_timestamp_event),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_SETPROPERTY,
-			kgsl_ioctl_device_setproperty,
-			KGSL_IOCTL_LOCK),
+			kgsl_ioctl_device_setproperty),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_GPUMEM_ALLOC_ID,
-			kgsl_ioctl_gpumem_alloc_id, 0),
+			kgsl_ioctl_gpumem_alloc_id),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_GPUMEM_FREE_ID,
-			kgsl_ioctl_gpumem_free_id, 0),
+			kgsl_ioctl_gpumem_free_id),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_GPUMEM_GET_INFO,
-			kgsl_ioctl_gpumem_get_info, 0),
+			kgsl_ioctl_gpumem_get_info),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_GPUMEM_SYNC_CACHE,
-			kgsl_ioctl_gpumem_sync_cache, 0),
+			kgsl_ioctl_gpumem_sync_cache),
 	KGSL_IOCTL_FUNC(IOCTL_KGSL_GPUMEM_SYNC_CACHE_BULK,
-			kgsl_ioctl_gpumem_sync_cache_bulk, 0),
+			kgsl_ioctl_gpumem_sync_cache_bulk),
 };
 
 static long kgsl_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
@@ -3455,7 +3679,7 @@ static long kgsl_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	struct kgsl_device_private *dev_priv = filep->private_data;
 	unsigned int nr;
 	kgsl_ioctl_func_t func;
-	int lock, ret;
+	int ret;
 	char ustack[64];
 	void *uptr = NULL;
 
@@ -3512,7 +3736,6 @@ static long kgsl_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		}
 
 		func = kgsl_ioctl_funcs[nr].func;
-		lock = kgsl_ioctl_funcs[nr].flags & KGSL_IOCTL_LOCK;
 	} else {
 		func = dev_priv->device->ftbl->ioctl;
 		if (!func) {
@@ -3521,18 +3744,9 @@ static long kgsl_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 			ret = -ENOIOCTLCMD;
 			goto done;
 		}
-		lock = 1;
 	}
 
-	if (lock)
-		kgsl_mutex_lock(&dev_priv->device->mutex,
-			&dev_priv->device->mutex_owner);
-
 	ret = func(dev_priv, cmd, uptr);
-
-	if (lock)
-		kgsl_mutex_unlock(&dev_priv->device->mutex,
-			&dev_priv->device->mutex_owner);
 
 	/*
 	 * Still copy back on failure, but assume function took
@@ -3893,8 +4107,6 @@ struct kgsl_driver kgsl_driver  = {
 	.process_mutex = __MUTEX_INITIALIZER(kgsl_driver.process_mutex),
 	.ptlock = __SPIN_LOCK_UNLOCKED(kgsl_driver.ptlock),
 	.devlock = __MUTEX_INITIALIZER(kgsl_driver.devlock),
-	.memfree_hist_mutex =
-		__MUTEX_INITIALIZER(kgsl_driver.memfree_hist_mutex),
 	/*
 	 * Full cache flushes are faster than line by line on at least
 	 * 8064 and 8974 once the region to be flushed is > 16mb.
@@ -4238,7 +4450,7 @@ static void kgsl_core_exit(void)
 		kgsl_driver.class = NULL;
 	}
 
-	kgsl_memfree_hist_exit();
+	kgsl_memfree_exit();
 	unregister_chrdev_region(kgsl_driver.major, KGSL_DEVICE_MAX);
 }
 
@@ -4310,8 +4522,7 @@ static int __init kgsl_core_init(void)
 			goto err;
 	}
 
-	if (kgsl_memfree_hist_init())
-		KGSL_CORE_ERR("failed to init memfree_hist");
+	kgsl_memfree_init();
 
 	return 0;
 

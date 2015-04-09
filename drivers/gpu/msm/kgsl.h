@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -75,24 +75,7 @@
 #define KGSL_STATS_ADD(_size, _stat, _max) \
 	do { _stat += (_size); if (_stat > _max) _max = _stat; } while (0)
 
-
-#define KGSL_MEMFREE_HIST_SIZE	((int)(PAGE_SIZE * 2))
-
 #define KGSL_MAX_NUMIBS 100000
-
-struct kgsl_memfree_hist_elem {
-	unsigned int pid;
-	unsigned int gpuaddr;
-	unsigned int size;
-	unsigned int flags;
-};
-
-struct kgsl_memfree_hist {
-	void *base_hist_rb;
-	unsigned int size;
-	struct kgsl_memfree_hist_elem *wptr;
-};
-
 
 struct kgsl_device;
 struct kgsl_context;
@@ -122,9 +105,6 @@ struct kgsl_driver {
 
 	void *ptpool;
 
-	struct mutex memfree_hist_mutex;
-	struct kgsl_memfree_hist memfree_hist;
-
 	struct {
 		unsigned int vmalloc;
 		unsigned int vmalloc_max;
@@ -150,7 +130,8 @@ struct kgsl_memdesc_ops {
 	int (*vmfault)(struct kgsl_memdesc *, struct vm_area_struct *,
 		       struct vm_fault *);
 	void (*free)(struct kgsl_memdesc *memdesc);
-	int (*map_kernel_mem)(struct kgsl_memdesc *);
+	int (*map_kernel)(struct kgsl_memdesc *);
+	void (*unmap_kernel)(struct kgsl_memdesc *);
 };
 
 /* Internal definitions for memdesc->priv */
@@ -166,6 +147,7 @@ struct kgsl_memdesc_ops {
 struct kgsl_memdesc {
 	struct kgsl_pagetable *pagetable;
 	void *hostptr; /* kernel virtual address */
+	unsigned int hostptr_count; /* number of threads using hostptr */
 	unsigned long useraddr; /* userspace address */
 	unsigned int gpuaddr;
 	phys_addr_t physaddr;
@@ -282,13 +264,17 @@ static inline int kgsl_gpuaddr_in_memdesc(const struct kgsl_memdesc *memdesc,
 
 static inline void *kgsl_memdesc_map(struct kgsl_memdesc *memdesc)
 {
-	if (memdesc->hostptr == NULL && memdesc->ops &&
-		memdesc->ops->map_kernel_mem)
-		memdesc->ops->map_kernel_mem(memdesc);
+	if (memdesc->ops && memdesc->ops->map_kernel)
+		memdesc->ops->map_kernel(memdesc);
 
 	return memdesc->hostptr;
 }
 
+static inline void kgsl_memdesc_unmap(struct kgsl_memdesc *memdesc)
+{
+	if (memdesc->ops && memdesc->ops->unmap_kernel)
+		memdesc->ops->unmap_kernel(memdesc);
+}
 static inline uint8_t *kgsl_gpuaddr_to_vaddr(struct kgsl_memdesc *memdesc,
 					     unsigned int gpuaddr)
 {
