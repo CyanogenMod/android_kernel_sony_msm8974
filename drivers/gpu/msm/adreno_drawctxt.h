@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2007-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -130,16 +130,18 @@ extern const struct adreno_context_ops adreno_preamble_ctx_ops;
  * @waiting: Workqueue structure for contexts waiting for a timestamp or event
  * @queued: Number of commands queued in the cmdqueue
  * @ops: Context switch functions for this context.
+ * @fault_policy: GFT fault policy set in cmdbatch_skip_cmd();
+ * @queued_timestamp: The last timestamp that was queued on this context
+ * @submitted_timestamp: The last timestamp that was submitted for this context
  */
 struct adreno_context {
 	struct kgsl_context base;
-	unsigned int ib_gpu_time_used;
 	unsigned int timestamp;
 	unsigned int internal_timestamp;
 	int state;
 	unsigned long priv;
 	unsigned int type;
-	struct mutex mutex;
+	spinlock_t lock;
 	struct kgsl_memdesc gpustate;
 	unsigned int reg_restore[3];
 	unsigned int shader_save[3];
@@ -178,6 +180,9 @@ struct adreno_context {
 	int queued;
 
 	const struct adreno_context_ops *ops;
+	unsigned int fault_policy;
+	unsigned int queued_timestamp;
+	unsigned int submitted_timestamp;
 };
 
 /**
@@ -193,6 +198,8 @@ struct adreno_context {
  * @ADRENO_CONTEXT_SKIP_EOF - Context skip IBs until the next end of frame
  *      marker.
  * @ADRENO_CONTEXT_FORCE_PREAMBLE - Force the preamble for the next submission.
+ * @ADRENO_CONTEXT_SKIP_CMD - Context's command batch is skipped during
+	fault tolerance.
  */
 enum adreno_context_priv {
 	ADRENO_CONTEXT_FAULT = 0,
@@ -204,6 +211,7 @@ enum adreno_context_priv {
 	ADRENO_CONTEXT_GPU_HANG_FT,
 	ADRENO_CONTEXT_SKIP_EOF,
 	ADRENO_CONTEXT_FORCE_PREAMBLE,
+	ADRENO_CONTEXT_SKIP_CMD,
 };
 
 struct kgsl_context *adreno_drawctxt_create(struct kgsl_device_private *,
@@ -283,5 +291,8 @@ static inline void calc_gmemsize(struct gmem_shadow_t *shadow, int gmem_size)
 	shadow->gmem_pitch = shadow->pitch;
 	shadow->size = shadow->pitch * shadow->height * 4;
 }
+
+void adreno_drawctxt_dump(struct kgsl_device *device,
+		struct kgsl_context *context);
 
 #endif  /* __ADRENO_DRAWCTXT_H */
