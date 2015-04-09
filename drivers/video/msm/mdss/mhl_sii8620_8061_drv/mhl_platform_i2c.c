@@ -62,9 +62,6 @@ static void print_formatted_debug_msg(int level,
 						 int line_num,
 						 char *fmt, ...)
 {
-#ifdef UNIT_TEST
-	/* nothing to do. */
-#else
 	uint8_t		*msg = NULL;
 	uint8_t		*msg_offset;
 	char		*file_spec_sep = NULL;
@@ -142,16 +139,12 @@ static void print_formatted_debug_msg(int level,
 	printk(msg);
 
 	kfree(msg);
-#endif
 }
 
 static void dump_transfer(void *context, enum tx_interface_types if_type,
 					 u8 page, u8 offset,
 					 u16 count, u8 *values, bool write)
 {
-#ifdef UNIT_TEST
-	/* nothing to do. */
-#else
 	int		buf_size = 64;
 	u16		idx;
 	int		buf_offset;
@@ -211,7 +204,6 @@ static void dump_transfer(void *context, enum tx_interface_types if_type,
 
 	print_formatted_debug_msg(0, NULL, NULL, -1, buf);
 	kfree(buf);
-#endif
 }
 
 int mhl_pf_modify_reg(u16 address,
