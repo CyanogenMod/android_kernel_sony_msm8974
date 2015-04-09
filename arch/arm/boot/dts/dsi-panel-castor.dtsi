@@ -57,6 +57,7 @@
 		qcom,mdss-dsi-pan-enable-dynamic-fps;
 		qcom,mdss-dsi-pan-fps-update = "dfps_suspend_resume_mode";
 		qcom,cont-splash-enabled;
+		qcom,mdss-dsi-tx-eot-append;
 
 		somc,driver-ic = <3>;
 		somc,dric-gpio = <&msmgpio 26 0>;
@@ -120,6 +121,7 @@
 		qcom,mdss-dsi-pan-enable-dynamic-fps;
 		qcom,mdss-dsi-pan-fps-update = "dfps_suspend_resume_mode";
 		qcom,cont-splash-enabled;
+		qcom,mdss-dsi-tx-eot-append;
 
 		somc,driver-ic = <3>;
 		somc,dric-gpio = <&msmgpio 26 0>;
@@ -186,6 +188,7 @@
 		qcom,mdss-dsi-pan-enable-dynamic-fps;
 		qcom,mdss-dsi-pan-fps-update = "dfps_suspend_resume_mode";
 		qcom,cont-splash-enabled;
+		qcom,mdss-dsi-tx-eot-append;
 
 		somc,driver-ic = <3>;
 		somc,dric-gpio = <&msmgpio 26 0>;
@@ -249,6 +252,7 @@
 		qcom,mdss-dsi-pan-enable-dynamic-fps;
 		qcom,mdss-dsi-pan-fps-update = "dfps_suspend_resume_mode";
 		qcom,cont-splash-enabled;
+		qcom,mdss-dsi-tx-eot-append;
 
 		somc,driver-ic = <3>;
 		somc,dric-gpio = <&msmgpio 26 0>;
@@ -312,6 +316,7 @@
 		qcom,mdss-dsi-pan-enable-dynamic-fps;
 		qcom,mdss-dsi-pan-fps-update = "dfps_suspend_resume_mode";
 		qcom,cont-splash-enabled;
+		qcom,mdss-dsi-tx-eot-append;
 
 		somc,driver-ic = <3>;
 		somc,dric-gpio = <&msmgpio 26 0>;

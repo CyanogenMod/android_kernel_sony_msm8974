@@ -35,6 +35,7 @@ int mhl_pf_get_gpio_num_int(void);
 int mhl_pf_get_gpio_num_pwr(void);
 int mhl_pf_get_gpio_num_rst(void);
 int mhl_pf_get_gpio_num_fw_wake(void);
+struct i2c_client *mhl_pf_get_i2c_client(void);
 
 /***** mhl_platform_i2c.c *****/
 void mhl_pf_i2c_init(struct i2c_adapter *adapter);

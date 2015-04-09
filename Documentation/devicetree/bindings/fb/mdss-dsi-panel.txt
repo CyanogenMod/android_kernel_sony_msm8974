@@ -172,6 +172,8 @@ Optional properties:
 					horizontal back porch (HBP) blanking period.
 - qcom,mdss-dsi-hsa-power-mode:		Boolean to determine DSI lane state during
 					horizontal sync active (HSA) mode.
+- qcom,mdss-dsi-last-line-interleave	Boolean to determine if last line
+					interleave flag needs to be enabled.
 - qcom,mdss-dsi-bllp-eof-power-mode:	Boolean to determine DSI lane state during
 					blanking low power period (BLLP) EOF mode.
 - qcom,mdss-dsi-bllp-power-mode:	Boolean to determine DSI lane state during
@@ -256,6 +258,72 @@ Optional properties:
 					delay required by panel to reach functional.
 - qcom,mdss-dsi-rx-eot-ignore:		Boolean used to enable ignoring end of transmission packets.
 - qcom,mdss-dsi-tx-eot-append:		Boolean used to enable appending end of transmission packets.
+- qcom,ulps-enabled:			Boolean to enable support for Ultra Low Power State (ULPS) mode.
+- qcom,mdss-tear-check-disable:		Boolean to disable mdp tear check. Tear check is enabled by default to avoid
+					tearing. Other tear-check properties are ignored if this property is present.
+					The below tear check configuration properties can be individually tuned if
+					tear check is enabled.
+- qcom,mdss-tear-check-sync-cfg-height: Specifies the vertical total number of lines.
+					The default value is 0xfff0.
+- qcom,mdss-tear-check-sync-init-val:	Specifies the init value at which the read pointer gets loaded
+					at vsync edge. The reader pointer refers to the line number of
+					panel buffer that is currently being updated.
+					The default value is panel height.
+- qcom,mdss-tear-check-sync-threshold-start:
+					Allows the first ROI line write to an panel when read pointer is
+					between the range of ROI start line and ROI start line plus this
+					setting.
+					The default value is 4.
+- qcom,mdss-tear-check-sync-threshold-continue:
+					The minimum number of lines the write pointer needs to be
+					above the read pointer so that it is safe to write to the panel.
+					(This check is not done for the first ROI line write of an update)
+					The default value is 4.
+- qcom,mdss-tear-check-start-pos:	Specify the y position from which the start_threshold value is
+					added and write is kicked off if the read pointer falls within that
+					region.
+					The default value is panel height.
+- qcom,mdss-tear-check-rd-ptr-trigger-intr:
+					Specify the read pointer value at which an interrupt has to be
+					generated.
+					The default value is panel height + 1.
+- qcom,mdss-tear-check-frame-rate:	Specify the value to be a real frame rate(fps) x 100 factor to tune the
+					timing of TE simulation with more precision.
+					The default value is 6000 with 60 fps.
+- qcom,panel-roi-alignment:		Specifies the panel ROI alignment restrictions on its
+					left, top, width, height alignments and minimum width and
+					height values
+- qcom,dynamic-mode-switch-enabled:		Boolean used to mention whether panel supports
+					dynamic switching from video mode to command mode
+					and vice versa.
+- qcom,video-to-cmd-mode-switch-commands:	List of commands that need to be sent
+					to panel in order to switch from video mode to command mode dynamically.
+					Refer to "qcom,mdss-dsi-on-command" section for adding commands.
+- qcom,cmd-to-video-mode-switch-commands:	List of commands that need to be sent
+					to panel in order to switch from command mode to video mode dynamically.
+					Refer to "qcom,mdss-dsi-on-command" section for adding commands.
+- qcom,esd-check-enabled:		Boolean used to enable ESD recovery feature.
+- qcom,mdss-dsi-panel-status-command:	A byte stream formed by multiple dcs packets based on
+					qcom dsi controller protocol, to read the panel status.
+					This value is used to kick in the ESD recovery.
+					byte 0: dcs data type
+					byte 1: set to indicate this is an individual packet
+						 (no chain)
+					byte 2: virtual channel number
+					byte 3: expect ack from client (dcs read command)
+					byte 4: wait number of specified ms after dcs command
+						 transmitted
+					byte 5, 6: 16 bits length in network byte order
+					byte 7 and beyond: number byte of payload
+- qcom,mdss-dsi-panel-status-command-mode:
+					String that specifies the ctrl state for reading the panel status.
+					"dsi_lp_mode" = DSI low power mode
+					"dsi_hs_mode" = DSI high speed mode
+- qcom,mdss-dsi-panel-status-check-mode:Specifies the panel status check method for ESD recovery.
+					"bta_check" = Uses BTA to check the panel status
+					"reg_read" = Reads panel status register to check the panel status
+- qcom,mdss-dsi-panel-status-value:	Specifies the value of the panel status register when the panel is
+					in good state.
 
 Note, if a given optional qcom,* binding is not present, then the driver will configure
 the default values specified.
@@ -315,6 +383,7 @@ Example:
 		qcom,mdss-dsi-hsa-power-mode;
 		qcom,mdss-dsi-bllp-eof-power-mode;
 		qcom,mdss-dsi-bllp-power-mode;
+		qcom,mdss-dsi-last-line-interleave;
 		qcom,mdss-dsi-traffic-mode = <0>;
 		qcom,mdss-dsi-virtual-channel-id = <0>;
 		qcom,mdss-dsi-color-order = <0>;
@@ -352,5 +421,23 @@ Example:
 		qcom,mdss-dsi-init-delay-us = <100>;
 		mdss-dsi-rx-eot-ignore;
 		mdss-dsi-tx-eot-append;
+		qcom,ulps-enabled;
+		qcom,mdss-tear-check-sync-cfg-height = <0xfff0>;
+		qcom,mdss-tear-check-sync-init-val = <1280>;
+		qcom,mdss-tear-check-sync-threshold-start = <4>;
+		qcom,mdss-tear-check-sync-threshold-continue = <4>;
+		qcom,mdss-tear-check-start-pos = <1280>;
+		qcom,mdss-tear-check-rd-ptr-trigger-intr = <1281>;
+		qcom,mdss-tear-check-frame-rate = <6000>;
+		qcom,panel-roi-alignment = <4 4 2 2 20 20>;
+		qcom,dynamic-mode-switch-enabled;
+		qcom,video-to-cmd-mode-switch-commands = [15 01 00 00 00 00 02 C2 0B
+						15 01 00 00 00 00 02 C2 08];
+		qcom,cmd-to-video-mode-switch-commands = [15 01 00 00 00 00 02 C2 03];
+		qcom,esd-check-enabled;
+		qcom,mdss-dsi-panel-status-command = [06 01 00 01 05 00 02 0A 08];
+		qcom,mdss-dsi-panel-status-command-state = "dsi_lp_mode";
+		qcom,mdss-dsi-panel-status-check-mode = "reg_read";
+		qcom,mdss-dsi-panel-status-value = <0x9c>;
 	};
 };
