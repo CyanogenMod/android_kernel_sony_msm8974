@@ -2,7 +2,7 @@
  *  linux/drivers/mmc/host/sdhci.c - Secure Digital Host Controller Interface driver
  *
  *  Copyright (C) 2005-2008 Pierre Ossman, All Rights Reserved.
- *  Copyright (C) 2013 Sony Mobile Communications AB.
+ *  Copyright (C) 2013 Sony Mobile Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -517,6 +517,9 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 				  struct sdhci_next *next)
 {
 	int sg_count;
+	unsigned long flags;
+
+	spin_lock_irqsave(&host->next_lock, flags);
 
 	if (!next && data->host_cookie &&
 	    data->host_cookie != host->next_data.cookie) {
@@ -538,14 +541,18 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 		host->next_data.sg_count = 0;
 	}
 
-	if (sg_count == 0)
+	if (sg_count == 0) {
+		spin_unlock_irqrestore(&host->next_lock, flags);
 		return -EINVAL;
+	}
 
 	if (next) {
 		next->sg_count = sg_count;
 		data->host_cookie = ++next->cookie < 0 ? 1 : next->cookie;
 	} else
 		host->sg_count = sg_count;
+
+	spin_unlock_irqrestore(&host->next_lock, flags);
 
 	return sg_count;
 }
@@ -3144,6 +3151,7 @@ struct sdhci_host *sdhci_alloc_host(struct device *dev,
 	host->mmc = mmc;
 
 	spin_lock_init(&host->lock);
+	spin_lock_init(&host->next_lock);
 	mutex_init(&host->ios_mutex);
 
 	return host;

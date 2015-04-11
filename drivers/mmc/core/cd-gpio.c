@@ -21,11 +21,11 @@
 struct mmc_cd_gpio {
 	unsigned int gpio;
 	bool status;
-	char label[0];
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 	bool pending_detect;
 	bool suspended;
 #endif
+	char label[0];
 	/* Don't add any fields at the end of this structure as they will
 	 * overwrite the label. */
 };
