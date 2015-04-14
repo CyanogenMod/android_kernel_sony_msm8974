@@ -19,9 +19,10 @@
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/init.h>
-#include <linux/lcd_notify.h>
+#include <linux/pm.h>
+#include <linux/suspend.h>
 
-static struct notifier_block apq_hotplug_lcd_notif;
+static struct notifier_block pm_notifier_block;
 
 static inline void offline_all(void)
 {
@@ -53,21 +54,18 @@ static void __apq_hotplug_resume(void)
 	online_all();
 }
 
-static int __cpuinit apq_hotplug_lcd_notifier_callback(
-					struct notifier_block *this,
-					unsigned long event, void *data)
+int __cpuinit apq_hotplug_pm_notify(struct notifier_block *notify_block,
+					unsigned long mode, void *unused)
 {
-	switch (event) {
-	case LCD_EVENT_ON_END:
-	case LCD_EVENT_OFF_START:
-		break;
-	case LCD_EVENT_ON_START:
-		__apq_hotplug_resume();
-		break;
-	case LCD_EVENT_OFF_END:
+	switch (mode) {
+	case PM_HIBERNATION_PREPARE:
+	case PM_SUSPEND_PREPARE:
 		__apq_hotplug_suspend();
 		break;
-	default:
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+	case PM_POST_RESTORE:
+		__apq_hotplug_resume();
 		break;
 	}
 
@@ -76,17 +74,19 @@ static int __cpuinit apq_hotplug_lcd_notifier_callback(
 
 static int __init apq_hotplug_init(void)
 {
-	apq_hotplug_lcd_notif.notifier_call = apq_hotplug_lcd_notifier_callback;
+	int ret = 0;
+
+	pm_notifier_block.notifier_call = apq_hotplug_pm_notify;
+	register_pm_notifier(&pm_notifier_block);
 
 	pr_info("initialized!\n");
 
-	return 0;
+	return ret;
 }
 
 static void __exit apq_hotplug_exit(void)
 {
-	lcd_unregister_client(&apq_hotplug_lcd_notif);
-	apq_hotplug_lcd_notif.notifier_call = NULL;
+	unregister_pm_notifier(&pm_notifier_block);
 }
 
 late_initcall(apq_hotplug_init);
