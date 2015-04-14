@@ -749,6 +749,12 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		}
 	}
 
+#ifdef CONFIG_MACH_SONY_RHINE
+	/* Allocate buffer for framebuffer[0] as it's needed for bootup logo */
+	if (mfd->index == 0 && !fbi->screen_base)
+		mdss_fb_alloc_fb_ion_memory(mfd, fbi->fix.smem_len);
+#endif
+
 	rc = pm_runtime_set_active(mfd->fbi->dev);
 	if (rc < 0)
 		pr_err("pm_runtime: fail to set active.\n");
@@ -1547,7 +1553,11 @@ static int mdss_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	int rc = 0;
 
+#ifdef CONFIG_MACH_SONY_RHINE
+	if (!info->fix.smem_start || mfd->fb_ion_handle)
+#else
 	if (!info->fix.smem_start && !mfd->fb_ion_handle)
+#endif
 		rc = mdss_fb_fbmem_ion_mmap(info, vma);
 	else
 		rc = mdss_fb_physical_mmap(info, vma);
