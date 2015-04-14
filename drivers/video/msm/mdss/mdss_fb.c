@@ -749,6 +749,12 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		}
 	}
 
+#ifndef CONFIG_MACH_SONY_SHINANO
+	/* Allocate buffer for framebuffer[0] as it's needed for bootup logo */
+	if (mfd->index == 0 && !fbi->screen_base)
+		mdss_fb_alloc_fb_ion_memory(mfd, fbi->fix.smem_len);
+#endif
+
 	rc = pm_runtime_set_active(mfd->fbi->dev);
 	if (rc < 0)
 		pr_err("pm_runtime: fail to set active.\n");
