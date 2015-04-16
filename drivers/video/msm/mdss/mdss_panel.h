@@ -521,13 +521,15 @@ int mdss_panel_get_boot_cfg(void);
 bool mdss_is_ready(void);
 
 struct msm_fb_data_type;
-#if defined(CONFIG_DEBUG_FS) && defined(CONFIG_FB_MSM_MDSS_SPECIFIC_PANEL)
-void mipi_dsi_panel_create_debugfs(struct msm_fb_data_type *mfd);
+#if defined(CONFIG_FB_MSM_MDSS_SPECIFIC_PANEL)
 bool mdss_dsi_panel_flip_ud(void);
+#if defined(CONFIG_DEBUG_FS)
+void mipi_dsi_panel_create_debugfs(struct msm_fb_data_type *mfd);
 #else
 static inline void mipi_dsi_panel_create_debugfs(struct msm_fb_data_type *mfd)
 {
 	/* empty */
 }
+#endif
 #endif
 #endif /* MDSS_PANEL_H */
