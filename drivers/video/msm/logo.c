@@ -37,10 +37,6 @@ static bool display_on_in_boot;
 
 static int __init continous_splash_setup(char *str)
 {
-	/* workaround to not show splash screen, since something is broken
-	 * and makes the kernel crash during startup in fota kernel */
-	display_on_in_boot = true;
-	/* end workaround */
 	if (!str)
 		return 0;
 	if (!strncmp(str, "on", 2))
