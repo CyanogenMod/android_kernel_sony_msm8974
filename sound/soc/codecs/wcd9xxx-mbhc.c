@@ -25,6 +25,8 @@
 #include <linux/mfd/wcd9xxx/wcd9xxx_registers.h>
 #include <linux/mfd/wcd9xxx/wcd9320_registers.h>
 #include <linux/mfd/wcd9xxx/pdata.h>
+#include <linux/mdss_dsi_panel.h>
+#include <linux/qpnp/power-on.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -3386,6 +3388,12 @@ static irqreturn_t wcd9xxx_mech_plug_detect_irq(int irq, void *data)
 		/* Call handler */
 		wcd9xxx_swch_irq_handler(mbhc);
 		wcd9xxx_unlock_sleep(mbhc->resmgr->core_res);
+	}
+
+	if (mdss_panel_status() == DISPLAY_OFF) {
+		qpnp_ponkey_emulate(1);
+		msleep(5);
+		qpnp_ponkey_emulate(0);
 	}
 
 	pr_debug("%s: leave %d\n", __func__, r);
