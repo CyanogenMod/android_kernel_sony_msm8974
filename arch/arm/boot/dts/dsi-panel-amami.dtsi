@@ -456,6 +456,8 @@
 		qcom,mdss-dsi-lane-1-state;
 		qcom,mdss-dsi-lane-2-state;
 		qcom,mdss-dsi-lane-3-state;
+		qcom,mdss-dsi-wr-mem-start = <0x2c>;
+		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
 		qcom,mdss-dsi-panel-timings = [7a 1a 12 00 3e 42 16 20 14 03 04 00];
 		qcom,mdss-dsi-t-clk-post = <0x0c>;
 		qcom,mdss-dsi-t-clk-pre = <0x1a>;
@@ -934,6 +936,8 @@
 		qcom,mdss-dsi-lane-1-state;
 		qcom,mdss-dsi-lane-2-state;
 		qcom,mdss-dsi-lane-3-state;
+		qcom,mdss-dsi-wr-mem-start = <0x2c>;
+		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
 		qcom,mdss-dsi-panel-timings = [7a 1a 12 00 3e 42 16 20 14 03 04 00];
 		qcom,mdss-dsi-t-clk-post = <0x0c>;
 		qcom,mdss-dsi-t-clk-pre = <0x1a>;
@@ -1549,6 +1553,8 @@
 		qcom,mdss-dsi-lane-1-state;
 		qcom,mdss-dsi-lane-2-state;
 		qcom,mdss-dsi-lane-3-state;
+		qcom,mdss-dsi-wr-mem-start = <0x2c>;
+		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
 		qcom,mdss-dsi-panel-timings = [7a 1a 12 00 3e 42 16 20 14 03 04 00];
 		qcom,mdss-dsi-t-clk-post = <0x0c>;
 		qcom,mdss-dsi-t-clk-pre = <0x1a>;
@@ -2164,6 +2170,8 @@
 		qcom,mdss-dsi-lane-1-state;
 		qcom,mdss-dsi-lane-2-state;
 		qcom,mdss-dsi-lane-3-state;
+		qcom,mdss-dsi-wr-mem-start = <0x2c>;
+		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
 		qcom,mdss-dsi-panel-timings = [7a 1a 12 00 3e 42 16 20 14 03 04 00];
 		qcom,mdss-dsi-t-clk-post = <0x0c>;
 		qcom,mdss-dsi-t-clk-pre = <0x1a>;

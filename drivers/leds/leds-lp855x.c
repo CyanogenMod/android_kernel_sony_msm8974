@@ -142,6 +142,7 @@ struct lp855x {
 };
 
 static bool bl_on_in_boot;
+static bool bl_enable_valid;
 static int __init continous_splash_setup(char *str)
 {
 	if (!str)
@@ -421,11 +422,13 @@ static int lp855x_set_slope_filter(struct lp855x *lp, bool enable)
 	return lp855x_write_byte(lp, CFG3_CTRL, val);
 }
 
+static int lp855x_suspend(struct device *dev);
+static int lp855x_resume(struct device *dev);
 static void lp855x_led_work(struct work_struct *work)
 {
 	struct lp855x *lp = container_of(work, struct lp855x, work);
 	enum lp855x_brightness_ctrl_mode mode;
-	int br;
+	int br, ret = 0;
 
 	mutex_lock(&lp->xfer_lock);
 	br = lp->cdev.brightness;
@@ -444,9 +447,30 @@ static void lp855x_led_work(struct work_struct *work)
 		if (pd->pwm_set_intensity)
 			pd->pwm_set_intensity(br, max_br);
 
-	} else if (mode == REGISTER_BASED)
-		lp855x_write_byte(lp, BRIGHTNESS_CTRL, br);
-
+	} else if (mode == REGISTER_BASED) {
+		if (br == 0) {
+			if (bl_enable_valid) {
+				lp855x_write_byte(lp, BRIGHTNESS_CTRL, br);
+				ret = lp855x_suspend(lp->dev);
+				if (ret) {
+					dev_err(lp->dev,
+						"Failure seting bl_enable to low %d\n",
+						ret);
+				}
+			}
+		} else if (!bl_enable_valid) {
+			ret = lp855x_resume(lp->dev);
+			if (ret) {
+				dev_err(lp->dev,
+					"Failure seting bl_enable to high %d\n",
+					ret);
+			} else {
+				lp855x_write_byte(lp, BRIGHTNESS_CTRL, br);
+			}
+		} else {
+			lp855x_write_byte(lp, BRIGHTNESS_CTRL, br);
+		}
+	}
 	mutex_unlock(&lp->xfer_lock);
 }
 
@@ -637,12 +661,14 @@ static int lp855x_power_on(struct device *dev,
 		struct lp855x_platform_data *pdata)
 {
 	gpio_set_value_cansleep(pdata->gpio_bl_enable, 1);
+	bl_enable_valid = true;
 	return 0;
 }
 static int lp855x_power_off(struct device *dev,
 		struct lp855x_platform_data *pdata)
 {
 	gpio_set_value_cansleep(pdata->gpio_bl_enable, 0);
+	bl_enable_valid = false;
 	return 0;
 }
 
@@ -734,7 +760,6 @@ static int __devexit lp855x_remove(struct i2c_client *cl)
 	return 0;
 }
 
-#ifdef CONFIG_PM
 static int lp855x_suspend(struct device *dev)
 {
 	struct lp855x *lp = dev_get_drvdata(dev);
@@ -765,6 +790,7 @@ err:
 	return ret;
 }
 
+#ifdef CONFIG_PM
 static const struct dev_pm_ops lp855x_dev_pm_ops = {
 	.suspend = lp855x_suspend,
 	.resume  = lp855x_resume,

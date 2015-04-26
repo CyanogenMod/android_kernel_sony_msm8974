@@ -123,6 +123,7 @@ struct ce_hw_support {
 	bool use_sw_hmac_algo;
 	bool use_sw_aes_ccm_algo;
 	bool clk_mgmt_sus_res;
+	unsigned int ce_device;
 };
 
 /* Sha operation parameters */
@@ -164,6 +165,13 @@ struct qce_req {
 	struct qcedev_pmem_info *pmem;	/* pointer to pmem_info structure*/
 	unsigned int  flags;
 };
+
+struct qce_pm_table {
+	int (*suspend)(void *handle);
+	int (*resume)(void *handle);
+};
+
+extern struct qce_pm_table qce_pm_table;
 
 void *qce_open(struct platform_device *pdev, int *rc);
 int qce_close(void *handle);
