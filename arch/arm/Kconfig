@@ -2370,8 +2370,6 @@ endif
 
 source "drivers/cpuidle/Kconfig"
 
-source "drivers/cpuquiet/Kconfig"
-
 endmenu
 
 config CPU_FREQ_MSM
