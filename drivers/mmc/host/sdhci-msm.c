@@ -169,6 +169,9 @@ enum sdc_mpm_pin_state {
 #define sdhci_is_valid_mpm_wakeup_int(_h) ((_h)->pdata->mpm_sdiowakeup_int >= 0)
 #define sdhci_is_valid_gpio_wakeup_int(_h) ((_h)->pdata->sdiowakeup_irq >= 0)
 
+/* Timeout value to avoid infinite waiting for pwr_irq */
+#define MSM_PWR_IRQ_TIMEOUT_MS 5000
+
 static const u32 tuning_block_64[] = {
 	0x00FF0FFF, 0xCCC3CCFF, 0xFFCC3CC3, 0xEFFEFFFE,
 	0xDDFFDFFF, 0xFBFFFBFF, 0xFF7FFFBF, 0xEFBDF777,
@@ -877,6 +880,14 @@ retry:
 		memset(data_buf, 0, size);
 		mmc_wait_for_req(mmc, &mrq);
 
+		/*
+		 * wait for 146 MCLK cycles for the card to send out the data
+		 * and thus move to TRANS state. As the MCLK would be minimum
+		 * 200MHz when tuning is performed, we need maximum 0.73us
+		 * delay. To be on safer side 1ms delay is given.
+		 */
+		if (cmd.error)
+			usleep_range(1000, 1200);
 		if (!cmd.error && !data.error &&
 			!memcmp(data_buf, tuning_block_pattern, size)) {
 			/* tuning is successful at this tuning point */
@@ -2202,8 +2213,10 @@ static void sdhci_msm_check_power_status(struct sdhci_host *host, u32 req_type)
 	 */
 	if (done)
 		init_completion(&msm_host->pwr_irq_completion);
-	else
-		wait_for_completion(&msm_host->pwr_irq_completion);
+	else if (!wait_for_completion_timeout(&msm_host->pwr_irq_completion,
+				msecs_to_jiffies(MSM_PWR_IRQ_TIMEOUT_MS)))
+		__WARN_printf("%s: request(%d) timed out waiting for pwr_irq\n",
+					mmc_hostname(host->mmc), req_type);
 
 	pr_debug("%s: %s: request %d done\n", mmc_hostname(host->mmc),
 			__func__, req_type);
@@ -2898,7 +2911,6 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 	host->quirks |= SDHCI_QUIRK_SINGLE_POWER_WRITE;
 	host->quirks |= SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN;
 	host->quirks2 |= SDHCI_QUIRK2_ALWAYS_USE_BASE_CLOCK;
-	host->quirks2 |= SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING;
 	host->quirks2 |= SDHCI_QUIRK2_USE_MAX_DISCARD_SIZE;
 	host->quirks2 |= SDHCI_QUIRK2_IGNORE_DATATOUT_FOR_R1BCMD;
 	host->quirks2 |= SDHCI_QUIRK2_BROKEN_PRESET_VALUE;

@@ -343,12 +343,12 @@ static int mdss_mdp_wb_stop(struct msm_fb_data_type *mfd)
 static int mdss_mdp_wb_register_node(struct mdss_mdp_wb *wb,
 				     struct mdss_mdp_wb_data *node)
 {
-	node->state = REGISTERED;
-	list_add_tail(&node->registered_entry, &wb->register_queue);
 	if (!node) {
 		pr_err("Invalid wb node\n");
 		return -EINVAL;
 	}
+	node->state = REGISTERED;
+	list_add_tail(&node->registered_entry, &wb->register_queue);
 
 	return 0;
 }
@@ -406,11 +406,28 @@ static struct mdss_mdp_wb_data *get_user_node(struct msm_fb_data_type *mfd,
 	int ret;
 
 	if (!list_empty(&wb->register_queue)) {
+		struct ion_client *iclient = mdss_get_ionclient();
+		struct ion_handle *ihdl;
+
+		if (!iclient) {
+			pr_err("iclient is NULL\n");
+			return NULL;
+		}
+
+		ihdl = ion_import_dma_buf(iclient, data->memory_id);
+		if (IS_ERR_OR_NULL(ihdl)) {
+			pr_err("unable to import fd %d\n", data->memory_id);
+			return NULL;
+		}
+		/* only interested in ptr address, so we can free handle */
+		ion_free(iclient, ihdl);
+
 		list_for_each_entry(node, &wb->register_queue, registered_entry)
-			if ((node->buf_info.memory_id == data->memory_id) &&
+			if ((node->buf_data.p[0].srcp_ihdl == ihdl) &&
 				    (node->buf_info.offset == data->offset)) {
-				pr_debug("found node fd=%x off=%x addr=%x\n",
-						data->memory_id, data->offset,
+				pr_debug("found fd=%d hdl=%p off=%x addr=%x\n",
+						data->memory_id, ihdl,
+						data->offset,
 						node->buf_data.p[0].addr);
 				return node;
 			}
@@ -465,8 +482,9 @@ static void mdss_mdp_wb_free_node(struct mdss_mdp_wb_data *node)
 
 	if (node->user_alloc) {
 		buf = &node->buf_data.p[0];
-		pr_debug("free user node mem_id=%d offset=%u addr=0x%x\n",
+		pr_debug("free user mem_id=%d ihdl=%p, offset=%u addr=0x%x\n",
 				node->buf_info.memory_id,
+				buf->srcp_ihdl,
 				node->buf_info.offset,
 				buf->addr);
 
@@ -547,10 +565,16 @@ static int mdss_mdp_wb_dequeue(struct msm_fb_data_type *mfd,
 {
 	struct mdss_mdp_wb *wb = mfd_to_wb(mfd);
 	struct mdss_mdp_wb_data *node = NULL;
+	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
 	int ret;
 
 	if (!wb) {
 		pr_err("unable to dequeue, writeback is not initialized\n");
+		return -ENODEV;
+	}
+
+	if (!ctl) {
+		pr_err("unable to dequeue, ctl is not initialized\n");
 		return -ENODEV;
 	}
 
@@ -563,6 +587,7 @@ static int mdss_mdp_wb_dequeue(struct msm_fb_data_type *mfd,
 	mutex_lock(&wb->lock);
 	if (wb->state == WB_STOPING) {
 		pr_debug("wfd stopped\n");
+		mdss_mdp_display_wait4comp(ctl);
 		wb->state = WB_STOP;
 		ret = -ENOBUFS;
 	} else if (!list_empty(&wb->busy_queue)) {
@@ -676,77 +701,30 @@ int mdss_mdp_wb_set_mirr_hint(struct msm_fb_data_type *mfd, int hint)
 int mdss_mdp_wb_get_format(struct msm_fb_data_type *mfd,
 					struct mdp_mixer_cfg *mixer_cfg)
 {
-	int dst_format;
 	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
 
 	if (!ctl) {
 		pr_err("No panel data!\n");
 		return -EINVAL;
+	} else {
+		mixer_cfg->writeback_format = ctl->dst_format;
 	}
 
-	switch (ctl->dst_format) {
-	case MDP_RGB_888:
-		dst_format = WB_FORMAT_RGB_888;
-		break;
-	case MDP_RGB_565:
-		dst_format = WB_FORMAT_RGB_565;
-		break;
-	case MDP_XRGB_8888:
-		dst_format = WB_FORMAT_xRGB_8888;
-		break;
-	case MDP_ARGB_8888:
-		dst_format = WB_FORMAT_ARGB_8888;
-		break;
-	case MDP_BGRA_8888:
-		dst_format = WB_FORMAT_BGRA_8888;
-		break;
-	case MDP_BGRX_8888:
-		dst_format = WB_FORMAT_BGRX_8888;
-		break;
-	case MDP_Y_CBCR_H2V2_VENUS:
-		dst_format = WB_FORMAT_NV12;
-		break;
-	default:
-		return -EINVAL;
-	}
-	mixer_cfg->writeback_format = dst_format;
 	return 0;
 }
 
-int mdss_mdp_wb_set_format(struct msm_fb_data_type *mfd, int dst_format)
+int mdss_mdp_wb_set_format(struct msm_fb_data_type *mfd, u32 dst_format)
 {
 	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
 
 	if (!ctl) {
 		pr_err("No panel data!\n");
 		return -EINVAL;
-	}
-
-	switch (dst_format) {
-	case WB_FORMAT_RGB_888:
-		ctl->dst_format = MDP_RGB_888;
-		break;
-	case WB_FORMAT_RGB_565:
-		ctl->dst_format = MDP_RGB_565;
-		break;
-	case WB_FORMAT_xRGB_8888:
-		ctl->dst_format = MDP_XRGB_8888;
-		break;
-	case WB_FORMAT_ARGB_8888:
-		ctl->dst_format = MDP_ARGB_8888;
-		break;
-	case WB_FORMAT_BGRA_8888:
-		ctl->dst_format = MDP_BGRA_8888;
-		break;
-	case WB_FORMAT_BGRX_8888:
-		ctl->dst_format = MDP_BGRX_8888;
-		break;
-	case WB_FORMAT_NV12:
-		ctl->dst_format = MDP_Y_CBCR_H2V2_VENUS;
-		break;
-	default:
-		pr_err("wfd format not supported\n");
+	} else if (dst_format >= MDP_IMGTYPE_LIMIT2) {
+		pr_err("Invalid dst format=%u\n", dst_format);
 		return -EINVAL;
+	} else {
+		ctl->dst_format = dst_format;
 	}
 
 	pr_debug("wfd format %d\n", ctl->dst_format);

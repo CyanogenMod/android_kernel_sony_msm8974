@@ -18,10 +18,6 @@
 
 #include "mhl_platform.h"
 
-struct mhl_tx_ctrl {
-	struct i2c_client *i2c_handle;
-};
-
 struct clk *mhl_clk;
 
 static enum {
@@ -31,9 +27,6 @@ static enum {
 
 /*device name*/
 static const char *device_name;
-
-/*device*/
-static struct device *pdev;
 
 static int mhl_pf_clock_enable(void);
 static void mhl_pf_clock_disable(void);
@@ -158,16 +151,25 @@ EXPORT_SYMBOL(mhl_pf_chip_power_off);
 static int mhl_pf_clock_enable(void)
 {
 	int rc = -1;
+	struct mhl_tx_ctrl *mhl_ctrl;
+	struct i2c_client *client;
 
 	pr_debug("%s()\n", __func__);
 
+	client = mhl_pf_get_i2c_client();
+	if (!client) {
+		pr_err("%s: cannot get i2c_client\n", __func__);
+		return -EBUSY;
+	}
 
-	if (!pdev)
+	mhl_ctrl = i2c_get_clientdata(client);
+
+	if (!mhl_ctrl->pdev)
 		return -EBUSY;
 
 	mhl_clk = mhl_pf_get_mhl_clk();
 	if (!mhl_clk) {
-		mhl_clk = clk_get(pdev, "");
+		mhl_clk = clk_get(mhl_ctrl->pdev, "");
 		if (!mhl_clk) {
 			pr_err("%s: mhl clk is null\n", __func__);
 			return -EBUSY;
@@ -221,19 +223,19 @@ int mhl_pf_init(void)
 		goto failed_no_mem;
 	}
 
-	pdev = &client->dev;
-	if (!pdev) {
-		pr_err("%s: FAILED: cannot get pdev\n", __func__);
+	mhl_ctrl->i2c_handle = client;
+	mhl_ctrl->mhlclass = class_create(THIS_MODULE, "mhl");
+
+	if (IS_ERR(mhl_ctrl->mhlclass)) {
+		pr_err("%s:fail class creation\n", __func__);
+		rc = PTR_ERR(mhl_ctrl->mhlclass);
 		goto failed_error;
 	}
 
-	pdev->class = class_create(THIS_MODULE, "mhl");
-	if (IS_ERR(pdev->class)) {
-		pr_err("%s:fail class creation\n", __func__);
-		rc = PTR_ERR(pdev->class);
-		goto failed_error;
-	}
-	pr_debug("%s:class name : %s\n", __func__, pdev->class->name);
+	mhl_ctrl->pdev = device_create(mhl_ctrl->mhlclass,
+				NULL, 0, NULL, "hdcp_state");
+
+	pr_debug("%s:class name : %s\n", __func__, mhl_ctrl->pdev->class->name);
 	i2c_set_clientdata(client, mhl_ctrl);
 
 	mhl_pf_i2c_init(client->adapter);
@@ -280,7 +282,7 @@ void mhl_pf_exit(void)
 	mhl_pf_switch_to_usb();
 
 	/* mhl device class is released */
-	class_destroy(client->dev.class);
+	class_destroy(mhl_ctrl->mhlclass);
 
 	if (!mhl_ctrl)
 		pr_err("%s: i2c get client data failed\n", __func__);

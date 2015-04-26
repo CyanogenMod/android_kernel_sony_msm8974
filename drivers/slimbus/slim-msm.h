@@ -22,7 +22,7 @@
 /* Per spec.max 40 bytes per received message */
 #define SLIM_MSGQ_BUF_LEN	40
 
-#define MSM_TX_BUFS	2
+#define MSM_TX_BUFS		32
 
 #define SLIM_USR_MC_GENERIC_ACK		0x25
 #define SLIM_USR_MC_MASTER_CAPABILITY	0x0
@@ -214,7 +214,7 @@ struct msm_slim_qmi {
 	struct work_struct		ssr_up;
 };
 
-struct msm_slim_mdm {
+struct msm_slim_ss {
 	struct notifier_block nb;
 	void *ssr;
 	enum msm_ctrl_state state;
@@ -236,14 +236,15 @@ struct msm_slim_ctrl {
 	u8			msg_cnt;
 	u32			tx_buf[10];
 	u8			rx_msgs[MSM_CONCUR_MSG][SLIM_MSGQ_BUF_LEN];
-	int			tx_idx;
+	int			tx_tail;
+	int			tx_head;
 	spinlock_t		rx_lock;
 	int			head;
 	int			tail;
 	int			irq;
 	int			err;
 	int			ee;
-	struct completion	*wr_comp;
+	struct completion	**wr_comp;
 	struct msm_slim_sat	*satd[MSM_MAX_NSATS];
 	struct msm_slim_endp	pipes[7];
 	struct msm_slim_sps_bam	bam;
@@ -254,6 +255,7 @@ struct msm_slim_ctrl {
 	struct clk		*rclk;
 	struct clk		*hclk;
 	struct mutex		tx_lock;
+	struct mutex		tx_buf_lock;
 	u8			pgdla;
 	enum msm_slim_msgq	use_rx_msgqs;
 	enum msm_slim_msgq	use_tx_msgqs;
@@ -267,7 +269,8 @@ struct msm_slim_ctrl {
 	u32			ver;
 	struct msm_slim_qmi	qmi;
 	struct msm_slim_pdata	pdata;
-	struct msm_slim_mdm	mdm;
+	struct msm_slim_ss	ext_mdm;
+	struct msm_slim_ss	dsp;
 	int			default_ipc_log_mask;
 	int			ipc_log_mask;
 	bool			sysfs_created;
@@ -368,11 +371,14 @@ int msm_alloc_port(struct slim_controller *ctrl, u8 pn);
 void msm_dealloc_port(struct slim_controller *ctrl, u8 pn);
 int msm_slim_connect_pipe_port(struct msm_slim_ctrl *dev, u8 pn);
 enum slim_port_err msm_slim_port_xfer_status(struct slim_controller *ctr,
-				u8 pn, u8 **done_buf, u32 *done_len);
-int msm_slim_port_xfer(struct slim_controller *ctrl, u8 pn, u8 *iobuf,
+				u8 pn, phys_addr_t *done_buf, u32 *done_len);
+int msm_slim_port_xfer(struct slim_controller *ctrl, u8 pn, phys_addr_t iobuf,
 			u32 len, struct completion *comp);
 int msm_send_msg_buf(struct msm_slim_ctrl *dev, u32 *buf, u8 len, u32 tx_reg);
-u32 *msm_get_msg_buf(struct msm_slim_ctrl *dev, int len);
+u32 *msm_get_msg_buf(struct msm_slim_ctrl *dev, int len,
+			struct completion *comp);
+u32 *msm_slim_manage_tx_msgq(struct msm_slim_ctrl *dev, bool getbuf,
+			struct completion *comp);
 int msm_slim_rx_msgq_get(struct msm_slim_ctrl *dev, u32 *data, int offset);
 int msm_slim_sps_init(struct msm_slim_ctrl *dev, struct resource *bam_mem,
 			u32 pipe_reg, bool remote);

@@ -2,7 +2,7 @@
  *  linux/drivers/mmc/host/sdhci.c - Secure Digital Host Controller Interface driver
  *
  *  Copyright (C) 2005-2008 Pierre Ossman, All Rights Reserved.
- *  Copyright (C) 2013 Sony Mobile Communications AB.
+ *  Copyright (C) 2013 Sony Mobile Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -517,6 +517,9 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 				  struct sdhci_next *next)
 {
 	int sg_count;
+	unsigned long flags;
+
+	spin_lock_irqsave(&host->next_lock, flags);
 
 	if (!next && data->host_cookie &&
 	    data->host_cookie != host->next_data.cookie) {
@@ -538,14 +541,18 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 		host->next_data.sg_count = 0;
 	}
 
-	if (sg_count == 0)
+	if (sg_count == 0) {
+		spin_unlock_irqrestore(&host->next_lock, flags);
 		return -EINVAL;
+	}
 
 	if (next) {
 		next->sg_count = sg_count;
 		data->host_cookie = ++next->cookie < 0 ? 1 : next->cookie;
 	} else
 		host->sg_count = sg_count;
+
+	spin_unlock_irqrestore(&host->next_lock, flags);
 
 	return sg_count;
 }
@@ -2607,17 +2614,6 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 			host->cmd->error = -EILSEQ;
 	}
 
-	if (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING) {
-		if ((host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS400) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK)) {
-			if (intmask & SDHCI_INT_CRC) {
-				sdhci_reset(host, SDHCI_RESET_CMD);
-				host->cmd->error = 0;
-			}
-		}
-	}
-
 	if (host->cmd->error) {
 		command = SDHCI_GET_CMD(sdhci_readw(host,
 						    SDHCI_COMMAND));
@@ -2650,17 +2646,6 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 
 		/* The controller does not support the end-of-busy IRQ,
 		 * fall through and take the SDHCI_INT_RESPONSE */
-	}
-
-	if (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING) {
-		if ((host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS400) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK)) {
-			if (intmask & SDHCI_INT_CRC) {
-				sdhci_finish_command(host);
-				return;
-			}
-		}
 	}
 
 	if (intmask & SDHCI_INT_RESPONSE)
@@ -2748,8 +2733,7 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 		host->data->error = -EIO;
 	}
 	if (host->data->error) {
-		if ((intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_TIMEOUT)) &&
-		    (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING)) {
+		if (intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_TIMEOUT)) {
 			command = SDHCI_GET_CMD(sdhci_readw(host,
 							    SDHCI_COMMAND));
 			if ((command != MMC_SEND_TUNING_BLOCK_HS400) &&
@@ -3167,6 +3151,7 @@ struct sdhci_host *sdhci_alloc_host(struct device *dev,
 	host->mmc = mmc;
 
 	spin_lock_init(&host->lock);
+	spin_lock_init(&host->next_lock);
 	mutex_init(&host->ios_mutex);
 
 	return host;

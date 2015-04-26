@@ -465,6 +465,8 @@
 		ranges;
 		qcom,pfm-threshold = <76>;
 		qcom,use-phase-scaling-factor;
+		qcom,phase-scaling-factor-bits-pos = <16>;
+		qcom,valid-scaling-factor-versions = <0 1 0 0>;
 
 		krait0_vreg: regulator@f9088000 {
 			compatible = "qcom,krait-regulator";
@@ -566,4 +568,8 @@
 
 &pm8941_chg_otg {
 	regulator-name = "8941_smbb_otg";
+};
+
+&pm8941_chg_chgr {
+	regulator-name = "flash_wa";
 };

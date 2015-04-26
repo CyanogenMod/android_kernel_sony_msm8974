@@ -2113,6 +2113,8 @@ static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
 			break;
 	} while (1);
 
+	dwc->gadget.xfer_isr_count++;
+
 	if (usb_endpoint_xfer_isoc(dep->endpoint.desc) &&
 			list_empty(&dep->req_queued)) {
 		if (list_empty(&dep->request_list))
@@ -2276,6 +2278,7 @@ static void dwc3_disconnect_gadget(struct dwc3 *dwc)
 		dwc->gadget_driver->disconnect(&dwc->gadget);
 		spin_lock(&dwc->lock);
 	}
+	dwc->gadget.xfer_isr_count = 0;
 }
 
 static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum)
@@ -2607,13 +2610,13 @@ static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc)
 {
 	dev_vdbg(dwc->dev, "%s\n", __func__);
 
-	/*
-	 * TODO take core out of low power mode when that's
-	 * implemented.
-	 */
+	/* Only perform resume from L2 or Early suspend states */
+	if (dwc->link_state == DWC3_LINK_STATE_U3) {
+		dbg_event(0xFF, "WAKEUP", 0);
+		dwc->gadget_driver->resume(&dwc->gadget);
+	}
 
-	dbg_event(0xFF, "WAKEUP", 0);
-	dwc->gadget_driver->resume(&dwc->gadget);
+	dwc->link_state = DWC3_LINK_STATE_U0;
 }
 
 static void dwc3_gadget_linksts_change_interrupt(struct dwc3 *dwc,

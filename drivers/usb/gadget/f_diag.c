@@ -26,6 +26,7 @@
 #include <linux/usb/gadget.h>
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
+#include <linux/kmemleak.h>
 
 static DEFINE_SPINLOCK(ch_lock);
 static LIST_HEAD(usb_diag_ch_list);
@@ -381,6 +382,7 @@ int usb_diag_alloc_req(struct usb_diag_ch *ch, int n_write, int n_read)
 		req = usb_ep_alloc_request(ctxt->in, GFP_ATOMIC);
 		if (!req)
 			goto fail;
+		kmemleak_not_leak(req);
 		req->complete = diag_write_complete;
 		list_add_tail(&req->list, &ctxt->write_pool);
 	}
@@ -389,6 +391,7 @@ int usb_diag_alloc_req(struct usb_diag_ch *ch, int n_write, int n_read)
 		req = usb_ep_alloc_request(ctxt->out, GFP_ATOMIC);
 		if (!req)
 			goto fail;
+		kmemleak_not_leak(req);
 		req->complete = diag_read_complete;
 		list_add_tail(&req->list, &ctxt->read_pool);
 	}
@@ -508,11 +511,11 @@ int usb_diag_write(struct usb_diag_ch *ch, struct diag_request *d_req)
 		/* If error add the link to linked list again*/
 		spin_lock_irqsave(&ctxt->lock, flags);
 		list_add_tail(&req->list, &ctxt->write_pool);
-		spin_unlock_irqrestore(&ctxt->lock, flags);
 		/* 1 error message for every 10 sec */
 		if (__ratelimit(&rl))
 			ERROR(ctxt->cdev, "%s: cannot queue"
 				" read request\n", __func__);
+		spin_unlock_irqrestore(&ctxt->lock, flags);
 		return -EIO;
 	}
 

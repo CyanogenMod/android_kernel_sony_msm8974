@@ -71,12 +71,19 @@ static const struct mmc_fixup mmc_fixups[] = {
 	MMC_FIXUP_EXT_CSD_REV(CID_NAME_ANY, CID_MANFID_HYNIX,
 			      0x014a, add_quirk, MMC_QUIRK_BROKEN_HPI, 5),
 
+	/* Disable HPI feature for Kingstone card */
+	MMC_FIXUP_EXT_CSD_REV("MMC16G", CID_MANFID_KINGSTON, CID_OEMID_ANY,
+			add_quirk, MMC_QUIRK_BROKEN_HPI, 5),
+
 	/*
 	 * Some Hynix cards exhibit data corruption over reboots if cache is
 	 * enabled. Disable cache for all versions until a class of cards that
 	 * show this behavior is identified.
 	 */
 	MMC_FIXUP("H8G2d", CID_MANFID_HYNIX, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_CACHE_DISABLE),
+
+	MMC_FIXUP("MMC16G", CID_MANFID_KINGSTON, CID_OEMID_ANY, add_quirk_mmc,
 		  MMC_QUIRK_CACHE_DISABLE),
 
 	END_FIXUP
@@ -352,6 +359,8 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 
 	card->ext_csd.raw_card_type = ext_csd[EXT_CSD_CARD_TYPE];
 	mmc_select_card_type(card);
+
+	card->ext_csd.raw_drive_strength = ext_csd[EXT_CSD_DRIVE_STRENGTH];
 
 	card->ext_csd.raw_s_a_timeout = ext_csd[EXT_CSD_S_A_TIMEOUT];
 	card->ext_csd.raw_erase_timeout_mult =

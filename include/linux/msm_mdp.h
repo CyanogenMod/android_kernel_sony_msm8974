@@ -81,6 +81,7 @@
 #define MSMFB_ASYNC_BLIT              _IOW(MSMFB_IOCTL_MAGIC, 168, unsigned int)
 #define MSMFB_OVERLAY_PREPARE		_IOWR(MSMFB_IOCTL_MAGIC, 169, \
 						struct mdp_overlay_list)
+#define MSMFB_LPM_ENABLE        _IOWR(MSMFB_IOCTL_MAGIC, 170, unsigned int)
 #define FB_TYPE_3D_PANEL 0x10101010
 #define MDP_IMGTYPE2_START 0x10000
 #define MSMFB_DRIVER_VERSION	0xF9E8D701
@@ -119,6 +120,7 @@ enum {
 	NOTIFY_TYPE_NO_UPDATE,
 	NOTIFY_TYPE_SUSPEND,
 	NOTIFY_TYPE_UPDATE,
+	NOTIFY_TYPE_BL_UPDATE,
 };
 
 enum {
@@ -160,8 +162,6 @@ enum {
 	MDP_XBGR_8888_TILE,	/* XBGR 8888 in tile format */
 	MDP_BGRX_8888_TILE,	/* BGRX 8888 in tile format */
 	MDP_YCBYCR_H2V1,  /* YCbYCr interleave */
-	MDP_RGB_565_TILE,	  /* RGB 565 in tile format */
-	MDP_BGR_565_TILE,	  /* BGR 565 in tile format */
 	MDP_IMGTYPE_LIMIT,
 	MDP_RGB_BORDERFILL,	/* border fill pipe */
 	MDP_FB_FORMAT = MDP_IMGTYPE2_START,    /* framebuffer format */

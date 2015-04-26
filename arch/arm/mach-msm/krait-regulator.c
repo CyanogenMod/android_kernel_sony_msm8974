@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -708,8 +708,10 @@ static void __switch_to_using_ldo(void *info)
 
 static int switch_to_using_ldo(struct krait_power_vreg *kvreg)
 {
-	if (kvreg->mode == LDO_MODE
-		&& get_krait_ldo_uv(kvreg) == kvreg->uV - kvreg->ldo_delta_uV)
+	int uV = kvreg->uV - kvreg->ldo_delta_uV;
+	int ldo_uV = DIV_ROUND_UP(uV, KRAIT_LDO_STEP) * KRAIT_LDO_STEP;
+
+	if (kvreg->mode == LDO_MODE && get_krait_ldo_uv(kvreg) == ldo_uV)
 		return 0;
 
 	return smp_call_function_single(kvreg->cpu_num,
@@ -1443,11 +1445,17 @@ static int __devinit krait_pdn_phase_scaling_init(struct pmic_gang_vreg *pvreg,
 {
 	struct resource *res;
 	void __iomem *efuse;
-	u32 efuse_data, efuse_version;
-	bool scaling_factor_valid, use_efuse;
+	u32 efuse_data, efuse_version, efuse_version_data;
+	bool sf_valid, use_efuse;
+	int sf_pos, sf_mask;
+	struct device_node *node = pdev->dev.of_node;
+	struct device *dev = &pdev->dev;
+	int valid_sfs[4] = {0, 0, 0, 0};
+	int sf_versions_len;
+	int rc;
 
-	use_efuse = of_property_read_bool(pdev->dev.of_node,
-					  "qcom,use-phase-scaling-factor");
+	use_efuse = of_property_read_bool(node,
+				"qcom,use-phase-scaling-factor");
 	/*
 	 * Allow usage of the eFuse phase scaling factor if it is enabled in
 	 * either device tree or by module parameter.
@@ -1462,6 +1470,7 @@ static int __devinit krait_pdn_phase_scaling_init(struct pmic_gang_vreg *pvreg,
 		return -EINVAL;
 	}
 
+	/* Read efuse registers */
 	efuse = ioremap(res->start, 8);
 	if (!efuse) {
 		pr_err("could not map phase scaling eFuse address\n");
@@ -1469,25 +1478,47 @@ static int __devinit krait_pdn_phase_scaling_init(struct pmic_gang_vreg *pvreg,
 	}
 
 	efuse_data = readl_relaxed(efuse);
-	efuse_version = readl_relaxed(efuse + 4);
-
+	efuse_version_data = readl_relaxed(efuse + 4);
 	iounmap(efuse);
 
-	scaling_factor_valid
-		= ((efuse_version & PHASE_SCALING_EFUSE_VERSION_MASK) >>
-				PHASE_SCALING_EFUSE_VERSION_POS)
-			== PHASE_SCALING_EFUSE_VERSION_SET;
+	rc = of_property_read_u32(pdev->dev.of_node,
+					"qcom,phase-scaling-factor-bits-pos",
+					&sf_pos);
+	if (rc < 0) {
+		dev_err(dev, "qcom,phase-scaling-factor-bits-pos missing rc=%d\n",
+									rc);
+		return -EINVAL;
+	}
 
-	if (scaling_factor_valid)
+	sf_mask = KRAIT_MASK(sf_pos + 2, sf_pos);
+
+	efuse_version
+		= ((efuse_version_data & PHASE_SCALING_EFUSE_VERSION_MASK) >>
+				PHASE_SCALING_EFUSE_VERSION_POS);
+
+	if (of_find_property(node, "qcom,valid-scaling-factor-versions",
+				&sf_versions_len)
+		&& (sf_versions_len == 4 * sizeof(u32))) {
+		rc = of_property_read_u32_array(node,
+				"qcom,valid-scaling-factor-versions",
+				valid_sfs, 4);
+		sf_valid = (valid_sfs[efuse_version] == 1);
+	} else {
+		dev_err(dev, "qcom,valid-scaling-factor-versions missing or its size is incorrect rc=%d\n",
+									rc);
+		return -EINVAL;
+	}
+
+	if (sf_valid)
 		pvreg->efuse_phase_scaling_factor
-			= ((efuse_data & PHASE_SCALING_EFUSE_VALUE_MASK)
-				>> PHASE_SCALING_EFUSE_VALUE_POS) + 1;
+			= ((efuse_data & sf_mask)
+				>> sf_pos) + 1;
 	else
 		pvreg->efuse_phase_scaling_factor = PHASE_SCALING_REF;
 
 	pr_info("eFuse phase scaling factor = %d/%d%s\n",
 		pvreg->efuse_phase_scaling_factor, PHASE_SCALING_REF,
-		scaling_factor_valid ? "" : " (eFuse not blown)");
+		sf_valid ? "" : " (eFuse not blown)");
 	pr_info("initial phase scaling factor = %d/%d%s\n",
 		use_efuse_phase_scaling_factor
 			? pvreg->efuse_phase_scaling_factor : PHASE_SCALING_REF,

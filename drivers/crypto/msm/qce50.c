@@ -127,7 +127,7 @@ static void _byte_stream_to_net_words(uint32_t *iv, unsigned char *b,
 {
 	unsigned n;
 
-	n = len  / sizeof(uint32_t) ;
+	n = len  / sizeof(uint32_t);
 	for (; n > 0; n--) {
 		*iv =  ((*b << 24)      & 0xff000000) |
 				(((*(b+1)) << 16) & 0xff0000)   |
@@ -141,12 +141,12 @@ static void _byte_stream_to_net_words(uint32_t *iv, unsigned char *b,
 	if (n == 3) {
 		*iv = ((*b << 24) & 0xff000000) |
 				(((*(b+1)) << 16) & 0xff0000)   |
-				(((*(b+2)) << 8) & 0xff00)     ;
+				(((*(b+2)) << 8) & 0xff00);
 	} else if (n == 2) {
 		*iv = ((*b << 24) & 0xff000000) |
-				(((*(b+1)) << 16) & 0xff0000)   ;
+				(((*(b+1)) << 16) & 0xff0000);
 	} else if (n == 1) {
-		*iv = ((*b << 24) & 0xff000000) ;
+		*iv = ((*b << 24) & 0xff000000);
 	}
 }
 
@@ -223,12 +223,14 @@ static int _probe_ce_engine(struct qce_device *pce_dev)
 	pce_dev->ce_sps.ce_burst_size = MAX_CE_BAM_BURST_SIZE;
 
 	dev_info(pce_dev->pdev,
+			"CE device = 0x%x\n, "
 			"IO base, CE = 0x%x\n, "
 			"Consumer (IN) PIPE %d,    "
 			"Producer (OUT) PIPE %d\n"
 			"IO base BAM = 0x%x\n"
 			"BAM IRQ %d\n"
 			"Engines Availability = 0x%x\n",
+			(uint32_t) pce_dev->ce_sps.ce_device,
 			(uint32_t) pce_dev->iobase,
 			pce_dev->ce_sps.dest_pipe_index,
 			pce_dev->ce_sps.src_pipe_index,
@@ -2643,7 +2645,7 @@ static int qce_sps_get_bam(struct qce_device *pce_dev)
 	struct sps_bam_props bam = {0};
 	struct bam_registration_info *pbam = NULL;
 	struct bam_registration_info *p;
-	uint32_t bam_cfg = 0 ;
+	uint32_t bam_cfg = 0;
 
 
 	mutex_lock(&bam_register_lock);
@@ -2953,7 +2955,7 @@ static void qce_add_cmd_element(struct qce_device *pdev,
 	(*cmd_ptr)->mask = 0xFFFFFFFF;
 	if (populate != NULL)
 		*populate = *cmd_ptr;
-	(*cmd_ptr)++ ;
+	(*cmd_ptr)++;
 }
 
 static int _setup_cipher_aes_cmdlistptrs(struct qce_device *pdev,
@@ -4403,6 +4405,65 @@ bad:
 	return rc;
 }
 
+static int _qce_suspend(void *handle)
+{
+	struct qce_device *pce_dev = (struct qce_device *)handle;
+	struct sps_pipe *sps_pipe_info;
+
+	if (handle == NULL)
+		return -ENODEV;
+
+	qce_enable_clk(pce_dev);
+
+	sps_pipe_info = pce_dev->ce_sps.consumer.pipe;
+	sps_disconnect(sps_pipe_info);
+
+	sps_pipe_info = pce_dev->ce_sps.producer.pipe;
+	sps_disconnect(sps_pipe_info);
+
+	qce_disable_clk(pce_dev);
+	return 0;
+}
+
+static int _qce_resume(void *handle)
+{
+	struct qce_device *pce_dev = (struct qce_device *)handle;
+	struct sps_pipe *sps_pipe_info;
+	struct sps_connect *sps_connect_info;
+	int rc;
+
+	if (handle == NULL)
+		return -ENODEV;
+
+	qce_enable_clk(pce_dev);
+
+	sps_pipe_info = pce_dev->ce_sps.consumer.pipe;
+	sps_connect_info = &pce_dev->ce_sps.consumer.connect;
+	memset(sps_connect_info->desc.base, 0x00, sps_connect_info->desc.size);
+	rc = sps_connect(sps_pipe_info, sps_connect_info);
+	if (rc) {
+		pr_err("sps_connect() fail pipe_handle=0x%x, rc = %d\n",
+			(u32)sps_pipe_info, rc);
+		return rc;
+	}
+	sps_pipe_info = pce_dev->ce_sps.producer.pipe;
+	sps_connect_info = &pce_dev->ce_sps.producer.connect;
+	memset(sps_connect_info->desc.base, 0x00, sps_connect_info->desc.size);
+	rc = sps_connect(sps_pipe_info, sps_connect_info);
+	if (rc)
+		pr_err("sps_connect() fail pipe_handle=0x%x, rc = %d\n",
+			(u32)sps_pipe_info, rc);
+
+	pce_dev->ce_sps.out_transfer.user = pce_dev->ce_sps.producer.pipe;
+	pce_dev->ce_sps.in_transfer.user = pce_dev->ce_sps.consumer.pipe;
+
+	qce_disable_clk(pce_dev);
+	return rc;
+}
+
+struct qce_pm_table qce_pm_table  = {_qce_suspend, _qce_resume};
+EXPORT_SYMBOL(qce_pm_table);
+
 int qce_aead_req(void *handle, struct qce_req *q_req)
 {
 	struct qce_device *pce_dev;
@@ -4759,9 +4820,9 @@ int qce_process_sha_req(void *handle, struct qce_sha_req *sreq)
 	if (_qce_sps_add_sg_data(pce_dev, areq->src, areq->nbytes,
 						 &pce_dev->ce_sps.in_transfer))
 		goto bad;
-	_qce_set_flag(&pce_dev->ce_sps.in_transfer,
-				SPS_IOVEC_FLAG_EOT|SPS_IOVEC_FLAG_NWD);
-
+	if (areq->nbytes)
+		_qce_set_flag(&pce_dev->ce_sps.in_transfer,
+					SPS_IOVEC_FLAG_EOT|SPS_IOVEC_FLAG_NWD);
 	if (_qce_sps_add_data(GET_PHYS_ADDR(pce_dev->ce_sps.result_dump),
 					CRYPTO_RESULT_DUMP_SIZE,
 					  &pce_dev->ce_sps.out_transfer))
@@ -5116,6 +5177,15 @@ static int __qce_get_device_tree_data(struct platform_device *pdev,
 	} else {
 		pr_warn("bam_pipe_pair=0x%x", pce_dev->ce_sps.pipe_pair_index);
 	}
+	if (of_property_read_u32((&pdev->dev)->of_node,
+				"qcom,ce-device",
+				&pce_dev->ce_sps.ce_device)) {
+		pr_err("Fail to get CE device information.\n");
+		return -EINVAL;
+	} else {
+		pr_warn("ce-device =0x%x", pce_dev->ce_sps.ce_device);
+	}
+
 	pce_dev->ce_sps.dest_pipe_index	= 2 * pce_dev->ce_sps.pipe_pair_index;
 	pce_dev->ce_sps.src_pipe_index	= pce_dev->ce_sps.dest_pipe_index + 1;
 
@@ -5453,9 +5523,11 @@ int qce_hw_support(void *handle, struct ce_hw_support *ce_support)
 				pce_dev->use_sw_hmac_algo;
 	ce_support->use_sw_aes_ccm_algo =
 				pce_dev->use_sw_aes_ccm_algo;
+	ce_support->ce_device = pce_dev->ce_sps.ce_device;
 	return 0;
 }
 EXPORT_SYMBOL(qce_hw_support);
+
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Crypto Engine driver");
