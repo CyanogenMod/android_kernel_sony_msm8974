@@ -189,7 +189,6 @@ struct sit_info {
 	char *sit_bitmap;		/* SIT bitmap pointer */
 	unsigned int bitmap_size;	/* SIT bitmap size */
 
-	unsigned long *tmp_map;			/* bitmap for temporal use */
 	unsigned long *dirty_sentries_bitmap;	/* bitmap for dirty sentries */
 	unsigned int dirty_sentries;		/* # of dirty sentries */
 	unsigned int sents_per_block;		/* # of SIT entries per block */
@@ -208,7 +207,7 @@ struct free_segmap_info {
 	unsigned int start_segno;	/* start segment number logically */
 	unsigned int free_segments;	/* # of free segments */
 	unsigned int free_sections;	/* # of free sections */
-	spinlock_t segmap_lock;		/* free segmap lock */
+	rwlock_t segmap_lock;		/* free segmap lock */
 	unsigned long *free_segmap;	/* free segment bitmap */
 	unsigned long *free_secmap;	/* free section bitmap */
 };
@@ -319,9 +318,9 @@ static inline unsigned int find_next_inuse(struct free_segmap_info *free_i,
 		unsigned int max, unsigned int segno)
 {
 	unsigned int ret;
-	spin_lock(&free_i->segmap_lock);
+	read_lock(&free_i->segmap_lock);
 	ret = find_next_bit(free_i->free_segmap, max, segno);
-	spin_unlock(&free_i->segmap_lock);
+	read_unlock(&free_i->segmap_lock);
 	return ret;
 }
 
@@ -332,7 +331,7 @@ static inline void __set_free(struct f2fs_sb_info *sbi, unsigned int segno)
 	unsigned int start_segno = secno * sbi->segs_per_sec;
 	unsigned int next;
 
-	spin_lock(&free_i->segmap_lock);
+	write_lock(&free_i->segmap_lock);
 	clear_bit(segno, free_i->free_segmap);
 	free_i->free_segments++;
 
@@ -341,7 +340,7 @@ static inline void __set_free(struct f2fs_sb_info *sbi, unsigned int segno)
 		clear_bit(secno, free_i->free_secmap);
 		free_i->free_sections++;
 	}
-	spin_unlock(&free_i->segmap_lock);
+	write_unlock(&free_i->segmap_lock);
 }
 
 static inline void __set_inuse(struct f2fs_sb_info *sbi,
@@ -363,7 +362,7 @@ static inline void __set_test_and_free(struct f2fs_sb_info *sbi,
 	unsigned int start_segno = secno * sbi->segs_per_sec;
 	unsigned int next;
 
-	spin_lock(&free_i->segmap_lock);
+	write_lock(&free_i->segmap_lock);
 	if (test_and_clear_bit(segno, free_i->free_segmap)) {
 		free_i->free_segments++;
 
@@ -374,7 +373,7 @@ static inline void __set_test_and_free(struct f2fs_sb_info *sbi,
 				free_i->free_sections++;
 		}
 	}
-	spin_unlock(&free_i->segmap_lock);
+	write_unlock(&free_i->segmap_lock);
 }
 
 static inline void __set_test_and_inuse(struct f2fs_sb_info *sbi,
@@ -382,13 +381,13 @@ static inline void __set_test_and_inuse(struct f2fs_sb_info *sbi,
 {
 	struct free_segmap_info *free_i = FREE_I(sbi);
 	unsigned int secno = segno / sbi->segs_per_sec;
-	spin_lock(&free_i->segmap_lock);
+	write_lock(&free_i->segmap_lock);
 	if (!test_and_set_bit(segno, free_i->free_segmap)) {
 		free_i->free_segments--;
 		if (!test_and_set_bit(secno, free_i->free_secmap))
 			free_i->free_sections--;
 	}
-	spin_unlock(&free_i->segmap_lock);
+	write_unlock(&free_i->segmap_lock);
 }
 
 static inline void get_sit_bitmap(struct f2fs_sb_info *sbi,
@@ -461,7 +460,7 @@ static inline bool has_not_enough_free_secs(struct f2fs_sb_info *sbi, int freed)
 	int node_secs = get_blocktype_secs(sbi, F2FS_DIRTY_NODES);
 	int dent_secs = get_blocktype_secs(sbi, F2FS_DIRTY_DENTS);
 
-	if (unlikely(is_sbi_flag_set(sbi, SBI_POR_DOING)))
+	if (unlikely(sbi->por_doing))
 		return false;
 
 	return (free_sections(sbi) + freed) <= (node_secs + 2 * dent_secs +
@@ -600,13 +599,13 @@ static inline void check_block_count(struct f2fs_sb_info *sbi,
 static inline void check_seg_range(struct f2fs_sb_info *sbi, unsigned int segno)
 {
 	if (segno > TOTAL_SEGS(sbi) - 1)
-		set_sbi_flag(sbi, SBI_NEED_FSCK);
+		sbi->need_fsck = true;
 }
 
 static inline void verify_block_addr(struct f2fs_sb_info *sbi, block_t blk_addr)
 {
 	if (blk_addr < SEG0_BLKADDR(sbi) || blk_addr >= MAX_BLKADDR(sbi))
-		set_sbi_flag(sbi, SBI_NEED_FSCK);
+		sbi->need_fsck = true;
 }
 
 /*
@@ -617,11 +616,11 @@ static inline void check_block_count(struct f2fs_sb_info *sbi,
 {
 	/* check segment usage */
 	if (GET_SIT_VBLOCKS(raw_sit) > sbi->blocks_per_seg)
-		set_sbi_flag(sbi, SBI_NEED_FSCK);
+		sbi->need_fsck = true;
 
 	/* check boundary of a given segment number */
 	if (segno > TOTAL_SEGS(sbi) - 1)
-		set_sbi_flag(sbi, SBI_NEED_FSCK);
+		sbi->need_fsck = true;
 }
 #endif
 
