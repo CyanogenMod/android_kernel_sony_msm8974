@@ -18,7 +18,6 @@
 #include <linux/platform_device.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
-#include <linux/delay.h>
 #include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/soc.h>
@@ -32,12 +31,12 @@
 #include <sound/tlv.h>
 #include <sound/asound.h>
 #include <sound/pcm_params.h>
+#include <sound/q6core.h>
 #include <linux/slab.h>
 
 #include "msm-pcm-routing-v2.h"
 #include "msm-dolby-dap-config.h"
 #include "q6voice.h"
-#include "q6core.h"
 
 struct msm_pcm_routing_bdai_data {
 	u16 port_id; /* AFE port ID */
@@ -728,9 +727,9 @@ static void msm_pcm_routing_process_voice(u16 reg, u16 val, int set)
 
 			if (voc_get_route_flag(session_id, RX_PATH) &&
 			   voc_get_route_flag(session_id, TX_PATH))
-				voc_enable_cvp(session_id);
+				voc_enable_device(session_id);
 		} else {
-			voc_disable_cvp(session_id);
+			voc_disable_device(session_id);
 		}
 	} else {
 		voc_set_route_flag(session_id, TX_PATH, set);
@@ -739,9 +738,9 @@ static void msm_pcm_routing_process_voice(u16 reg, u16 val, int set)
 				msm_bedais[reg].port_id, DEV_TX);
 			if (voc_get_route_flag(session_id, RX_PATH) &&
 			   voc_get_route_flag(session_id, TX_PATH))
-				voc_enable_cvp(session_id);
+				voc_enable_device(session_id);
 		} else {
-			voc_disable_cvp(session_id);
+			voc_disable_device(session_id);
 		}
 	}
 }
@@ -3999,6 +3998,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"CS-VOICE_UL1", NULL, "VOC_EXT_EC MUX"},
 	{"VOIP_UL", NULL, "VOC_EXT_EC MUX"},
 	{"VoLTE_UL", NULL, "VOC_EXT_EC MUX"},
+	{"VOICE2_UL", NULL, "VOC_EXT_EC MUX"},
 
 	{"AUDIO_REF_EC_UL1 MUX", "PRI_MI2S_TX" , "PRI_MI2S_TX"},
 	{"AUDIO_REF_EC_UL1 MUX", "SEC_MI2S_TX" , "SEC_MI2S_TX"},
