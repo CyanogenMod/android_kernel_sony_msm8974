@@ -377,6 +377,9 @@ struct wcd9xxx_mbhc {
 #endif
 
 	struct mutex mbhc_lock;
+	struct mutex impedl_lock;
+	struct mutex impedr_lock;
+	struct mutex mclk_lock;
 };
 
 #define WCD9XXX_MBHC_CAL_SIZE(buttons, rload) ( \

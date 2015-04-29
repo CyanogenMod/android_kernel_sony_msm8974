@@ -1,5 +1,5 @@
 /* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
- * Copyright (C) 2014 Sony Mobile Communications AB. All rights reserved.
+ * Copyright (C) 2014 Sony Mobile Communications Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -35,6 +35,9 @@
 #include <linux/pm_runtime.h>
 #include <linux/kernel.h>
 #include <linux/gpio.h>
+#include <linux/pm_qos.h>
+#include <linux/pm.h>
+#include <mach/cpuidle.h>
 #include "wcd9320.h"
 #include "wcd9xxx-resmgr.h"
 #include "wcd9xxx-common.h"
@@ -1134,6 +1137,24 @@ static const struct soc_enum class_h_dsm_enum =
 
 static const struct snd_kcontrol_new class_h_dsm_mux =
 	SOC_DAPM_ENUM("CLASS_H_DSM MUX Mux", class_h_dsm_enum);
+
+static const char * const rx1_interpolator_text[] = {
+	"ZERO", "RX1 MIX2"
+};
+static const struct soc_enum rx1_interpolator_enum =
+	SOC_ENUM_SINGLE(TAIKO_A_CDC_CLK_RX_B1_CTL, 0, 2, rx1_interpolator_text);
+
+static const struct snd_kcontrol_new rx1_interpolator =
+	SOC_DAPM_ENUM("RX1 INTERP Mux", rx1_interpolator_enum);
+
+static const char * const rx2_interpolator_text[] = {
+	"ZERO", "RX2 MIX2"
+};
+static const struct soc_enum rx2_interpolator_enum =
+	SOC_ENUM_SINGLE(TAIKO_A_CDC_CLK_RX_B1_CTL, 1, 2, rx2_interpolator_text);
+
+static const struct snd_kcontrol_new rx2_interpolator =
+	SOC_DAPM_ENUM("RX2 INTERP Mux", rx2_interpolator_enum);
 
 static const char *const taiko_conn_mad_text[] = {
 	"ADC_MB", "ADC1", "ADC2", "ADC3", "ADC4", "ADC5", "ADC6", "NOTUSED1",
@@ -2505,9 +2526,10 @@ static int taiko_codec_enable_lineout(struct snd_soc_dapm_widget *w,
 						 WCD9XXX_CLSH_STATE_LO,
 						 WCD9XXX_CLSH_REQ_ENABLE,
 						 WCD9XXX_CLSH_EVENT_POST_PA);
-		pr_debug("%s: sleeping 3 ms after %s PA turn on\n",
+		pr_debug("%s: sleeping 5 ms after %s PA turn on\n",
 				__func__, w->name);
-		usleep_range(3000, 3000);
+		/* Wait for CnP time after PA enable */
+		usleep_range(5000, 5100);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		wcd9xxx_clsh_fsm(codec, &taiko->clsh_d,
@@ -2515,6 +2537,10 @@ static int taiko_codec_enable_lineout(struct snd_soc_dapm_widget *w,
 						 WCD9XXX_CLSH_REQ_DISABLE,
 						 WCD9XXX_CLSH_EVENT_POST_PA);
 		snd_soc_update_bits(codec, lineout_gain_reg, 0x40, 0x00);
+		pr_debug("%s: sleeping 5 ms after %s PA turn off\n",
+				__func__, w->name);
+		/* Wait for CnP time after PA disable */
+		usleep_range(5000, 5100);
 		break;
 	}
 	return 0;
@@ -3245,6 +3271,7 @@ static int taiko_hphl_dac_event(struct snd_soc_dapm_widget *w,
 	case SND_SOC_DAPM_POST_PMD:
 		snd_soc_update_bits(codec, TAIKO_A_CDC_CLK_RDAC_CLK_EN_CTL,
 							0x02, 0x00);
+		break;
 	}
 	return 0;
 }
@@ -3381,7 +3408,6 @@ static int taiko_codec_enable_anc(struct snd_soc_dapm_widget *w,
 			snd_soc_write(codec, reg, (old_val & ~mask) |
 				(val & mask));
 		}
-		release_firmware(fw);
 		if (!hwdep_cal)
 			release_firmware(fw);
 		break;
@@ -3408,17 +3434,19 @@ static int taiko_hph_pa_event(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_codec *codec = w->codec;
 	struct taiko_priv *taiko = snd_soc_codec_get_drvdata(codec);
-	enum wcd9xxx_notify_event e_pre_on, e_post_off;
+	enum wcd9xxx_notify_event e_pre_on, e_pre_off, e_post_off;
 	u8 req_clsh_state;
 	u32 pa_settle_time = TAIKO_HPH_PA_SETTLE_COMP_OFF;
 
 	pr_debug("%s: %s event = %d\n", __func__, w->name, event);
 	if (w->shift == 5) {
 		e_pre_on = WCD9XXX_EVENT_PRE_HPHL_PA_ON;
+		e_pre_off = WCD9XXX_EVENT_PRE_HPHL_PA_OFF;
 		e_post_off = WCD9XXX_EVENT_POST_HPHL_PA_OFF;
 		req_clsh_state = WCD9XXX_CLSH_STATE_HPHL;
 	} else if (w->shift == 4) {
 		e_pre_on = WCD9XXX_EVENT_PRE_HPHR_PA_ON;
+		e_pre_off = WCD9XXX_EVENT_PRE_HPHR_PA_OFF;
 		e_post_off = WCD9XXX_EVENT_POST_HPHR_PA_OFF;
 		req_clsh_state = WCD9XXX_CLSH_STATE_HPHR;
 	} else {
@@ -3444,6 +3472,11 @@ static int taiko_hph_pa_event(struct snd_soc_dapm_widget *w,
 						 WCD9XXX_CLSH_REQ_ENABLE,
 						 WCD9XXX_CLSH_EVENT_POST_PA);
 
+		break;
+
+	case SND_SOC_DAPM_PRE_PMD:
+		/* Let MBHC know PA is turning off */
+		wcd9xxx_resmgr_notifier_call(&taiko->resmgr, e_pre_off);
 		break;
 
 	case SND_SOC_DAPM_POST_PMD:
@@ -3774,8 +3807,11 @@ static const struct snd_soc_dapm_route audio_map[] = {
 
 	{"CLASS_H_DSM MUX", "DSM_HPHL_RX1", "RX1 CHAIN"},
 
-	{"RX1 CHAIN", NULL, "RX1 MIX2"},
-	{"RX2 CHAIN", NULL, "RX2 MIX2"},
+	{"RX1 INTERP", NULL, "RX1 MIX2"},
+	{"RX1 CHAIN", NULL, "RX1 INTERP"},
+	{"RX2 INTERP", NULL, "RX2 MIX2"},
+	{"RX2 CHAIN", NULL, "RX2 INTERP"},
+
 	{"RX1 MIX2", NULL, "ANC1 MUX"},
 	{"RX2 MIX2", NULL, "ANC2 MUX"},
 
@@ -5409,14 +5445,16 @@ static const struct snd_soc_dapm_widget taiko_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("HEADPHONE"),
 	SND_SOC_DAPM_PGA_E("HPHL", TAIKO_A_RX_HPH_CNP_EN, 5, 0, NULL, 0,
 		taiko_hph_pa_event, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+		SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU |
+		SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_MIXER_E("HPHL DAC", TAIKO_A_RX_HPH_L_DAC_CTL, 7, 0,
 		hphl_switch, ARRAY_SIZE(hphl_switch), taiko_hphl_dac_event,
 		SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_PGA_E("HPHR", TAIKO_A_RX_HPH_CNP_EN, 4, 0, NULL, 0,
 		taiko_hph_pa_event, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMU |	SND_SOC_DAPM_POST_PMD),
+		SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU |
+		SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_DAC_E("HPHR DAC", NULL, TAIKO_A_RX_HPH_R_DAC_CTL, 7, 0,
 		taiko_hphr_dac_event,
@@ -5474,12 +5512,9 @@ static const struct snd_soc_dapm_widget taiko_dapm_widgets[] = {
 	SND_SOC_DAPM_MIXER("RX2 MIX1", SND_SOC_NOPM, 0, 0, NULL, 0),
 	SND_SOC_DAPM_MIXER("RX7 MIX1", SND_SOC_NOPM, 0, 0, NULL, 0),
 
-	SND_SOC_DAPM_MIXER_E("RX1 MIX2", TAIKO_A_CDC_CLK_RX_B1_CTL, 0, 0, NULL,
-		0, taiko_codec_enable_interpolator, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMU),
-	SND_SOC_DAPM_MIXER_E("RX2 MIX2", TAIKO_A_CDC_CLK_RX_B1_CTL, 1, 0, NULL,
-		0, taiko_codec_enable_interpolator, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_MIXER("RX1 MIX2", SND_SOC_NOPM, 0, 0, NULL, 0),
+	SND_SOC_DAPM_MIXER("RX2 MIX2", SND_SOC_NOPM, 0, 0, NULL, 0),
+
 	SND_SOC_DAPM_MIXER_E("RX3 MIX1", TAIKO_A_CDC_CLK_RX_B1_CTL, 2, 0, NULL,
 		0, taiko_codec_enable_interpolator, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU),
@@ -5496,6 +5531,12 @@ static const struct snd_soc_dapm_widget taiko_dapm_widgets[] = {
 		0, taiko_codec_enable_interpolator, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU),
 
+	SND_SOC_DAPM_MUX_E("RX1 INTERP", TAIKO_A_CDC_CLK_RX_B1_CTL, 0, 0,
+		&rx1_interpolator, taiko_codec_enable_interpolator,
+		SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_MUX_E("RX2 INTERP", TAIKO_A_CDC_CLK_RX_B1_CTL, 1, 0,
+		&rx2_interpolator, taiko_codec_enable_interpolator,
+		SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 
 	SND_SOC_DAPM_MIXER("RX1 CHAIN", TAIKO_A_CDC_RX1_B6_CTL, 5, 0, NULL, 0),
 	SND_SOC_DAPM_MIXER("RX2 CHAIN", TAIKO_A_CDC_RX2_B6_CTL, 5, 0, NULL, 0),
@@ -5798,29 +5839,10 @@ static const struct snd_soc_dapm_widget taiko_dapm_widgets[] = {
 
 	/* Sidetone */
 	SND_SOC_DAPM_MUX("IIR1 INP1 MUX", SND_SOC_NOPM, 0, 0, &iir1_inp1_mux),
-	SND_SOC_DAPM_MIXER("IIR1", TAIKO_A_CDC_CLK_SD_CTL, 0, 0, NULL, 0),
-	SND_SOC_DAPM_MUX_E("IIR1 INP1 MUX", TAIKO_A_CDC_IIR1_GAIN_B1_CTL, 0, 0,
-		&iir1_inp1_mux,  taiko_codec_iir_mux_event,
-		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-
 	SND_SOC_DAPM_PGA_E("IIR1", TAIKO_A_CDC_CLK_SD_CTL, 0, 0, NULL, 0,
 		taiko_codec_set_iir_gain, SND_SOC_DAPM_POST_PMU),
 
-	SND_SOC_DAPM_MUX_E("IIR1 INP2 MUX", TAIKO_A_CDC_IIR1_GAIN_B2_CTL, 0, 0,
-		&iir1_inp2_mux,  taiko_codec_iir_mux_event,
-		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_MUX_E("IIR1 INP3 MUX", TAIKO_A_CDC_IIR1_GAIN_B3_CTL, 0, 0,
-		&iir1_inp3_mux,  taiko_codec_iir_mux_event,
-		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_MUX_E("IIR1 INP4 MUX", TAIKO_A_CDC_IIR1_GAIN_B4_CTL, 0, 0,
-		&iir1_inp4_mux,  taiko_codec_iir_mux_event,
-		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-
-
 	SND_SOC_DAPM_MUX("IIR1 INP2 MUX", SND_SOC_NOPM, 0, 0, &iir1_inp2_mux),
-	SND_SOC_DAPM_MIXER("IIR1", TAIKO_A_CDC_CLK_SD_CTL, 0, 0, NULL, 0),
 
 	SND_SOC_DAPM_MUX("IIR2 INP1 MUX", SND_SOC_NOPM, 0, 0, &iir2_inp1_mux),
 	SND_SOC_DAPM_MIXER("IIR2", TAIKO_A_CDC_CLK_SD_CTL, 1, 0, NULL, 0),
@@ -7236,6 +7258,11 @@ static int taiko_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct taiko_priv *taiko = platform_get_drvdata(pdev);
+
+	if (!taiko) {
+		dev_err(dev, "%s: taiko private data is NULL\n", __func__);
+		return -EINVAL;
+	}
 	dev_dbg(dev, "%s: system resume\n", __func__);
 	/* Notify */
 	wcd9xxx_resmgr_notifier_call(&taiko->resmgr, WCD9XXX_EVENT_POST_RESUME);

@@ -772,6 +772,7 @@ static int stereo_speaker_on(
 	unsigned char h;
 	FIXEDPT re25;
 	int calibrateDone = 0;
+	unsigned short sysctrl_value = 0;
 
 	/* use the generic slave address for optimizations */
 
@@ -843,6 +844,26 @@ static int stereo_speaker_on(
 			return -EINVAL;
 		}
 		pr_info("%s re25:%016llx\n", __func__, re25);
+
+		err = Tfa98xx_ReadRegister16(handles[h], TFA98XX_SYS_CTRL,
+			&sysctrl_value);
+		if (err != Tfa98xx_Error_Ok) {
+			pr_err("%s: Tfa98xx_ReadRegister16 failed, h=%d\n",
+				__func__, h);
+			return -EINVAL;
+		}
+
+		sysctrl_value &= ~(TFA98XX_SYS_CTRL_AMPE_MSK);
+
+		err = Tfa98xx_WriteRegister16(handles[h], TFA98XX_SYS_CTRL,
+			sysctrl_value);
+		if (err != Tfa98xx_Error_Ok) {
+			pr_err("%s: Tfa98xx_WriteRegister16 failed, h=%d\n",
+				__func__, h);
+			return -EINVAL;
+		}
+
+		msleep(20);
 
 		err = Tfa98xx_SetMute(handles[h], Tfa98xx_Mute_Off);
 		if (err != Tfa98xx_Error_Ok) {

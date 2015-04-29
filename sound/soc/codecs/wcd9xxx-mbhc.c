@@ -44,8 +44,8 @@
 #include "wcd9xxx-common.h"
 
 #define WCD9XXX_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
-			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
-			   SND_JACK_UNSUPPORTED | SND_JACK_MICROPHONE2)
+			   SND_JACK_OC_HPHR | SND_JACK_UNSUPPORTED | \
+			   SND_JACK_MICROPHONE2)
 #define WCD9XXX_JACK_BUTTON_MASK (SND_JACK_BTN_0 | SND_JACK_BTN_1 | \
 				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
 				  SND_JACK_BTN_4 | SND_JACK_BTN_5 | \
@@ -126,8 +126,7 @@
 #define WCD9XXX_MB_MEAS_DELTA_MAX_MV 80
 #define WCD9XXX_CS_MEAS_DELTA_MAX_MV 20
 
-#define WCD9XXX_VALID_HP_MIN_Z 10000
-#define WCD9XXX_VALID_HP_MAX_Z 50000
+#define WCD9XXX_VALID_HP_MAX_Z 1000000
 
 static int impedance_detect_en;
 module_param(impedance_detect_en, int,
@@ -868,6 +867,7 @@ static void wcd9xxx_insert_detect_setup(struct wcd9xxx_mbhc *mbhc, bool ins)
 static void wcd9xxx_report_plug(struct wcd9xxx_mbhc *mbhc, int insertion,
 				enum snd_jack_types jack_type)
 {
+	int hp_valid = 0;
 	WCD9XXX_BCL_ASSERT_LOCKED(mbhc->resmgr);
 
 	pr_debug("%s: enter insertion %d hph_status %x\n",
@@ -931,7 +931,8 @@ static void wcd9xxx_report_plug(struct wcd9xxx_mbhc *mbhc, int insertion,
 					    0, WCD9XXX_JACK_MASK);
 			mbhc->hph_status &= ~(SND_JACK_HEADSET |
 						SND_JACK_LINEOUT |
-						SND_JACK_ANC_HEADPHONE);
+						SND_JACK_ANC_HEADPHONE |
+						SND_JACK_UNSUPPORTED);
 		}
 
 		/* Report insertion */
@@ -961,8 +962,15 @@ static void wcd9xxx_report_plug(struct wcd9xxx_mbhc *mbhc, int insertion,
 						mbhc->mbhc_cfg->micbias);
 		}
 
-		if (mbhc->impedance_detect && impedance_detect_en)
-			wcd9xxx_detect_impedance(mbhc, &mbhc->zl, &mbhc->zr);
+		if (mbhc->impedance_detect && impedance_detect_en) {
+			hp_valid = wcd9xxx_detect_impedance(mbhc, &mbhc->zl,
+				&mbhc->zr);
+			if (jack_type == SND_JACK_ANC_HEADPHONE && !hp_valid) {
+				mbhc->current_plug =
+					PLUG_TYPE_STEREO_MICROPHONE;
+				mbhc->hph_status &= ~SND_JACK_HEADPHONE;
+			}
+		}
 
 		pr_debug("%s: Reporting insertion %d(%x)\n", __func__,
 			 jack_type, mbhc->hph_status);
@@ -2308,7 +2316,6 @@ static void wcd9xxx_find_plug_and_report(struct wcd9xxx_mbhc *mbhc,
 					 enum wcd9xxx_mbhc_plug_type plug_type)
 {
 	bool anc_mic_found = false;
-	int hp_valid = 0;
 
 	pr_debug("%s: enter current_plug(%d) new_plug(%d)\n",
 		 __func__, mbhc->current_plug, plug_type);
@@ -2348,12 +2355,8 @@ static void wcd9xxx_find_plug_and_report(struct wcd9xxx_mbhc *mbhc,
 		}
 
 		if (anc_mic_found) {
-			hp_valid = wcd9xxx_detect_impedance(mbhc, &mbhc->zl,
-				&mbhc->zr);
-			/* Report ANC headphone or stereo microphone */
-			wcd9xxx_report_plug(mbhc, 1,
-				hp_valid ? SND_JACK_ANC_HEADPHONE :
-				SND_JACK_STEREO_MICROPHONE);
+			/* Report ANC headphone */
+			wcd9xxx_report_plug(mbhc, 1, SND_JACK_ANC_HEADPHONE);
 		} else {
 			/*
 			 * If Headphone was reported previously, this will
@@ -3142,11 +3145,14 @@ static void wcd9xxx_correct_swch_plug(struct work_struct *work)
 			if (!mbhc->mbhc_cfg->detect_extn_cable &&
 			    retry == NUM_ATTEMPTS_TO_REPORT &&
 			    mbhc->current_plug == PLUG_TYPE_NONE) {
+				WCD9XXX_BCL_LOCK(mbhc->resmgr);
 				wcd9xxx_report_plug(mbhc, 1,
 						    SND_JACK_HEADPHONE);
+				WCD9XXX_BCL_UNLOCK(mbhc->resmgr);
 			}
 		} else if (plug_type == PLUG_TYPE_HEADPHONE) {
 			pr_debug("Good headphone detected, continue polling\n");
+			WCD9XXX_BCL_LOCK(mbhc->resmgr);
 			if (mbhc->mbhc_cfg->detect_extn_cable) {
 				if (mbhc->current_plug != plug_type)
 					wcd9xxx_report_plug(mbhc, 1,
@@ -3155,10 +3161,12 @@ static void wcd9xxx_correct_swch_plug(struct work_struct *work)
 				wcd9xxx_report_plug(mbhc, 1,
 						    SND_JACK_HEADPHONE);
 			}
+			WCD9XXX_BCL_UNLOCK(mbhc->resmgr);
 		} else if (plug_type == PLUG_TYPE_HIGH_HPH) {
 			pr_debug("%s: High HPH detected, continue polling\n",
 				  __func__);
-			 if (mbhc->mbhc_cfg->detect_extn_cable) {
+			WCD9XXX_BCL_LOCK(mbhc->resmgr);
+			if (mbhc->mbhc_cfg->detect_extn_cable) {
 				if (mbhc->current_plug != plug_type)
 					wcd9xxx_report_plug(mbhc, 1,
 							    SND_JACK_LINEOUT);
@@ -3166,6 +3174,7 @@ static void wcd9xxx_correct_swch_plug(struct work_struct *work)
 				wcd9xxx_report_plug(mbhc, 1,
 						     SND_JACK_HEADPHONE);
 			}
+			WCD9XXX_BCL_UNLOCK(mbhc->resmgr);
 		} else {
 			if (plug_type == PLUG_TYPE_GND_MIC_SWAP) {
 				pt_gnd_mic_swap_cnt++;
@@ -4730,6 +4739,9 @@ static int wcd9xxx_event_notify(struct notifier_block *self, unsigned long val,
 	case WCD9XXX_EVENT_PRE_HPHR_PA_ON:
 		set_bit(MBHC_EVENT_PA_HPHR, &mbhc->event_state);
 		break;
+	case WCD9XXX_EVENT_PRE_HPHL_PA_OFF:
+		mutex_lock(&mbhc->impedl_lock);
+		break;
 	case WCD9XXX_EVENT_POST_HPHL_PA_OFF:
 		clear_bit(MBHC_EVENT_PA_HPHL, &mbhc->event_state);
 		/* if HPH PAs are off, report OCP and switch back to CFILT */
@@ -4741,6 +4753,10 @@ static int wcd9xxx_event_notify(struct notifier_block *self, unsigned long val,
 		      (1 << MBHC_EVENT_PA_HPHL | 1 << MBHC_EVENT_PA_HPHR |
 		       1 << MBHC_EVENT_PRE_TX_1_3_ON)))
 			wcd9xxx_switch_micbias(mbhc, 0);
+		mutex_unlock(&mbhc->impedl_lock);
+		break;
+	case WCD9XXX_EVENT_PRE_HPHR_PA_OFF:
+		mutex_lock(&mbhc->impedr_lock);
 		break;
 	case WCD9XXX_EVENT_POST_HPHR_PA_OFF:
 		clear_bit(MBHC_EVENT_PA_HPHR, &mbhc->event_state);
@@ -4753,6 +4769,7 @@ static int wcd9xxx_event_notify(struct notifier_block *self, unsigned long val,
 		      (1 << MBHC_EVENT_PA_HPHL | 1 << MBHC_EVENT_PA_HPHR |
 		       1 << MBHC_EVENT_PRE_TX_1_3_ON)))
 			wcd9xxx_switch_micbias(mbhc, 0);
+		mutex_unlock(&mbhc->impedr_lock);
 		break;
 	/* Clock usage change */
 	case WCD9XXX_EVENT_PRE_MCLK_ON:
@@ -4770,11 +4787,13 @@ static int wcd9xxx_event_notify(struct notifier_block *self, unsigned long val,
 		}
 		break;
 	case WCD9XXX_EVENT_PRE_MCLK_OFF:
+		mutex_lock(&mbhc->mclk_lock);
 		/* If clock source changes, stop and restart polling */
 		if (wcd9xxx_mbhc_polling(mbhc))
 			wcd9xxx_pause_hs_polling(mbhc);
 		break;
 	case WCD9XXX_EVENT_POST_MCLK_OFF:
+		mutex_unlock(&mbhc->mclk_lock);
 		break;
 	case WCD9XXX_EVENT_PRE_RCO_ON:
 		break;
@@ -4909,6 +4928,9 @@ static int wcd9xxx_detect_impedance(struct wcd9xxx_mbhc *mbhc, uint32_t *zl,
 	 * shouldn't read and write hardware registers during detection.
 	 */
 	mutex_lock(&codec->mutex);
+	mutex_lock(&mbhc->impedl_lock);
+	mutex_lock(&mbhc->impedr_lock);
+	mutex_lock(&mbhc->mclk_lock);
 
 	wcd9xxx_onoff_ext_mclk(mbhc, true);
 
@@ -4959,6 +4981,9 @@ static int wcd9xxx_detect_impedance(struct wcd9xxx_mbhc *mbhc, uint32_t *zl,
 
 	mbhc->mbhc_cb->setup_zdet(mbhc, PA_DISABLE);
 
+	mutex_unlock(&mbhc->mclk_lock);
+	mutex_unlock(&mbhc->impedr_lock);
+	mutex_unlock(&mbhc->impedl_lock);
 	mutex_unlock(&codec->mutex);
 
 	wcd9xxx_onoff_ext_mclk(mbhc, false);
@@ -4976,8 +5001,7 @@ static int wcd9xxx_detect_impedance(struct wcd9xxx_mbhc *mbhc, uint32_t *zl,
 	pr_debug("%s: RL %d milliohm, RR %d milliohm\n", __func__, *zl, *zr);
 	pr_debug("%s: Impedance detection completed\n", __func__);
 
-	valid_z = WCD9XXX_VALID_HP_MIN_Z < *zl && *zl < WCD9XXX_VALID_HP_MAX_Z
-		&& WCD9XXX_VALID_HP_MIN_Z < *zr && *zr < WCD9XXX_VALID_HP_MAX_Z;
+	valid_z = *zl < WCD9XXX_VALID_HP_MAX_Z;
 
 	pr_debug("%s: HP valid %d\n", __func__, valid_z);
 
@@ -5075,6 +5099,9 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 	}
 
 	mutex_init(&mbhc->mbhc_lock);
+	mutex_init(&mbhc->impedl_lock);
+	mutex_init(&mbhc->impedr_lock);
+	mutex_init(&mbhc->mclk_lock);
 
 	/* Register event notifier */
 	mbhc->nblock.notifier_call = wcd9xxx_event_notify;
@@ -5082,6 +5109,9 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 	if (ret) {
 		pr_err("%s: Failed to register notifier %d\n", __func__, ret);
 		mutex_destroy(&mbhc->mbhc_lock);
+		mutex_destroy(&mbhc->impedr_lock);
+		mutex_destroy(&mbhc->impedl_lock);
+		mutex_destroy(&mbhc->mclk_lock);
 		return ret;
 	}
 
@@ -5172,6 +5202,9 @@ err_insert_irq:
 	wcd9xxx_resmgr_unregister_notifier(mbhc->resmgr, &mbhc->nblock);
 
 	mutex_destroy(&mbhc->mbhc_lock);
+	mutex_destroy(&mbhc->impedr_lock);
+	mutex_destroy(&mbhc->impedl_lock);
+	mutex_destroy(&mbhc->mclk_lock);
 
 	pr_debug("%s: leave ret %d\n", __func__, ret);
 	return ret;
@@ -5195,6 +5228,9 @@ void wcd9xxx_mbhc_deinit(struct wcd9xxx_mbhc *mbhc)
 	wcd9xxx_free_irq(core_res, mbhc->intr_ids->hph_right_ocp, mbhc);
 
 	mutex_destroy(&mbhc->mbhc_lock);
+	mutex_destroy(&mbhc->impedr_lock);
+	mutex_destroy(&mbhc->impedl_lock);
+	mutex_destroy(&mbhc->mclk_lock);
 	wcd9xxx_resmgr_unregister_notifier(mbhc->resmgr, &mbhc->nblock);
 	wcd9xxx_cleanup_debugfs(mbhc);
 }
