@@ -135,6 +135,9 @@ module_param(impedance_detect_en, int,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(impedance_detect_en, "enable/disable impedance detect");
 
+static bool input_wakeup = true;
+module_param(input_wakeup, bool, 0664);
+
 static bool detect_use_vddio_switch;
 
 struct wcd9xxx_mbhc_detect {
@@ -3390,9 +3393,9 @@ static irqreturn_t wcd9xxx_mech_plug_detect_irq(int irq, void *data)
 		wcd9xxx_unlock_sleep(mbhc->resmgr->core_res);
 	}
 
-	if (mdss_panel_status() == DISPLAY_OFF) {
+	if (input_wakeup && (mdss_panel_status() == DISPLAY_OFF)) {
 		qpnp_ponkey_emulate(1);
-		msleep(5);
+		usleep_range(5000, 5000);
 		qpnp_ponkey_emulate(0);
 	}
 
