@@ -634,11 +634,17 @@ static int process_map(struct ocmem_req *req, unsigned long start,
 {
 	int rc = 0;
 
-	rc = ocmem_restore_sec_program(OCMEM_SECURE_DEV_ID);
+	rc = ocmem_enable_core_clock();
 
-	if (rc < 0) {
-		pr_err("ocmem: Failed to restore security programming\n");
-		goto lock_failed;
+	if (rc < 0)
+		goto core_clock_fail;
+
+
+	if (is_iface_access(req->owner)) {
+		rc = ocmem_enable_iface_clock();
+
+		if (rc < 0)
+			goto iface_clock_fail;
 	}
 
 	rc = ocmem_lock(req->owner, phys_to_offset(req->req_start), req->req_sz,
@@ -664,6 +670,11 @@ static int process_map(struct ocmem_req *req, unsigned long start,
 process_map_fail:
 	ocmem_unlock(req->owner, phys_to_offset(req->req_start), req->req_sz);
 lock_failed:
+	if (is_iface_access(req->owner))
+		ocmem_disable_iface_clock();
+iface_clock_fail:
+	ocmem_disable_core_clock();
+core_clock_fail:
 	pr_err("ocmem: Failed to map ocmem request\n");
 	return rc;
 }
@@ -687,6 +698,10 @@ static int process_unmap(struct ocmem_req *req, unsigned long start,
 		goto unlock_failed;
 	}
 
+	if (is_iface_access(req->owner))
+		ocmem_disable_iface_clock();
+	ocmem_disable_core_clock();
+	pr_debug("ocmem: Unmapped request %p\n", req);
 	return 0;
 
 unlock_failed:
@@ -1330,21 +1345,9 @@ static int process_grow(struct ocmem_req *req)
 	if (rc < 0)
 		return -EINVAL;
 
-	rc = ocmem_enable_core_clock();
-
-	if (rc < 0)
-		goto core_clock_fail;
-
-	if (is_iface_access(req->owner)) {
-		rc = ocmem_enable_iface_clock();
-
-		if (rc < 0)
-			goto iface_clock_fail;
-	}
-
 	rc = process_map(req, req->req_start, req->req_end);
 	if (rc < 0)
-		goto map_error;
+		return -EINVAL;
 
 	offset = phys_to_offset(req->req_start);
 
@@ -1363,14 +1366,7 @@ static int process_grow(struct ocmem_req *req)
 		BUG();
 	}
 	return 0;
-
 power_ctl_error:
-map_error:
-if (is_iface_access(req->owner))
-	ocmem_disable_iface_clock();
-iface_clock_fail:
-	ocmem_disable_core_clock();
-core_clock_fail:
 	return -EINVAL;
 }
 
@@ -1540,10 +1536,6 @@ int process_free(int id, struct ocmem_handle *handle)
 				}
 			}
 
-			if (is_iface_access(req->owner))
-				ocmem_disable_iface_clock();
-			ocmem_disable_core_clock();
-
 			rc = do_free(req);
 			if (rc < 0) {
 				pr_err("ocmem: Failed to free %p\n", req);
@@ -1564,9 +1556,6 @@ int process_free(int id, struct ocmem_handle *handle)
 				pr_err("Failed to switch OFF memory macros\n");
 				goto free_fail;
 			}
-			if (is_iface_access(req->owner))
-				ocmem_disable_iface_clock();
-			ocmem_disable_core_clock();
 		}
 
 		/* free the allocation */
@@ -1669,10 +1658,6 @@ int process_drop(int id, struct ocmem_handle *handle,
 		rc = process_unmap(req, req->req_start, req->req_end);
 		if (rc < 0)
 			return -EINVAL;
-
-		if (is_iface_access(req->owner))
-			ocmem_disable_iface_clock();
-		ocmem_disable_core_clock();
 	} else
 		return -EINVAL;
 
@@ -1783,9 +1768,6 @@ int process_shrink(int id, struct ocmem_handle *handle, unsigned long size)
 			rc = process_unmap(req, req->req_start, req->req_end);
 			if (rc < 0)
 				goto shrink_fail;
-			if (is_iface_access(req->owner))
-				ocmem_disable_iface_clock();
-			ocmem_disable_core_clock();
 		}
 		rc = do_free(req);
 		if (rc < 0)
@@ -2272,17 +2254,6 @@ int process_allocate(int id, struct ocmem_handle *handle,
 
 	if (req->req_sz != 0) {
 
-		rc = ocmem_enable_core_clock();
-
-		if (rc < 0)
-			goto core_clock_fail;
-
-		if (is_iface_access(req->owner)) {
-			rc = ocmem_enable_iface_clock();
-
-			if (rc < 0)
-				goto iface_clock_fail;
-		}
 		rc = process_map(req, req->req_start, req->req_end);
 		if (rc < 0)
 			goto map_error;
@@ -2304,11 +2275,6 @@ power_ctl_error:
 map_error:
 	handle->req = NULL;
 	do_free(req);
-	if (is_iface_access(req->owner))
-		ocmem_disable_iface_clock();
-iface_clock_fail:
-	ocmem_disable_core_clock();
-core_clock_fail:
 do_allocate_error:
 	ocmem_destroy_req(req);
 	return -EINVAL;
@@ -2337,17 +2303,6 @@ int process_delayed_allocate(struct ocmem_req *req)
 	inc_ocmem_stat(zone_of(req), NR_ASYNC_ALLOCATIONS);
 
 	if (req->req_sz != 0) {
-		rc = ocmem_enable_core_clock();
-
-		if (rc < 0)
-			goto core_clock_fail;
-
-		if (is_iface_access(req->owner)) {
-			rc = ocmem_enable_iface_clock();
-
-			if (rc < 0)
-				goto iface_clock_fail;
-		}
 
 		rc = process_map(req, req->req_start, req->req_end);
 		if (rc < 0)
@@ -2378,11 +2333,6 @@ power_ctl_error:
 map_error:
 	handle->req = NULL;
 	do_free(req);
-	if (is_iface_access(req->owner))
-		ocmem_disable_iface_clock();
-iface_clock_fail:
-	ocmem_disable_core_clock();
-core_clock_fail:
 do_allocate_error:
 	ocmem_destroy_req(req);
 	return -EINVAL;
