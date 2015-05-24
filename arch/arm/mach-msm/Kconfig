@@ -3219,3 +3219,10 @@ config MSM_MODEM_SUBSYSTEM_RESTART_MONITOR
 	  This option enables a module which can notify user-space
 	  applications of modem subsystem power up/down event via uevent.
 endif
+
+config SIM_DETECT_FEATURE
+	bool "work around GPIO 56/60 prevent AP sleep"
+	help
+	  based on modem hotstwap ISR to work around GPIO 56/60
+	  prevent AP suspend issue.use modem side GPIO detect to SIM insert
+	  or remove, and notify AP to handle reboot
