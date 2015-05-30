@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,7 @@
 
 #define MSM_VDEC_DVC_NAME "msm_vdec_8974"
 #define MIN_NUM_OUTPUT_BUFFERS 4
-#define MAX_NUM_OUTPUT_BUFFERS VIDEO_MAX_FRAME
+#define MAX_NUM_OUTPUT_BUFFERS VB2_MAX_FRAME
 #define DEFAULT_VIDEO_CONCEAL_COLOR_BLACK 0x8010
 #define MB_SIZE_IN_PIXEL (16 * 16)
 
@@ -527,6 +527,14 @@ int msm_vdec_prepare_buf(struct msm_vidc_inst *inst,
 	}
 	hdev = inst->core->device;
 
+	if (inst->state == MSM_VIDC_CORE_INVALID ||
+			inst->core->state == VIDC_CORE_INVALID) {
+		dprintk(VIDC_ERR,
+			"Core %p in bad state, ignoring prepare buf\n",
+				inst->core);
+		goto exit;
+	}
+
 	switch (b->type) {
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		break;
@@ -576,6 +584,7 @@ int msm_vdec_prepare_buf(struct msm_vidc_inst *inst,
 		dprintk(VIDC_ERR, "Buffer type not recognized: %d\n", b->type);
 		break;
 	}
+exit:
 	return rc;
 }
 
@@ -843,6 +852,26 @@ int msm_vdec_g_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 			f->fmt.pix_mp.plane_fmt[0].reserved[0] =
 				(__u16)inst->prop.height[CAPTURE_PORT];
 		}
+
+		if (msm_comm_get_stream_output_mode(inst) ==
+			HAL_VIDEO_DECODER_SECONDARY) {
+			if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+				f->fmt.pix_mp.height =
+					inst->prop.height[CAPTURE_PORT];
+				f->fmt.pix_mp.width =
+					inst->prop.width[CAPTURE_PORT];
+			} else if (f->type ==
+							V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+				f->fmt.pix_mp.height =
+					inst->prop.height[OUTPUT_PORT];
+				f->fmt.pix_mp.width =
+					inst->prop.width[OUTPUT_PORT];
+				f->fmt.pix_mp.plane_fmt[0].bytesperline =
+					(__u16)inst->prop.width[OUTPUT_PORT];
+				f->fmt.pix_mp.plane_fmt[0].reserved[0] =
+					(__u16)inst->prop.height[OUTPUT_PORT];
+			}
+		}
 	} else {
 		dprintk(VIDC_ERR,
 			"Buf type not recognized, type = %d\n",
@@ -892,9 +921,8 @@ int msm_vdec_s_parm(struct msm_vidc_inst *inst, struct v4l2_streamparm *a)
 		dprintk(VIDC_PROF, "reported fps changed for %p: %d->%d\n",
 				inst, inst->prop.fps, fps);
 		inst->prop.fps = fps;
-		mutex_lock(&inst->core->sync_lock);
+
 		msm_comm_scale_clocks_and_bus(inst);
-		mutex_unlock(&inst->core->sync_lock);
 	}
 exit:
 	return rc;
@@ -1243,9 +1271,8 @@ static inline int start_streaming(struct msm_vidc_inst *inst)
 			goto fail_start;
 		}
 	}
-	mutex_lock(&inst->core->sync_lock);
+
 	msm_comm_scale_clocks_and_bus(inst);
-	mutex_unlock(&inst->core->sync_lock);
 
 	rc = msm_comm_try_state(inst, MSM_VIDC_START_DONE);
 	if (rc) {
@@ -1352,9 +1379,7 @@ static int msm_vdec_stop_streaming(struct vb2_queue *q)
 		break;
 	}
 
-	mutex_lock(&inst->core->sync_lock);
 	msm_comm_scale_clocks_and_bus(inst);
-	mutex_unlock(&inst->core->sync_lock);
 
 	if (rc)
 		dprintk(VIDC_ERR,
@@ -1384,7 +1409,7 @@ int msm_vdec_cmd(struct msm_vidc_inst *inst, struct v4l2_decoder_cmd *dec)
 	case V4L2_DEC_QCOM_CMD_FLUSH:
 		if (core->state != VIDC_CORE_INVALID &&
 			inst->state ==  MSM_VIDC_CORE_INVALID) {
-			rc = msm_comm_recover_from_session_error(inst);
+			rc = msm_comm_kill_session(inst);
 			if (rc)
 				dprintk(VIDC_ERR,
 					"Failed to recover from session_error: %d\n",
@@ -1399,7 +1424,7 @@ int msm_vdec_cmd(struct msm_vidc_inst *inst, struct v4l2_decoder_cmd *dec)
 	case V4L2_DEC_CMD_STOP:
 		if (core->state != VIDC_CORE_INVALID &&
 			inst->state ==  MSM_VIDC_CORE_INVALID) {
-			rc = msm_comm_recover_from_session_error(inst);
+			rc = msm_comm_kill_session(inst);
 			if (rc)
 				dprintk(VIDC_ERR,
 					"Failed to recover from session_error: %d\n",
@@ -1911,6 +1936,11 @@ int msm_vdec_ctrl_init(struct msm_vidc_inst *inst)
 
 int msm_vdec_ctrl_deinit(struct msm_vidc_inst *inst)
 {
+	if (!inst) {
+		dprintk(VIDC_ERR, "%s invalid parameters\n", __func__);
+		return -EINVAL;
+	}
+
 	kfree(inst->ctrls);
 	kfree(inst->cluster);
 	v4l2_ctrl_handler_free(&inst->ctrl_handler);
