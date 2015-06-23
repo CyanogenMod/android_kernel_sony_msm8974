@@ -129,7 +129,10 @@ static int msm_comm_get_load(struct msm_vidc_core *core,
 	enum session_type type, enum vidc_calculation calc)
 {
 	struct msm_vidc_inst *inst = NULL;
-	int num_mbs_per_sec = 0;
+	int num_mbs_per_sec = 0, rc = 0, op_rate = 0;
+	struct v4l2_control ctrl = {
+		.id = V4L2_CID_MPEG_VIDC_VIDEO_OPERATING_RATE };
+
 	if (!core) {
 		dprintk(VIDC_ERR, "Invalid args: %p\n", core);
 		return -EINVAL;
@@ -140,13 +143,23 @@ static int msm_comm_get_load(struct msm_vidc_core *core,
 		if (inst->session_type == type &&
 			inst->state >= MSM_VIDC_OPEN_DONE &&
 			inst->state < MSM_VIDC_STOP_DONE) {
-			if (is_non_realtime_session(inst) && calc == LOAD)
+			rc = v4l2_g_ctrl(&inst->ctrl_handler, &ctrl);
+			if (!rc && ctrl.value)
+				op_rate = ctrl.value >> 16;
+			if (is_non_realtime_session(inst) && calc == LOAD) {
 				// 1 fps load for non-realtime
 				num_mbs_per_sec +=
 					msm_comm_get_mbs_per_sec(inst)/inst->prop.fps;
-			else if (!is_thumbnail_session(inst))
-				num_mbs_per_sec +=
-					msm_comm_get_mbs_per_sec(inst);
+			} else if (!is_thumbnail_session(inst)) {
+				if (op_rate) {
+					num_mbs_per_sec += NUM_MBS_PER_SEC(
+						max(inst->prop.height[CAPTURE_PORT], inst->prop.height[OUTPUT_PORT]),
+						max(inst->prop.width[CAPTURE_PORT], inst->prop.width[OUTPUT_PORT]), op_rate);
+				} else {
+					num_mbs_per_sec +=
+						msm_comm_get_mbs_per_sec(inst);
+				}
+			}
 		}
 		mutex_unlock(&inst->lock);
 	}
