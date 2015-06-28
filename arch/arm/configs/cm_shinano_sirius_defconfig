@@ -327,6 +327,7 @@ CONFIG_USB_SIERRA_NET=y
 CONFIG_BCMDHD=m
 CONFIG_BCMDHD_FW_PATH="/system/etc/firmware/wlan/bcmdhd/fw_bcmdhd.bin"
 CONFIG_BCMDHD_NVRAM_PATH="/system/etc/firmware/wlan/bcmdhd/bcmdhd.cal"
+# CONFIG_INPUT_MOUSEDEV is not set
 CONFIG_INPUT_EVDEV=y
 CONFIG_INPUT_KEYRESET=y
 CONFIG_KEYBOARD_GPIO=y
