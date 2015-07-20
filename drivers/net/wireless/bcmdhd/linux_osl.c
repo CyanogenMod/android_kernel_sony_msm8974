@@ -1,7 +1,8 @@
 /*
  * Linux OS Independent Layer
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
+ * Copyright (C) 2015 Sony Mobile Communications Inc.
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1001,6 +1002,7 @@ original:
 #endif /* CONFIG_DHD_USE_STATIC_BUF */
 
 	flags = CAN_SLEEP() ? GFP_KERNEL: GFP_ATOMIC;
+	flags |= __GFP_REPEAT;
 	if ((addr = kmalloc(size, flags)) == NULL) {
 		if (osh)
 			osh->failed++;

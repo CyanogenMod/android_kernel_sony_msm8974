@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_cfg80211.h 489825 2014-07-08 09:03:49Z $
+ * $Id: wl_cfg80211.h 516345 2014-11-19 11:58:57Z $
  */
 
 #ifndef _wl_cfg80211_h_
@@ -596,6 +596,7 @@ struct bcm_cfg80211 {
 	u32 tdls_mgmt_frame_len;
 	s32 tdls_mgmt_freq;
 #endif /* WLTDLS */
+	bool nan_running;
 };
 
 
@@ -795,24 +796,38 @@ wl_get_netinfo_by_netdev(struct bcm_cfg80211 *cfg, struct net_device *ndev)
 #define ndev_to_wlc_ndev(ndev, cfg)	(ndev)
 #endif /* WL_ENABLE_P2P_IF */
 
-#if defined(WL_ENABLE_P2P_IF)
+#if defined(WL_CFG80211_P2P_DEV_IF)
+#define wdev_to_wlc_ndev(wdev, cfg)	\
+	((wdev->iftype == NL80211_IFTYPE_P2P_DEVICE) ? \
+	bcmcfg_to_prmry_ndev(cfg) : wdev_to_ndev(wdev))
+#define cfgdev_to_wlc_ndev(cfgdev, cfg)	wdev_to_wlc_ndev(cfgdev, cfg)
+#define bcmcfg_to_prmry_cfgdev(cfgdev, cfg) bcmcfg_to_prmry_wdev(cfg)
+#elif defined(WL_ENABLE_P2P_IF)
 #define cfgdev_to_wlc_ndev(cfgdev, cfg)	ndev_to_wlc_ndev(cfgdev, cfg)
 #define bcmcfg_to_prmry_cfgdev(cfgdev, cfg) bcmcfg_to_prmry_ndev(cfg)
 #else
 #define cfgdev_to_wlc_ndev(cfgdev, cfg)	(cfgdev)
 #define bcmcfg_to_prmry_cfgdev(cfgdev, cfg) (cfgdev)
-#endif 
+#endif /* WL_CFG80211_P2P_DEV_IF */
 
+#if defined(WL_CFG80211_P2P_DEV_IF)
+#define ndev_to_cfgdev(ndev)	ndev_to_wdev(ndev)
+#define discover_cfgdev(cfgdev, cfg) (cfgdev->iftype == NL80211_IFTYPE_P2P_DEVICE)
+#else
 #define ndev_to_cfgdev(ndev)	(ndev)
 #define discover_cfgdev(cfgdev, cfg) (cfgdev == cfg->p2p_net)
+#endif /* WL_CFG80211_P2P_DEV_IF */
 
-#if defined(WL_ENABLE_P2P_IF)
+#if defined(WL_CFG80211_P2P_DEV_IF)
+#define scan_req_match(cfg)	(((cfg) && (cfg->scan_request) && \
+	(cfg->scan_request->wdev == cfg->p2p_wdev)) ? true : false)
+#elif defined(WL_ENABLE_P2P_IF)
 #define scan_req_match(cfg)	(((cfg) && (cfg->scan_request) && \
 	(cfg->scan_request->dev == cfg->p2p_net)) ? true : false)
 #else
 #define scan_req_match(cfg)	(((cfg) && p2p_is_on(cfg) && p2p_scan(cfg)) ? \
 	true : false)
-#endif 
+#endif /* WL_CFG80211_P2P_DEV_IF */
 
 #define wl_to_sr(w) (w->scan_req_int)
 #if defined(STATIC_WL_PRIV_STRUCT)
@@ -897,12 +912,16 @@ void wl_cfg80211_btcoex_deinit(void);
 extern s32 wl_cfg80211_get_best_channels(struct net_device *dev, char* command,
 	int total_len);
 #endif /* WL_SUPPORT_AUTO_CHANNEL */
+
+extern int wl_cfg80211_ether_atoe(const char *a, struct ether_addr *n);
+extern int wl_cfg80211_hex_str_to_bin(unsigned char *data, int dlen, char *str);
 extern int wl_cfg80211_hang(struct net_device *dev, u16 reason);
 extern s32 wl_mode_to_nl80211_iftype(s32 mode);
 int wl_cfg80211_do_driver_init(struct net_device *net);
 void wl_cfg80211_enable_trace(bool set, u32 level);
 extern s32 wl_update_wiphybands(struct bcm_cfg80211 *cfg, bool notify);
 extern s32 wl_cfg80211_if_is_group_owner(void);
+extern chanspec_t wl_chspec_host_to_driver(chanspec_t chanspec);
 extern chanspec_t wl_ch_host_to_driver(u16 channel);
 extern s32 wl_set_tx_power(struct net_device *dev,
 	enum nl80211_tx_power_setting type, s32 dbm);
@@ -942,6 +961,10 @@ extern u8 wl_get_action_category(void *frame, u32 frame_len);
 extern int wl_get_public_action(void *frame, u32 frame_len, u8 *ret_action);
 
 extern int wl_cfg80211_enable_roam_offload(struct net_device *dev, bool enable);
+#ifdef WL_NAN
+extern int wl_cfg80211_nan_cmd_handler(struct net_device *ndev, char *cmd,
+	int cmd_len);
+#endif /* WL_NAN */
 
 #ifdef WL_CFG80211_VSDB_PRIORITIZE_SCAN_REQUEST
 struct net_device *wl_cfg80211_get_remain_on_channel_ndev(struct bcm_cfg80211 *cfg);

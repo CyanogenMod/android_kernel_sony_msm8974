@@ -1,7 +1,7 @@
 /*
  * bcmevent read-only data shared by kernel or app layers
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,7 @@
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
- * $Id: bcmevent.c 487870 2014-06-27 07:37:35Z $
+ * $Id: bcmevent.c 516345 2014-11-19 11:58:57Z $
  */
 
 #include <typedefs.h>
@@ -152,6 +152,10 @@ const bcmevent_name_t bcmevent_names[] = {
 #ifdef WLAIBSS
 	BCMEVENT_NAME(WLC_E_AIBSS_TXFAIL),
 #endif /* WLAIBSS */
+#ifdef GSCAN_SUPPORT
+	BCMEVENT_NAME(WLC_E_PFN_GSCAN_FULL_RESULT),
+	BCMEVENT_NAME(WLC_E_PFN_SWC),
+#endif /* GSCAN_SUPPORT */
 	BCMEVENT_NAME(WLC_E_RMC_EVENT),
 };
 

@@ -1,7 +1,7 @@
 /*
  * Driver O/S-independent utility routines
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,7 @@
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
- * $Id: bcmutils.c 461404 2014-03-12 01:59:36Z $
+ * $Id: bcmutils.c 516345 2014-11-19 11:58:57Z $
  */
 
 #include <bcm_cfg.h>
@@ -1939,6 +1939,7 @@ bcm_format_flags(const bcm_bit_desc_t *bd, uint32 flags, char* buf, int len)
 
 	return (int)(p - buf);
 }
+#endif 
 
 /* print bytes formatted as hex to a string. return the resulting string length */
 int
@@ -1954,7 +1955,6 @@ bcm_format_hex(char *str, const void *bytes, int len)
 	}
 	return (int)(p - str);
 }
-#endif 
 
 /* pretty hex print a contiguous buffer */
 void
