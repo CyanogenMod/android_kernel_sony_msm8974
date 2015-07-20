@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Android related functions
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_android.c 489825 2014-07-08 09:03:49Z $
+ * $Id: wl_android.c 518916 2014-12-04 04:59:10Z $
  */
 
 #include <linux/module.h>
@@ -47,6 +47,9 @@
 #ifdef WL_CFG80211
 #include <wl_cfg80211.h>
 #endif
+#ifdef WL_NAN
+#include <wl_cfgnan.h>
+#endif /* WL_NAN */
 
 /*
  * Android private command strings, PLEASE define new private commands here
@@ -83,6 +86,7 @@
 #define CMD_SETROAMMODE 	"SETROAMMODE"
 #define CMD_SETIBSSBEACONOUIDATA	"SETIBSSBEACONOUIDATA"
 #define CMD_MIRACAST		"MIRACAST"
+#define CMD_NAN				"NAN_"
 
 #if defined(WL_SUPPORT_AUTO_CHANNEL)
 #define CMD_GET_BEST_CHANNELS	"GET_BEST_CHANNELS"
@@ -461,7 +465,7 @@ exit:
 #ifndef WL_SCHED_SCAN
 static int wl_android_set_pno_setup(struct net_device *dev, char *command, int total_len)
 {
-	wlc_ssid_t ssids_local[MAX_PFN_LIST_COUNT];
+	wlc_ssid_ext_t ssids_local[MAX_PFN_LIST_COUNT];
 	int res = -1;
 	int nssid = 0;
 	cmd_tlv_t *cmd_tlv_temp;
@@ -931,7 +935,7 @@ wl_android_get_connection_stats(struct net_device *dev, char *command, int total
 
 	bufsize = total_len;
 	if (bufsize < sizeof(struct connection_stats)) {
-		WL_ERR(("%s: not enough buffer size, provided=%u, requires=%u\n",
+		WL_ERR(("%s: not enough buffer size, provided=%u, requires=%zu\n",
 			__FUNCTION__, bufsize,
 			sizeof(struct connection_stats)));
 		goto error;
@@ -2062,6 +2066,12 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		bytes_written = wl_cfg80211_set_p2p_noa(net, command + skip,
 			priv_cmd.total_len - skip);
 	}
+#ifdef WL_NAN
+	else if (strnicmp(command, CMD_NAN, strlen(CMD_NAN)) == 0) {
+		bytes_written = wl_cfg80211_nan_cmd_handler(net, command,
+			priv_cmd.total_len);
+	}
+#endif /* WL_NAN */
 #if !defined WL_ENABLE_P2P_IF
 	else if (strnicmp(command, CMD_P2P_GET_NOA, strlen(CMD_P2P_GET_NOA)) == 0) {
 		bytes_written = wl_cfg80211_get_p2p_noa(net, command, priv_cmd.total_len);

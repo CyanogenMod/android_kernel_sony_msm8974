@@ -3,7 +3,7 @@
  * This header file housing the define and function prototype use by
  * both the wl driver, tools & Apps.
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -348,6 +348,17 @@ extern bool wf_chspec_valid(chanspec_t chanspec);
  * @return Returns the channel number of the primary 20MHz channel
  */
 extern uint8 wf_chspec_ctlchan(chanspec_t chspec);
+
+/**
+ * Return the bandwidth string.
+ *
+ * This function returns the bandwidth string for the passed chanspec.
+ *
+ * @param	chspec    input chanspec
+ *
+ * @return Returns the bandwidth string
+ */
+extern char * wf_chspec_to_bw_str(chanspec_t chspec);
 
 /**
  * Return the primary (control) chanspec.

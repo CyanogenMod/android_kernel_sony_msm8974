@@ -2,7 +2,7 @@
  * Broadcom Dongle Host Driver (DHD), Linux-specific network interface
  * Basically selected code segments from usb-cdc.c and usb-rndis.c
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * Copyright (C) 2013 Sony Mobile Communications Inc.
  * 
  *      Unless you and Broadcom execute a separate written software license
@@ -23,7 +23,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_linux.c 500527 2014-09-04 09:38:46Z $
+ * $Id: dhd_linux.c 524130 2015-01-06 02:36:46Z $
  */
 
 #include <typedefs.h>
@@ -75,6 +75,9 @@
 #endif
 #ifdef PNO_SUPPORT
 #include <dhd_pno.h>
+#endif
+#ifdef RTT_SUPPORT
+#include <dhd_rtt.h>
 #endif
 
 #ifdef CONFIG_COMPAT
@@ -312,6 +315,13 @@ struct ipv6_work_info_t {
 	unsigned long		event;
 };
 
+#ifdef DHD_DEBUG
+typedef struct dhd_dump {
+	uint8 *buf;
+	int bufsize;
+} dhd_dump_t;
+#endif /* DHD_DEBUG */
+
 /* Local private structure (extension of pub) */
 typedef struct dhd_info {
 #if defined(WL_WIRELESS_EXT)
@@ -407,6 +417,15 @@ typedef struct dhd_info {
 #ifdef SAR_SUPPORT
 	struct notifier_block sar_notifier;
 #endif
+#ifdef DHD_DEBUG
+	dhd_dump_t *dump;
+	struct timer_list join_timer;
+	u32 join_timeout_val;
+	bool join_timer_active;
+	uint scan_time_count;
+	struct timer_list scan_timer;
+	bool scan_timer_active;
+#endif /* DHD_DEBUG */
 } dhd_info_t;
 
 /* Flag to indicate if we should download firmware on driver load */
@@ -471,11 +490,7 @@ module_param(dhd_watchdog_ms, uint, 0);
 
 #if defined(DHD_DEBUG)
 /* Console poll interval */
-#ifdef SOMC_MIMO
-uint dhd_console_ms = 50;
-#else
 uint dhd_console_ms = 0;
-#endif /* SOMC_MIMO */
 module_param(dhd_console_ms, uint, 0644);
 #endif /* defined(DHD_DEBUG) */
 
@@ -3849,7 +3864,10 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 #ifdef DHDTCPACK_SUPPRESS
 	dhd_tcpack_suppress_set(&dhd->pub, TCPACK_SUP_DELAYTX);
 #endif /* DHDTCPACK_SUPPRESS */
-
+#ifdef DHD_DEBUG
+	dhd->join_timeout_val = DHD_JOIN_MAX_TIME_DEFAULT;
+	dhd->scan_time_count = DHD_SCAN_DEF_TIMEOUT;
+#endif
 	dhd_state |= DHD_ATTACH_STATE_DONE;
 	dhd->dhd_state = dhd_state;
 
@@ -4186,7 +4204,7 @@ dhd_get_concurrent_capabilites(dhd_pub_t *dhd)
 				ret = DHD_FLAG_CONCURR_SINGLE_CHAN_MODE;
 				if (mchan_supported)
 					ret |= DHD_FLAG_CONCURR_MULTI_CHAN_MODE;
-#if defined(WL_ENABLE_P2P_IF)
+#if defined(WL_ENABLE_P2P_IF) || defined(WL_CFG80211_P2P_DEV_IF)
 				/* For customer_hw4, although ICS,
 				* we still support concurrent mode
 				*/
@@ -4768,6 +4786,9 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #endif
 	setbit(eventmask, WLC_E_JOIN_START);
 	setbit(eventmask, WLC_E_SCAN_COMPLETE);
+#ifdef DHD_DEBUG
+	setbit(eventmask, WLC_E_SCAN_CONFIRM_IND);
+#endif
 #ifdef WLMEDIA_HTSF
 	setbit(eventmask, WLC_E_HTSFSYNC);
 #endif /* WLMEDIA_HTSF */
@@ -4787,6 +4808,9 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef WLTDLS
 	setbit(eventmask, WLC_E_TDLS_PEER_EVENT);
 #endif /* WLTDLS */
+#ifdef RTT_SUPPORT
+	setbit(eventmask, WLC_E_PROXD);
+#endif /* RTT_SUPPORT */
 #ifdef WL_CFG80211
 	setbit(eventmask, WLC_E_ESCAN_RESULT);
 	if (dhd->op_mode & DHD_FLAG_P2P_MODE) {
@@ -4924,6 +4948,11 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef PNO_SUPPORT
 	if (!dhd->pno_state) {
 		dhd_pno_init(dhd);
+	}
+#endif
+#ifdef RTT_SUPPORT
+	if (!dhd->rtt_state) {
+		dhd_rtt_init(dhd);
 	}
 #endif
 #ifdef WL11U
@@ -5526,6 +5555,11 @@ void dhd_detach(dhd_pub_t *dhdp)
 	if (dhdp->pno_state)
 		dhd_pno_deinit(dhdp);
 #endif
+#ifdef RTT_SUPPORT
+	if (dhdp->rtt_state) {
+		dhd_rtt_deinit(dhdp);
+	}
+#endif
 #if defined(CONFIG_PM_SLEEP)
 	if (dhd_pm_notifier_registered) {
 		unregister_pm_notifier(&dhd->pm_notifier);
@@ -5590,6 +5624,11 @@ dhd_free(dhd_pub_t *dhdp)
 			}
 		}
 		dhd = (dhd_info_t *)dhdp->info;
+		if (dhdp->soc_ram) {
+			MFREE(dhd->pub.osh, dhdp->soc_ram, dhdp->soc_ram_length);
+			dhdp->soc_ram = NULL;
+		}
+
 		/* If pointer is allocated by dhd_os_prealloc then avoid MFREE */
 		if (dhd &&
 			dhd != (dhd_info_t *)dhd_os_prealloc(dhdp, DHD_PREALLOC_DHD_INFO, 0, FALSE))
@@ -5614,16 +5653,34 @@ dhd_module_cleanup(void)
 #endif
 }
 
+#define BCMCONF "/data/misc/wifi/bcm_debug.conf"
+
 static int __init
 dhd_module_init(void)
 {
 	int err;
+	void *fp = NULL;
 
 	DHD_ERROR(("%s in\n", __FUNCTION__));
 	err = dhd_wifi_platform_register_drv();
 #ifdef CONFIG_SONY_SUBSYS_RAMDUMP
 	register_sony_subsys("bcm_wlan");
 #endif
+
+	fp = dhd_os_open_image(BCMCONF);
+	if (fp) {
+		unsigned char buf[7];
+		long res = 0;
+		int len = dhd_os_get_image_block(buf, 7, fp);
+		if (len > 0 && len < 7) {
+			buf[len] = '\0';
+			if (!kstrtol(buf, 16, &res))
+				dhd_msg_level = (int)res;
+		} else {
+			DHD_ERROR(("Error in dbg level pattern\n"));
+		}
+		dhd_os_close_image(fp);
+	}
 
 	return err;
 }
@@ -6102,6 +6159,11 @@ dhd_net_bus_devreset(struct net_device *dev, uint8 flag)
 	if (dhd->pub.pno_state)
 		dhd_pno_deinit(&dhd->pub);
 #endif
+#ifdef RTT_SUPPORT
+	if (dhd->pub.rtt_state) {
+		dhd_rtt_deinit(&dhd->pub);
+	}
+#endif /* RTT_SUPPORT */
 	}
 
 	if (!flag) {
@@ -6262,6 +6324,109 @@ done:
 	return ret;
 }
 
+int
+dhd_dev_get_feature_set(struct net_device *dev)
+{
+	dhd_info_t *ptr = *(dhd_info_t **)netdev_priv(dev);
+	dhd_pub_t *dhd = (&ptr->pub);
+	int feature_set = 0;
+
+	if (!dhd)
+		return feature_set;
+
+	if (FW_SUPPORTED(dhd, sta))
+		feature_set |= WIFI_FEATURE_INFRA;
+	if (FW_SUPPORTED(dhd, dualband))
+		feature_set |= WIFI_FEATURE_INFRA_5G;
+	if (FW_SUPPORTED(dhd, p2p))
+		feature_set |= WIFI_FEATURE_P2P;
+	if (dhd->op_mode & DHD_FLAG_HOSTAP_MODE)
+		feature_set |= WIFI_FEATURE_SOFT_AP;
+	if (FW_SUPPORTED(dhd, tdls))
+		feature_set |= WIFI_FEATURE_TDLS;
+	if (FW_SUPPORTED(dhd, vsdb))
+		feature_set |= WIFI_FEATURE_TDLS_OFFCHANNEL;
+	if (FW_SUPPORTED(dhd, nan)) {
+		feature_set |= WIFI_FEATURE_NAN;
+		/* NAN is essentail for d2d rtt */
+		if (FW_SUPPORTED(dhd, rttd2d))
+			feature_set |= WIFI_FEATURE_D2D_RTT;
+	}
+#ifdef RTT_SUPPORT
+	feature_set |= WIFI_FEATURE_D2AP_RTT;
+#endif /* RTT_SUPPORT */
+#ifdef LINKSTAT_SUPPORT
+	feature_set |= WIFI_FEATURE_LINKSTAT;
+#endif /* LINKSTAT_SUPPORT */
+	/* Supports STA + STA always */
+	feature_set |= WIFI_FEATURE_ADDITIONAL_STA;
+#ifdef PNO_SUPPORT
+	if (dhd_is_pno_supported(dhd)) {
+		feature_set |= WIFI_FEATURE_PNO;
+		feature_set |= WIFI_FEATURE_BATCH_SCAN;
+#ifdef GSCAN_SUPPORT
+		feature_set |= WIFI_FEATURE_GSCAN;
+#endif /* GSCAN_SUPPORT */
+	}
+#endif /* PNO_SUPPORT */
+#ifdef WL11U
+	feature_set |= WIFI_FEATURE_HOTSPOT;
+#endif /* WL11U */
+	return feature_set;
+}
+
+int*
+dhd_dev_get_feature_set_matrix(struct net_device *dev, int *num)
+{
+	int feature_set_full, mem_needed;
+	int *ret;
+
+	*num = 0;
+	mem_needed = sizeof(int) * MAX_FEATURE_SET_CONCURRRENT_GROUPS;
+	ret = (int *) kmalloc(mem_needed, GFP_KERNEL);
+
+	 if (!ret) {
+		DHD_ERROR(("%s: failed to allocate %d bytes\n", __FUNCTION__,
+		mem_needed));
+		return ret;
+	 }
+
+	feature_set_full = dhd_dev_get_feature_set(dev);
+
+	ret[0] = (feature_set_full & WIFI_FEATURE_INFRA) |
+	         (feature_set_full & WIFI_FEATURE_INFRA_5G) |
+	         (feature_set_full & WIFI_FEATURE_NAN) |
+	         (feature_set_full & WIFI_FEATURE_D2D_RTT) |
+	         (feature_set_full & WIFI_FEATURE_D2AP_RTT) |
+	         (feature_set_full & WIFI_FEATURE_PNO) |
+	         (feature_set_full & WIFI_FEATURE_BATCH_SCAN) |
+	         (feature_set_full & WIFI_FEATURE_GSCAN) |
+	         (feature_set_full & WIFI_FEATURE_HOTSPOT) |
+	         (feature_set_full & WIFI_FEATURE_ADDITIONAL_STA) |
+	         (feature_set_full & WIFI_FEATURE_EPR);
+
+	ret[1] = (feature_set_full & WIFI_FEATURE_INFRA) |
+	         (feature_set_full & WIFI_FEATURE_INFRA_5G) |
+	         /* Not yet verified NAN with P2P */
+	         /* (feature_set_full & WIFI_FEATURE_NAN) | */
+	         (feature_set_full & WIFI_FEATURE_P2P) |
+	         (feature_set_full & WIFI_FEATURE_D2AP_RTT) |
+	         (feature_set_full & WIFI_FEATURE_D2D_RTT) |
+	         (feature_set_full & WIFI_FEATURE_EPR);
+
+	ret[2] = (feature_set_full & WIFI_FEATURE_INFRA) |
+	         (feature_set_full & WIFI_FEATURE_INFRA_5G) |
+	         (feature_set_full & WIFI_FEATURE_NAN) |
+	         (feature_set_full & WIFI_FEATURE_D2D_RTT) |
+	         (feature_set_full & WIFI_FEATURE_D2AP_RTT) |
+	         (feature_set_full & WIFI_FEATURE_TDLS) |
+	         (feature_set_full & WIFI_FEATURE_TDLS_OFFCHANNEL) |
+	         (feature_set_full & WIFI_FEATURE_EPR);
+	*num = MAX_FEATURE_SET_CONCURRRENT_GROUPS;
+
+	return ret;
+}
+
 #ifdef PNO_SUPPORT
 /* Linux wrapper to call common dhd_pno_stop_for_ssid */
 int
@@ -6273,7 +6438,7 @@ dhd_dev_pno_stop_for_ssid(struct net_device *dev)
 }
 /* Linux wrapper to call common dhd_pno_set_for_ssid */
 int
-dhd_dev_pno_set_for_ssid(struct net_device *dev, wlc_ssid_t* ssids_local, int nssid,
+dhd_dev_pno_set_for_ssid(struct net_device *dev, wlc_ssid_ext_t* ssids_local, int nssid,
 	uint16  scan_fr, int pno_repeat, int pno_freq_expo_max, uint16 *channel_list, int nchan)
 {
 	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
@@ -6320,7 +6485,186 @@ dhd_dev_pno_get_for_batch(struct net_device *dev, char *buf, int bufsize)
 	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
 	return (dhd_pno_get_for_batch(&dhd->pub, buf, bufsize, PNO_STATUS_NORMAL));
 }
+/* Linux wrapper to call common dhd_pno_set_mac_oui */
+int
+dhd_dev_pno_set_mac_oui(struct net_device *dev, uint8 *oui)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+	return (dhd_pno_set_mac_oui(&dhd->pub, oui));
+}
 #endif /* PNO_SUPPORT */
+
+#ifdef RTT_SUPPORT
+/* Linux wrapper to call common dhd_pno_set_cfg_gscan */
+int
+dhd_dev_rtt_set_cfg(struct net_device *dev, void *buf)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_rtt_set_cfg(&dhd->pub, buf));
+}
+int
+dhd_dev_rtt_cancel_cfg(struct net_device *dev, struct ether_addr *mac_list, int mac_cnt)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_rtt_stop(&dhd->pub, mac_list, mac_cnt));
+}
+
+int
+dhd_dev_rtt_register_noti_callback(struct net_device *dev, void *ctx, dhd_rtt_compl_noti_fn noti_fn)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_rtt_register_noti_callback(&dhd->pub, ctx, noti_fn));
+}
+int
+dhd_dev_rtt_unregister_noti_callback(struct net_device *dev, dhd_rtt_compl_noti_fn noti_fn)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_rtt_unregister_noti_callback(&dhd->pub, noti_fn));
+}
+
+int
+dhd_dev_rtt_capability(struct net_device *dev, rtt_capabilities_t *capa)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_rtt_capability(&dhd->pub, capa));
+}
+#endif /* RTT_SUPPORT */
+
+#ifdef GSCAN_SUPPORT
+/* Linux wrapper to call common dhd_pno_set_cfg_gscan */
+int
+dhd_dev_pno_set_cfg_gscan(struct net_device *dev, dhd_pno_gscan_cmd_cfg_t type,
+	void *buf, uint8 flush)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_pno_set_cfg_gscan(&dhd->pub, type, buf, flush));
+}
+
+/* Linux wrapper to call common dhd_pno_get_gscan */
+void *
+dhd_dev_pno_get_gscan(struct net_device *dev, dhd_pno_gscan_cmd_cfg_t type,
+	void *info, uint32 *len)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_pno_get_gscan(&dhd->pub, type, info, len));
+}
+
+/* Linux wrapper to call common dhd_wait_batch_results_complete */
+void
+dhd_dev_wait_batch_results_complete(struct net_device *dev)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_wait_batch_results_complete(&dhd->pub));
+}
+
+/* Linux wrapper to call common dhd_pno_lock_batch_results */
+void
+dhd_dev_pno_lock_access_batch_results(struct net_device *dev)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_pno_lock_batch_results(&dhd->pub));
+}
+
+/* Linux wrapper to call common dhd_pno_unlock_batch_results */
+void
+dhd_dev_pno_unlock_access_batch_results(struct net_device *dev)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_pno_unlock_batch_results(&dhd->pub));
+}
+
+/* Linux wrapper to call common dhd_pno_initiate_gscan_request */
+int
+dhd_dev_pno_run_gscan(struct net_device *dev, bool run, bool flush)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_pno_initiate_gscan_request(&dhd->pub, run, flush));
+}
+
+/* Linux wrapper to call common dhd_pno_enable_full_scan_result */
+int
+dhd_dev_pno_enable_full_scan_result(struct net_device *dev, bool real_time_flag)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_pno_enable_full_scan_result(&dhd->pub, real_time_flag));
+}
+
+/* Linux wrapper to call common dhd_handle_swc_evt */
+void *
+dhd_dev_swc_scan_event(struct net_device *dev, const void  *data, int *send_evt_bytes)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_handle_swc_evt(&dhd->pub, data, send_evt_bytes));
+}
+
+/* Linux wrapper to call common dhd_handle_hotlist_scan_evt */
+void *
+dhd_dev_hotlist_scan_event(struct net_device *dev,
+	const void  *data, int *send_evt_bytes, hotlist_type_t type)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_handle_hotlist_scan_evt(&dhd->pub, data, send_evt_bytes, type));
+}
+
+/* Linux wrapper to call common dhd_process_full_gscan_result */
+void *
+dhd_dev_process_full_gscan_result(struct net_device *dev,
+	const void  *data, int *send_evt_bytes)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_process_full_gscan_result(&dhd->pub, data, send_evt_bytes));
+}
+
+void
+dhd_dev_gscan_hotlist_cache_cleanup(struct net_device *dev, hotlist_type_t type)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	dhd_gscan_hotlist_cache_cleanup(&dhd->pub, type);
+
+	return;
+}
+
+int
+dhd_dev_gscan_batch_cache_cleanup(struct net_device *dev)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_gscan_batch_cache_cleanup(&dhd->pub));
+}
+
+/* Linux wrapper to call common dhd_retreive_batch_scan_results */
+int
+dhd_dev_retrieve_batch_scan(struct net_device *dev)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_retreive_batch_scan_results(&dhd->pub));
+}
+
+void
+dhd_dev_end_one_shot_gscan(struct net_device *dev)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+
+	return (dhd_end_one_shot_gscan(&dhd->pub));
+}
+#endif /* GSCAN_SUPPORT */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
 static void dhd_hang_process(void *dhd_info, void *event_info, u8 event)
@@ -6549,8 +6893,10 @@ write_to_file(dhd_pub_t *dhd, uint8 *buf, int size)
 	set_fs(KERNEL_DS);
 
 	/* open file to write */
-	fp = filp_open("/tmp/mem_dump", O_WRONLY|O_CREAT, 0640);
-	if (!fp) {
+	fp = filp_open("/data/mem_dump", O_WRONLY|O_CREAT, 0640);
+
+	if (IS_ERR(fp)) {
+		fp = NULL;
 		printf("%s: open file error\n", __FUNCTION__);
 		ret = -1;
 		goto exit;
@@ -6558,10 +6904,17 @@ write_to_file(dhd_pub_t *dhd, uint8 *buf, int size)
 
 	/* Write buf to file */
 	fp->f_op->write(fp, buf, size, &pos);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0))
+	fp->f_op->fsync(fp, 0, size-1, 1);
+#else
+	fp->f_op->fsync(fp, 1);
+#endif /* KERNEL_VERSION(3, 1, 0) */
 
 exit:
 	/* free buf before return */
-	MFREE(dhd->osh, buf, size);
+	if (buf) {
+		MFREE(dhd->osh, buf, size);
+	}
 	/* close file before return */
 	if (fp)
 		filp_close(fp, current->files);
@@ -6569,6 +6922,105 @@ exit:
 	set_fs(old_fs);
 
 	return ret;
+}
+
+static void dhd_join_timeout(ulong data)
+{
+	dhd_info_t *dhd = (dhd_info_t *)data;
+	if (dhd->join_timer_active)
+		DHD_ERROR(("DHD: %s: JOIN TIMEOUT\n",
+		__FUNCTION__));
+}
+
+int dhd_start_join_timer(dhd_pub_t *pub)
+{
+	int ret;
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	DHD_INFO(("DHD: Join Timer Started:%s:\n", __FUNCTION__));
+	if (!dhd->join_timeout_val)
+		dhd->join_timeout_val = DHD_JOIN_MAX_TIME_DEFAULT;
+	init_timer(&dhd->join_timer);
+	dhd->join_timer.data = (ulong)dhd;
+	dhd->join_timer.function = dhd_join_timeout;
+	dhd->join_timer_active = TRUE;
+	ret = mod_timer(&dhd->join_timer, jiffies + msecs_to_jiffies(dhd->join_timeout_val));
+	return ret;
+}
+int dhd_del_join_timer(dhd_pub_t *pub)
+{
+	int ret = BCME_OK;
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	if (dhd->join_timer_active) {
+		ret = del_timer(&dhd->join_timer);
+		DHD_INFO(("DHD: Join Timer Stopped:%s:\n", __FUNCTION__));
+	}
+	return ret;
+}
+int dhd_set_join_timeout(dhd_pub_t *pub, uint32 timeout)
+{
+	int ret = BCME_OK;
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	if (timeout) {
+		dhd->join_timeout_val = timeout;
+		return ret;
+	}
+	DHD_ERROR(("DHD: Join Timer Can not be zero:%s:\n", __FUNCTION__));
+	return BCME_ERROR;
+}
+uint32 dhd_get_join_timeout(dhd_pub_t *pub)
+{
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	return dhd->join_timeout_val;
+}
+
+static void dhd_scan_timeout(ulong data)
+{
+	dhd_info_t *dhd = (dhd_info_t *)data;
+	if (dhd->scan_timer_active) {
+		DHD_ERROR(("DHD: %s: SCAN TIMEOUT\n",
+		__FUNCTION__));
+	}
+}
+int dhd_add_scan_timer(dhd_pub_t *pub)
+{
+	int ret;
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	DHD_ERROR(("DHD: Scan Timer Started:%s:\n", __FUNCTION__));
+	if (!dhd->scan_time_count)
+		dhd->scan_time_count = DHD_SCAN_DEF_TIMEOUT;
+	init_timer(&dhd->scan_timer);
+	dhd->scan_timer.data = (ulong)dhd;
+	dhd->scan_timer.function = dhd_scan_timeout;
+	dhd->scan_timer_active = TRUE;
+	ret = mod_timer(&dhd->scan_timer, jiffies + msecs_to_jiffies(dhd->scan_time_count));
+	return ret;
+}
+int dhd_del_scan_timer(dhd_pub_t *pub)
+{
+	int ret = BCME_OK;
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	if (dhd->scan_timer_active) {
+		ret = del_timer(&dhd->scan_timer);
+		DHD_INFO(("DHD: Scan Timer Stopped:%s:\n", __FUNCTION__));
+	}
+	return ret;
+}
+
+int dhd_set_scan_timeout(dhd_pub_t *pub, uint32 timeout)
+{
+	int ret = BCME_OK;
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	if (timeout) {
+		dhd->scan_time_count = timeout;
+		return ret;
+	}
+	DHD_ERROR(("DHD: Scan Timer Can not be zero:%s:\n", __FUNCTION__));
+	return BCME_ERROR;
+}
+uint32 dhd_get_scan_timeout(dhd_pub_t *pub)
+{
+	dhd_info_t *dhd = (dhd_info_t *)pub->info;
+	return dhd->scan_time_count;
 }
 #endif /* DHD_DEBUG */
 

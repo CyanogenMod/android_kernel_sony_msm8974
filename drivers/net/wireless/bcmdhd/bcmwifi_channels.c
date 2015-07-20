@@ -3,7 +3,7 @@
  * Contents are wifi-specific, used by any kernel or app-level
  * software that might want wifi things as it grows.
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -760,6 +760,13 @@ wf_chspec_ctlchan(chanspec_t chspec)
 
 		return (channel_to_ctl_chan(center_chan, bw_mhz, sb));
 	}
+}
+
+/* given a chanspec, return the bandwidth string */
+char *
+wf_chspec_to_bw_str(chanspec_t chspec)
+{
+	return (char *)wf_chspec_bw_str[(CHSPEC_BW(chspec) >> WL_CHANSPEC_BW_SHIFT)];
 }
 
 /*

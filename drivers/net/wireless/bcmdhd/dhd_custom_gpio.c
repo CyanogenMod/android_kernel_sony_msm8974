@@ -1,6 +1,6 @@
 /*
 * Customer code to add GPIO control during WLAN start/stop
-* Copyright (C) 1999-2014, Broadcom Corporation
+* Copyright (C) 1999-2015, Broadcom Corporation
 * Copyright (C) 2013 Sony Mobile Communications Inc.
 * 
 *      Unless you and Broadcom execute a separate written software license
@@ -363,7 +363,11 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"CI", "CI", 0},
 	{"CL", "CL", 212},
 	{"CM", "CM", 0},
+#ifdef SOMC_WLAN_R1_CHINA_LTA
+	{"CN", "CN", 43},
+#else
 	{"CN", "CN", 212},
+#endif
 	{"CO", "CO", 212},
 	{"CR", "CR", 21},
 	{"CV", "CV", 0},
@@ -423,14 +427,14 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"KH", "KH", 4},
 	{"KI", "KI", 1},
 	{"KM", "KM", 0},
-	{"KN", "KN", 0},
+	{"KN", "XT", 212},
 	{"KR", "KR", 212},
 	{"KW", "KW", 5},
 	{"KY", "KY", 4},
 	{"KZ", "KZ", 212},
 	{"LA", "LA", 4},
 	{"LB", "LB", 6},
-	{"LC", "LC", 0},
+	{"LC", "XT", 212},
 	{"LI", "LI", 4},
 	{"LK", "XT", 212},
 	{"LR", "LR", 2},
@@ -460,8 +464,8 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"MW", "XT", 212},
 	{"MX", "MX", 212},
 	{"MY", "MY", 212},
-	{"MZ", "MZ", 0},
-	{"NA", "NA", 0},
+	{"MZ", "XT", 212},
+	{"NA", "XT", 212},
 	{"NC", "NC", 0},
 	{"NG", "NG", 0},
 	{"NI", "NI", 0},
@@ -531,12 +535,12 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"UY", "UY", 5},
 	{"UZ", "XT", 212},
 	{"VA", "VA", 2},
-	{"VC", "VC", 0},
+	{"VC", "XT", 212},
 	{"VE", "VE", 3},
 	{"VG", "XT", 212},
 	{"VI", "VI", 18},
 	{"VN", "XT", 212},
-	{"VU", "VU", 0},
+	{"VU", "XT", 212},
 	{"WS", "XT", 212},
 	{"YE", "XT", 212},
 	{"YT", "YT", 2},

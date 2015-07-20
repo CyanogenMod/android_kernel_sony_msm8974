@@ -18,15 +18,6 @@ DHDCFLAGS = -Wall -Wstrict-prototypes -Dlinux -DLINUX -DBCMDRIVER             \
 DHDCFLAGS += -DCUSTOMER_HW2 -DCUSTOMER_HW5
 DHDCFLAGS += -DWL_CFG80211
 
-# Definitions are filtered by Kernel version
-DHDCFLAGS += -DWL_ENABLE_P2P_IF
-#DHDCFLAGS += -DWL_SUPPORT_BACKPORTED_KPATCHES
-# Default definitions for KitKat
-DHDCFLAGS += -DWL_CFG80211_STA_EVENT
-DHDCFLAGS += -DWL_IFACE_COMB_NUM_CHANNELS
-# To support p2p private command on kernel 3.8 or above
-DHDCFLAGS += -DWL_NEWCFG_PRIVCMD_SUPPORT
-
 # Debug
 DHDCFLAGS += -DSIMPLE_MAC_PRINT
 DHDCFLAGS += -DDEBUGFS_CFG80211
@@ -124,6 +115,45 @@ DHDCFLAGS += -DDHDENABLE_TAILPAD
 DHDCFLAGS += -DCONNECTION_STATISTICS
 
 DHDCFLAGS += -DSUPPORT_P2P_GO_PS
+
+##############################
+# Android Platform Definition
+##############################
+
+###########
+# Lollipop
+###########
+DHDCFLAGS += -DWL_ENABLE_P2P_IF
+#DHDCFLAGS += -DWL_SUPPORT_BACKPORTED_KPATCHES
+# Default definitions for KitKat
+DHDCFLAGS += -DWL_CFG80211_STA_EVENT
+DHDCFLAGS += -DWL_IFACE_COMB_NUM_CHANNELS
+# To support p2p private command on kernel 3.8 or above
+DHDCFLAGS += -DWL_NEWCFG_PRIVCMD_SUPPORT
+
+ifneq ($(CONFIG_DHD_USE_SCHED_SCAN),)
+DHDCFLAGS += -DWL_SCHED_SCAN
+endif
+
+ifneq ($(CONFIG_BCM4339),)
+# To support GSCAN
+#DHDCFLAGS += -DGSCAN_SUPPORT
+endif
+
+ifneq ($(CONFIG_BCM4354),)
+# To support RTT
+DHDCFLAGS += -DRTT_SUPPORT
+# To support Link Statictics
+DHDCFLAGS += -DLINKSTAT_SUPPORT
+# To support GSCAN
+#DHDCFLAGS += -DGSCAN_SUPPORT
+
+# To support WL_VENDOR_EXT_SUPPORT
+DHDCFLAGS += -DWL_VENDOR_EXT_SUPPORT
+
+# Extra file list for Lollipop
+ANDROID_OFILES := wl_cfgvendor.o dhd_rtt.o
+endif
 
 ifeq ($(CONFIG_BCMDHD_INSMOD_NO_FW_LOAD),y)
  DHDCFLAGS += -DENABLE_INSMOD_NO_FW_LOAD
@@ -253,6 +283,8 @@ DHDOFILES = bcmsdh.o bcmsdh_linux.o bcmsdh_sdmmc.o bcmsdh_sdmmc_linux.o \
 	bcmevent.o bcmutils.o bcmwifi_channels.o hndpmu.o linux_osl.o       \
 	sbutils.o siutils.o wldev_common.o wl_cfg_btcoex.o wl_android.o wl_cfg80211.o       \
 	wl_cfgp2p.o wl_linux_mon.o dhd_linux_platdev.o
+
+DHDOFILES += $(ANDROID_OFILES)
 
 obj-$(CONFIG_BCMDHD) += bcmdhd.o
 bcmdhd-objs += $(DHDOFILES)
