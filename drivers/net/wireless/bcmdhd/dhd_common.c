@@ -1,7 +1,7 @@
 /*
  * Broadcom Dongle Host Driver (DHD), common DHD core.
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_common.c 482932 2014-06-05 13:34:21Z $
+ * $Id: dhd_common.c 516345 2014-11-19 11:58:57Z $
  */
 #include <typedefs.h>
 #include <osl.h>
@@ -47,6 +47,9 @@
 #endif
 #ifdef PNO_SUPPORT
 #include <dhd_pno.h>
+#endif
+#ifdef RTT_SUPPORT
+#include <dhd_rtt.h>
 #endif
 #ifdef SET_RANDOM_MAC_SOFTAP
 #include <linux/random.h>
@@ -129,6 +132,8 @@ enum {
 #if defined(DHD_DEBUG)
 	IOV_CONS,
 	IOV_DCONSOLE_POLL,
+	IOV_DHD_JOIN_TIMEOUT_DBG,
+	IOV_SCAN_TIMEOUT,
 #endif /* defined(DHD_DEBUG) */
 #ifdef PROP_TXSTATUS
 	IOV_PROPTXSTATUS_ENABLE,
@@ -163,6 +168,8 @@ const bcm_iovar_t dhd_iovars[] = {
 #ifdef DHD_DEBUG
 	{"cons",	IOV_CONS,	0,	IOVT_BUFFER,	0 },
 	{"dconpoll",	IOV_DCONSOLE_POLL, 0,	IOVT_UINT32,	0 },
+	{"scan_timeout", IOV_SCAN_TIMEOUT, 0,	IOVT_UINT32,	0 },
+	{"join_timeout_dbg", IOV_DHD_JOIN_TIMEOUT_DBG, 0, IOVT_UINT32, 0 },
 #endif
 	{"clearcounts", IOV_CLEARCOUNTS, 0, IOVT_VOID,	0 },
 	{"gpioob",	IOV_GPIOOB,	0,	IOVT_UINT32,	0 },
@@ -196,6 +203,22 @@ const bcm_iovar_t dhd_iovars[] = {
 };
 
 #define DHD_IOVAR_BUF_SIZE	128
+
+
+void dhd_save_fwdump(dhd_pub_t *dhd_pub, void * buffer, uint32 length)
+{
+
+	if (dhd_pub->soc_ram == NULL) {
+		dhd_pub->soc_ram = (uint8*) MALLOCZ(dhd_pub->osh, length);
+		if (dhd_pub->soc_ram == NULL) {
+			DHD_ERROR(("%s: Failed to allocate memory for fw crash snap shot.\n",
+				__FUNCTION__));
+			return;
+		}
+	}
+	dhd_pub->soc_ram_length = length;
+	memcpy(dhd_pub->soc_ram, buffer, length);
+}
 
 /* to NDIS developer, the structure dhd_common is redundant,
  * please do NOT merge it back from other branches !!!
@@ -360,6 +383,35 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 	case IOV_GVAL(IOV_DUMP):
 		bcmerror = dhd_dump(dhd_pub, arg, len);
 		break;
+
+#ifdef DHD_DEBUG
+	case IOV_GVAL(IOV_SCAN_TIMEOUT):
+		{
+			uint32 scan_timeout = dhd_get_scan_timeout(dhd_pub);
+			bcopy(&scan_timeout, arg, sizeof(scan_timeout));
+			break;
+		}
+		case IOV_SVAL(IOV_SCAN_TIMEOUT):
+		{
+			uint32 scan_timeout;
+			bcopy(((uint8*)params), &scan_timeout, sizeof(scan_timeout));
+			dhd_set_scan_timeout(dhd_pub, scan_timeout);
+			break;
+		}
+	case IOV_GVAL(IOV_DHD_JOIN_TIMEOUT_DBG):
+	{
+		uint32 join_timeout = dhd_get_join_timeout(dhd_pub);
+		bcopy(&join_timeout, arg, sizeof(join_timeout));
+		break;
+	}
+	case IOV_SVAL(IOV_DHD_JOIN_TIMEOUT_DBG):
+	{
+		uint32 join_timeout;
+		bcopy(((uint8*)params), &join_timeout, sizeof(join_timeout));
+		dhd_set_join_timeout(dhd_pub, join_timeout);
+		break;
+	}
+#endif /* DHD_DEBUG */
 
 #ifdef DHD_DEBUG
 	case IOV_GVAL(IOV_DCONSOLE_POLL):
@@ -1125,6 +1177,17 @@ wl_show_host_event(wl_event_msg_t *event, void *event_data)
 		DHD_EVENT(("MACEVENT: %s, MAC %s\n", event_name, eabuf));
 		break;
 
+
+	case WLC_E_CCA_CHAN_QUAL:
+		if (datalen) {
+			buf = (uchar *) event_data;
+			DHD_EVENT(("MACEVENT: %s %d, MAC %s, status %d, reason %d, auth %d, "
+				"channel 0x%02x \n", event_name, event_type, eabuf, (int)status,
+				(int)reason, (int)auth_type, *(buf + 4)));
+		}
+		break;
+
+
 	default:
 		DHD_EVENT(("MACEVENT: %s %d, MAC %s, status %d, reason %d, auth %d\n",
 		       event_name, event_type, eabuf, (int)status, (int)reason,
@@ -1178,6 +1241,31 @@ wl_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata,
 	evlen = datalen + sizeof(bcm_event_t);
 
 	switch (type) {
+#ifdef DHD_DEBUG
+	case WLC_E_JOIN_START:
+	case WLC_E_ROAM_START:
+		dhd_start_join_timer(dhd_pub);
+		break;
+	case WLC_E_ASSOC:
+	case WLC_E_REASSOC:
+		if ((status != WLC_E_STATUS_TIMEOUT) && (status != WLC_E_STATUS_FAIL))
+			break;
+	case WLC_E_SET_SSID:
+		if (status != WLC_E_STATUS_SUCCESS)
+			break;
+	case WLC_E_JOIN:
+	case WLC_E_ROAM:
+		dhd_del_join_timer(dhd_pub);
+		break;
+
+	case WLC_E_SCAN_CONFIRM_IND:
+		dhd_add_scan_timer(dhd_pub);
+		break;
+
+	case WLC_E_ESCAN_RESULT:
+		dhd_del_scan_timer(dhd_pub);
+		break;
+#endif /* DHD_DEBUG */
 #ifdef PROP_TXSTATUS
 	case WLC_E_FIFO_CREDIT_MAP:
 		dhd_wlfc_enable(dhd_pub);
@@ -1283,6 +1371,11 @@ wl_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata,
 #endif 
 		/* These are what external supplicant/authenticator wants */
 		/* fall through */
+#if defined(RTT_SUPPORT)
+	case WLC_E_PROXD:
+		dhd_rtt_event_handler(dhd_pub, event, (void *)event_data);
+		break;
+#endif /* RTT_SUPPORT */
 	case WLC_E_LINK:
 	case WLC_E_DEAUTH:
 	case WLC_E_DEAUTH_IND:
@@ -2151,7 +2244,7 @@ wl_iw_parse_channel_list_tlv(char** list_str, uint16* channel_list,
  *  SSIDs list parsing from cscan tlv list
  */
 int
-wl_iw_parse_ssid_list_tlv(char** list_str, wlc_ssid_t* ssid, int max, int *bytes_left)
+wl_iw_parse_ssid_list_tlv(char** list_str, wlc_ssid_ext_t* ssid, int max, int *bytes_left)
 {
 	char* str;
 	int idx = 0;
@@ -2199,6 +2292,7 @@ wl_iw_parse_ssid_list_tlv(char** list_str, wlc_ssid_t* ssid, int max, int *bytes
 
 			*bytes_left -= ssid[idx].SSID_len;
 			str += ssid[idx].SSID_len;
+			ssid[idx].hidden = TRUE;
 
 			DHD_TRACE(("%s :size=%d left=%d\n",
 				(char*)ssid[idx].SSID, ssid[idx].SSID_len, *bytes_left));

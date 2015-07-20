@@ -1,7 +1,7 @@
 /*
  * Linux Wireless Extensions support
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_iw.h 489825 2014-07-08 09:03:49Z $
+ * $Id: wl_iw.h 516345 2014-11-19 11:58:57Z $
  */
 
 #ifndef _wl_iw_h_
@@ -54,8 +54,6 @@
 #define PNODEBUG_SET_CMD			"PNODEBUG"
 #define TXPOWER_SET_CMD			"TXPOWER"
 
-#define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
-#define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
 
 /* Structure to keep global parameters */
 typedef struct wl_iw_extra_params {

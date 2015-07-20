@@ -4,8 +4,8 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
- * Copyright (C) 2013 Sony Mobile Communications AB
+ * Copyright (C) 1999-2015, Broadcom Corporation
+ * Copyright (C) 2013 Sony Mobile Communications Inc.
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -25,7 +25,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd.h 487060 2014-06-24 13:42:01Z $
+ * $Id: dhd.h 516345 2014-11-19 11:58:57Z $
  */
 
 /****************
@@ -152,6 +152,11 @@ enum dhd_prealloc_index {
 /* Packet alignment for most efficient SDIO (can change based on platform) */
 #ifndef DHD_SDALIGN
 #define DHD_SDALIGN	32
+#endif
+
+#ifdef DHD_DEBUG
+#define DHD_JOIN_MAX_TIME_DEFAULT 10000 /* ms: Max time out for joining AP */
+#define DHD_SCAN_DEF_TIMEOUT 10000 /* ms: Max time out for scan in progress */
 #endif
 
 /* host reordering packts logic */
@@ -300,6 +305,9 @@ typedef struct dhd_pub {
 #ifdef PNO_SUPPORT
 	void *pno_state;
 #endif
+#ifdef RTT_SUPPORT
+	void *rtt_state;
+#endif
 #ifdef ROAM_AP_ENV_DETECTION
 	bool	roam_env_detection;
 #endif
@@ -331,6 +339,8 @@ typedef struct dhd_pub {
 #if defined(CUSTOMER_HW5)
 	bool dhd_bug_on;
 #endif
+	uint8 *soc_ram;
+	uint32 soc_ram_length;
 } dhd_pub_t;
 #if defined(CUSTOMER_HW5)
 #define MAX_RESCHED_CNT 600
@@ -520,6 +530,29 @@ extern void dhd_sched_dpc(dhd_pub_t *dhdp);
 
 /* Notify tx completion */
 extern void dhd_txcomplete(dhd_pub_t *dhdp, void *txp, bool success);
+
+#define WIFI_FEATURE_INFRA              0x0001      /* Basic infrastructure mode        */
+#define WIFI_FEATURE_INFRA_5G           0x0002      /* Support for 5 GHz Band           */
+#define WIFI_FEATURE_HOTSPOT            0x0004      /* Support for GAS/ANQP             */
+#define WIFI_FEATURE_P2P                0x0008      /* Wifi-Direct                      */
+#define WIFI_FEATURE_SOFT_AP            0x0010      /* Soft AP                          */
+#define WIFI_FEATURE_GSCAN              0x0020      /* Google-Scan APIs                 */
+#define WIFI_FEATURE_NAN                0x0040      /* Neighbor Awareness Networking    */
+#define WIFI_FEATURE_D2D_RTT            0x0080      /* Device-to-device RTT             */
+#define WIFI_FEATURE_D2AP_RTT           0x0100      /* Device-to-AP RTT                 */
+#define WIFI_FEATURE_BATCH_SCAN         0x0200      /* Batched Scan (legacy)            */
+#define WIFI_FEATURE_PNO                0x0400      /* Preferred network offload        */
+#define WIFI_FEATURE_ADDITIONAL_STA     0x0800      /* Support for two STAs             */
+#define WIFI_FEATURE_TDLS               0x1000      /* Tunnel directed link setup       */
+#define WIFI_FEATURE_TDLS_OFFCHANNEL    0x2000      /* Support for TDLS off channel     */
+#define WIFI_FEATURE_EPR                0x4000      /* Enhanced power reporting         */
+#define WIFI_FEATURE_AP_STA             0x8000      /* Support for AP STA Concurrency   */
+#define WIFI_FEATURE_LINKSTAT           0x10000     /* Support for Linkstats            */
+
+#define MAX_FEATURE_SET_CONCURRRENT_GROUPS  3
+
+extern int dhd_dev_get_feature_set(struct net_device *dev);
+extern int *dhd_dev_get_feature_set_matrix(struct net_device *dev, int *num);
 
 /* OS independent layer functions */
 extern int dhd_os_proto_block(dhd_pub_t * pub);
@@ -792,6 +825,16 @@ extern uint dhd_force_tx_queueing;
 #endif
 #endif /* WLTDLS */
 
+#ifdef DHD_DEBUG
+extern int dhd_start_join_timer(dhd_pub_t *pub);
+extern int dhd_del_join_timer(dhd_pub_t *pub);
+extern int dhd_set_join_timeout(dhd_pub_t *pub, uint32 timeout);
+extern uint32 dhd_get_join_timeout(dhd_pub_t *pub);
+extern int dhd_add_scan_timer(dhd_pub_t *dhd_pub);
+extern int dhd_del_scan_timer(dhd_pub_t *dhd_pub);
+extern int dhd_set_scan_timeout(dhd_pub_t *pub, uint32 timeout);
+extern uint32 dhd_get_scan_timeout(dhd_pub_t *pub);
+#endif /* DHD_DEBUG */
 
 #define MAX_DTIM_SKIP_BEACON_INTERVAL	100 /* max allowed associated AP beacon for DTIM skip */
 #ifndef MAX_DTIM_ALLOWED_INTERVAL
@@ -886,5 +929,7 @@ void dhd_os_prefree(dhd_pub_t *dhdpub, void *addr, uint size);
 #define DHD_OS_PREFREE(dhdpub, addr, size) MFREE(dhdpub->osh, addr, size)
 #endif /* defined(CONFIG_DHD_USE_STATIC_BUF) */
 
+
+void dhd_save_fwdump(dhd_pub_t *dhd_pub, void * buffer, uint32 length);
 
 #endif /* _dhd_h_ */

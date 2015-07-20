@@ -1,7 +1,7 @@
 /*
  * Misc useful os-independent macros and functions.
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2015, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: bcmutils.h 489825 2014-07-08 09:03:49Z $
+ * $Id: bcmutils.h 516345 2014-11-19 11:58:57Z $
  */
 
 #ifndef	_bcmutils_h_
@@ -872,9 +872,13 @@ DECLARE_MAP_API(4,  3, 2,  7U, 0x000F) /* setbit4() and getbit4() */
 #if !defined(SIMPLE_MAC_PRINT)
 #define MACDBG "%02x:%02x:%02x:%02x:%02x:%02x"
 #define MAC2STRDBG(ea) (ea)[0], (ea)[1], (ea)[2], (ea)[3], (ea)[4], (ea)[5]
+#define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
+#define MAC2STR(ea) (ea)[0], (ea)[1], (ea)[2], (ea)[3], (ea)[4], (ea)[5]
 #else
 #define MACDBG				"%02x:%02x:%02x"
 #define MAC2STRDBG(ea) (ea)[0], (ea)[4], (ea)[5]
+#define MACSTR				"%02x:%02x:%02x"
+#define MAC2STR(ea) (ea)[0], (ea)[4], (ea)[5]
 #endif /* SIMPLE_MAC_PRINT */
 
 /* bcm_format_flags() bit description structure */
@@ -931,10 +935,7 @@ extern int bcm_format_field(const bcm_bit_desc_ex_t *bd, uint32 field, char* buf
 extern int bcm_format_flags(const bcm_bit_desc_t *bd, uint32 flags, char* buf, int len);
 #endif
 
-#if defined(DHD_DEBUG) || defined(WLMSG_PRHDRS) || defined(WLMSG_PRPKT) || \
-	defined(WLMSG_ASSOC) || defined(WLMEDIA_PEAKRATE)
 extern int bcm_format_hex(char *str, const void *bytes, int len);
-#endif
 
 extern const char *bcm_crypto_algo_name(uint algo);
 extern char *bcm_chipname(uint chipid, char *buf, uint len);
@@ -951,17 +952,53 @@ typedef struct bcm_tlv {
 	uint8	data[1];
 } bcm_tlv_t;
 
-#define BCM_TLV_MAX_DATA_SIZE (255)
+/* bcm tlv w/ 16 bit id/len */
+typedef struct bcm_xtlv {
+	uint16	id;
+	uint16	len;
+	uint8	data[1];
+} bcm_xtlv_t;
 
+/* descriptor of xtlv data src or dst  */
+typedef struct {
+	uint16	type;
+	uint16	len;
+	void	*ptr; /* ptr to memory location */
+} xtlv_desc_t;
+
+/*  set a var from xtlv buffer */
+typedef int
+(bcm_set_var_from_tlv_cbfn_t)(void *ctx, void **tlv_buf, uint16 type, uint16 len);
+
+struct bcm_tlvbuf {
+    uint16 size;
+    uint8 *head; /* point to head of buffer */
+    uint8 *buf; /* current position of buffer */
+	/* followed by the allocated buffer */
+};
+
+#define BCM_TLV_MAX_DATA_SIZE (255)
+#define BCM_XTLV_MAX_DATA_SIZE (65535)
 #define BCM_TLV_HDR_SIZE (OFFSETOF(bcm_tlv_t, data))
+
+#define BCM_XTLV_HDR_SIZE (OFFSETOF(bcm_xtlv_t, data))
+#define BCM_XTLV_LEN(elt) ltoh16_ua(&(elt->len))
+#define BCM_XTLV_ID(elt) ltoh16_ua(&(elt->id))
+#define BCM_XTLV_SIZE(elt) (BCM_XTLV_HDR_SIZE + BCM_XTLV_LEN(elt))
 
 /* Check that bcm_tlv_t fits into the given buflen */
 #define bcm_valid_tlv(elt, buflen) (\
 	 ((int)(buflen) >= (int)BCM_TLV_HDR_SIZE) && \
 	 ((int)(buflen) >= (int)(BCM_TLV_HDR_SIZE + (elt)->len)))
 
+#define bcm_valid_xtlv(elt, buflen) (\
+	 ((int)(buflen) >= (int)BCM_XTLV_HDR_SIZE) && \
+	 ((int)(buflen) >= (int)BCM_XTLV_SIZE(elt)))
+
 extern bcm_tlv_t *bcm_next_tlv(bcm_tlv_t *elt, int *buflen);
 extern bcm_tlv_t *bcm_parse_tlvs(void *buf, int buflen, uint key);
+extern bcm_tlv_t *bcm_parse_tlvs_min_bodylen(void *buf, int buflen, uint key, int min_bodylen);
+
 extern bcm_tlv_t *bcm_parse_ordered_tlvs(void *buf, int buflen, uint key);
 
 extern bcm_tlv_t *bcm_find_vendor_ie(void *tlvs, int tlvs_len, const char *voui, uint8 *type,
@@ -973,6 +1010,30 @@ extern uint8 *bcm_write_tlv_safe(int type, const void *data, int datalen, uint8 
 
 extern uint8 *bcm_copy_tlv(const void *src, uint8 *dst);
 extern uint8 *bcm_copy_tlv_safe(const void *src, uint8 *dst, int dst_maxlen);
+
+/* xtlv */
+extern bcm_xtlv_t *bcm_next_xtlv(bcm_xtlv_t *elt, int *buflen);
+extern struct bcm_tlvbuf *bcm_xtlv_buf_alloc(void *osh, uint16 len);
+extern void bcm_xtlv_buf_free(void *osh, struct bcm_tlvbuf *tbuf);
+extern uint16 bcm_xtlv_buf_len(struct bcm_tlvbuf *tbuf);
+extern uint16 bcm_xtlv_buf_rlen(struct bcm_tlvbuf *tbuf);
+extern uint8 *bcm_xtlv_buf(struct bcm_tlvbuf *tbuf);
+extern uint8 *bcm_xtlv_head(struct bcm_tlvbuf *tbuf);
+extern int bcm_xtlv_put_data(struct bcm_tlvbuf *tbuf, uint16 type, const void *data, uint16 dlen);
+extern int bcm_xtlv_put_8(struct bcm_tlvbuf *tbuf, uint16 type, const int8 data);
+extern int bcm_xtlv_put_16(struct bcm_tlvbuf *tbuf, uint16 type, const int16 data);
+extern int bcm_xtlv_put_32(struct bcm_tlvbuf *tbuf, uint16 type, const int32 data);
+extern int bcm_unpack_xtlv_entry(void **tlv_buf, uint16 xpct_type, uint16 xpct_len, void *dst);
+extern int bcm_skip_xtlv(void **tlv_buf);
+extern int bcm_pack_xtlv_entry(void **tlv_buf, uint16 *buflen, uint16 type, uint16 len, void *src);
+extern int bcm_unpack_xtlv_buf(void *ctx,
+	void *tlv_buf, uint16 buflen, bcm_set_var_from_tlv_cbfn_t *cbfn);
+extern int
+bcm_unpack_xtlv_buf_to_mem(void *tlv_buf, int *buflen, xtlv_desc_t *items);
+extern int
+bcm_pack_xtlv_buf_from_mem(void **tlv_buf, uint16 *buflen, xtlv_desc_t *items);
+extern int
+bcm_pack_xtlv_entry_from_hex_string(void **tlv_buf, uint16 *buflen, uint16 type, char *hex);
 
 /* bcmerror */
 extern const char *bcmerrorstr(int bcmerror);
