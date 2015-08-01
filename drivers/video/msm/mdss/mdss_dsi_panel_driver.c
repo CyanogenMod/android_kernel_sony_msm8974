@@ -1802,6 +1802,7 @@ static int mdss_dsi_panel_pcc_setup(struct mdss_panel_data *pdata)
 	int ret;
 	u32 copyback;
 	struct mdp_pcc_cfg_data pcc_config;
+	u32 raw_u_data = 0, raw_v_data = 0;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -1812,8 +1813,11 @@ static int mdss_dsi_panel_pcc_setup(struct mdss_panel_data *pdata)
 				panel_data);
 
 	pcc_data = &ctrl_pdata->spec_pdata->pcc_data;
-	if (!pcc_data->color_tbl)
+	if (!pcc_data->color_tbl) {
+		pr_info("%s (%d): color_tbl isn't found.\n",
+			__func__, __LINE__);
 		goto exit;
+	}
 
 	mdss_dsi_op_mode_config(DSI_CMD_MODE, pdata);
 	if (ctrl_pdata->spec_pdata->pre_uv_read_cmds.cmds) {
@@ -1826,14 +1830,20 @@ static int mdss_dsi_panel_pcc_setup(struct mdss_panel_data *pdata)
 		mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
 		mdss_bus_bandwidth_ctrl(0);
 	}
-	if (ctrl_pdata->spec_pdata->uv_read_cmds.cmds)
+	if (ctrl_pdata->spec_pdata->uv_read_cmds.cmds) {
 		get_uv_data(ctrl_pdata, &pcc_data->u_data, &pcc_data->v_data);
+		raw_u_data = pcc_data->u_data;
+		raw_v_data = pcc_data->v_data;
+	}
 	if (pcc_data->param_type == CLR_DATA_UV_PARAM_TYPE_NONE) {
 		pcc_data->u_data = CENTER_U_DATA;
 		pcc_data->v_data = CENTER_V_DATA;
 	}
-	if (pcc_data->u_data == 0 && pcc_data->v_data == 0)
+	if (pcc_data->u_data == 0 && pcc_data->v_data == 0) {
+		pr_info("%s (%d): u,v is flashed 0.\n",
+			__func__, __LINE__);
 		goto exit;
+	}
 
 	memset(&pcc_config, 0, sizeof(struct mdp_pcc_cfg_data));
 
@@ -1856,8 +1866,10 @@ static int mdss_dsi_panel_pcc_setup(struct mdss_panel_data *pdata)
 	}
 
 	ret = find_color_area(&pcc_config, pcc_data);
-	if (ret)
+	if (ret) {
+		pr_err("%s: failed to find color area.\n", __func__);
 		goto exit;
+	}
 
 	if (pcc_data->color_tbl[pcc_data->tbl_idx].color_type != UNUSED) {
 		pcc_config.block = MDP_LOGICAL_BLOCK_DISP_0;
@@ -1873,8 +1885,10 @@ static int mdss_dsi_panel_pcc_setup(struct mdss_panel_data *pdata)
 			pinfo->rev_u[0], pinfo->rev_u[1],
 			pinfo->rev_v[0], pinfo->rev_v[1]);
 
-	pr_info("%s (%d):ct=%d area=%d ud=%d vd=%d r=0x%08X g=0x%08X b=0x%08X",
+	pr_info("%s (%d): raw_ud=%d raw_vd=%d "
+		"ct=%d area=%d ud=%d vd=%d r=0x%08X g=0x%08X b=0x%08X",
 		__func__, __LINE__,
+		raw_u_data, raw_v_data,
 		pcc_data->color_tbl[pcc_data->tbl_idx].color_type,
 		pcc_data->color_tbl[pcc_data->tbl_idx].area_num,
 		pcc_data->u_data, pcc_data->v_data,

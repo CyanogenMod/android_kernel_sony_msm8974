@@ -16,12 +16,22 @@
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <linux/hrtimer.h>
+#include <linux/wakelock.h>
 #ifdef CONFIG_PM_WAKEUP_TIMES
 #include <linux/poll.h>
 #endif
 
 #include "power.h"
+
+/*
+ * suspend back-off default values
+ */
+#define SBO_SLEEP_MSEC 1100
+#define SBO_TIME 10000
+#define SBO_CNT 10
+
+static unsigned suspend_short_count;
+static struct wake_lock suspend_backoff_lock;
 
 #define MAX_BUF 100
 
@@ -454,10 +464,21 @@ static suspend_state_t decode_state(const char *buf, size_t n)
 	return PM_SUSPEND_ON;
 }
 
+static void
+suspend_backoff(void)
+{
+	pr_info("suspend: too many immediate wakeups, back off\n");
+	wake_lock_timeout(&suspend_backoff_lock,
+		msecs_to_jiffies(SBO_TIME));
+}
+
 static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 			   const char *buf, size_t n)
 {
 	suspend_state_t state;
+	struct timespec ts_entry, ts_exit;
+	u64 elapsed_msecs64;
+	u32 elapsed_msecs32;
 	int error;
 
 	error = pm_autosleep_lock();
@@ -470,9 +491,31 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	}
 
 	state = decode_state(buf, n);
-	if (state < PM_SUSPEND_MAX)
+	if (state < PM_SUSPEND_MAX) {
+		/*
+		 * We want to prevent system from frequent periodic wake-ups
+		 * when sleeping time is less or equival certain interval.
+		 * It's done in order to save power in certain cases, one of
+		 * the examples is GPS tracking, but not only.
+		 */
+		getnstimeofday(&ts_entry);
 		error = pm_suspend(state);
-	else if (state == PM_SUSPEND_MAX)
+		getnstimeofday(&ts_exit);
+
+		elapsed_msecs64 = timespec_to_ns(&ts_exit) -
+			timespec_to_ns(&ts_entry);
+		do_div(elapsed_msecs64, NSEC_PER_MSEC);
+		elapsed_msecs32 = elapsed_msecs64;
+
+		if (elapsed_msecs32 <= SBO_SLEEP_MSEC) {
+			if (suspend_short_count == SBO_CNT)
+				suspend_backoff();
+			else
+				suspend_short_count++;
+		} else {
+			suspend_short_count = 0;
+		}
+	} else if (state == PM_SUSPEND_MAX)
 		error = hibernate();
 	else
 		error = -EINVAL;
@@ -743,6 +786,10 @@ static int __init pm_init(void)
 	error = sysfs_create_group(power_kobj, &attr_group);
 	if (error)
 		return error;
+
+	wake_lock_init(&suspend_backoff_lock, WAKE_LOCK_SUSPEND,
+			"suspend_backoff");
+
 	return pm_autosleep_init();
 }
 

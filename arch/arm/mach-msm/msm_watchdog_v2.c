@@ -42,6 +42,10 @@
 #define SCM_SVC_SEC_WDOG_DIS	0x7
 
 static struct workqueue_struct *wdog_wq;
+static struct msm_watchdog_data *wdog_data;
+
+static DEFINE_PER_CPU(struct work_struct, ipi_work);
+static struct workqueue_struct *ipi_wq;
 
 struct msm_watchdog_data {
 	unsigned int __iomem phys_base;
@@ -253,12 +257,12 @@ static void pet_watchdog(struct msm_watchdog_data *wdog_dd)
 	wdog_dd->last_pet = time_ns;
 }
 
-static void keep_alive_response(void *info)
+static void keep_alive_response(struct work_struct *work)
 {
 	int cpu = smp_processor_id();
-	struct msm_watchdog_data *wdog_dd = (struct msm_watchdog_data *)info;
-	cpumask_set_cpu(cpu, &wdog_dd->alive_mask);
+	cpumask_set_cpu(cpu, &wdog_data->alive_mask);
 	smp_mb();
+	pr_debug("watchdog_v2: %s on cpu%d\n", __func__, cpu);
 }
 
 /*
@@ -270,8 +274,16 @@ static void ping_other_cpus(struct msm_watchdog_data *wdog_dd)
 	int cpu;
 	cpumask_clear(&wdog_dd->alive_mask);
 	smp_mb();
-	for_each_cpu(cpu, cpu_online_mask)
-		smp_call_function_single(cpu, keep_alive_response, wdog_dd, 1);
+	cpu_maps_update_begin();
+	for_each_cpu(cpu, cpu_online_mask) {
+		if (cpu != smp_processor_id())
+			queue_work_on(cpu, ipi_wq, &per_cpu(ipi_work, cpu));
+	}
+	for_each_cpu(cpu, cpu_online_mask) {
+		if (cpu != smp_processor_id())
+			flush_work(&per_cpu(ipi_work, cpu));
+	}
+	cpu_maps_update_done();
 }
 
 static void pet_watchdog_work(struct work_struct *work)
@@ -565,12 +577,25 @@ static int __devinit msm_watchdog_probe(struct platform_device *pdev)
 	ret = msm_wdog_dt_to_pdata(pdev, wdog_dd);
 	if (ret)
 		goto err;
+
+	wdog_data = wdog_dd;
 	wdog_dd->dev = &pdev->dev;
 	platform_set_drvdata(pdev, wdog_dd);
 	cpumask_clear(&wdog_dd->alive_mask);
 	INIT_WORK(&wdog_dd->init_dogwork_struct, init_watchdog_work);
 	INIT_DELAYED_WORK(&wdog_dd->dogwork_struct, pet_watchdog_work);
 	queue_work_on(0, wdog_wq, &wdog_dd->init_dogwork_struct);
+	if (wdog_dd->do_ipi_ping) {
+		int cpu;
+		ipi_wq =  alloc_workqueue("wdog_ipi", WQ_HIGHPRI, 0);
+		if (!ipi_wq) {
+			pr_err("Failed to allocate wdog_ipi workqueue\n");
+			ret = -ENOMEM;
+			goto err;
+		}
+		for_each_possible_cpu(cpu)
+			INIT_WORK(&per_cpu(ipi_work, cpu), keep_alive_response);
+	}
 	return 0;
 err:
 	destroy_workqueue(wdog_wq);

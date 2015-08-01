@@ -58,6 +58,9 @@
 #define SYN_RETRY_NUM_OF_RESET 5
 #define SYN_PCA_ACCESS_MAX_READ_SIZE	15
 #define SYN_PCA_ACCESS_MAX_WRITE_SIZE	16
+#define SYN_WAIT_TIME_OF_RESET		20
+#define SYN_WAIT_TIME_OF_RESET_7300	90
+#define SYN_WAIT_TIME_OF_RESET_7500	60
 #define SYN_FINGER_OFF(n, x, s) \
 	((((n) / 4) + !!(n % 4)) + (s) * (x))
 #define SYN_REG_MAX \
@@ -846,6 +849,35 @@ static int clearpad_set_charger(struct clearpad_t *this)
 	if (rc)
 		dev_err(&this->pdev->dev, "failed to set charger status");
 exit:
+	return rc;
+}
+
+static int clearpad_soft_reset(struct clearpad_t *this)
+{
+	int rc;
+	u32 t_ms;
+
+	rc = clearpad_put(SYNF(this, F01_RMI, COMMAND, 0x00),
+			   DEVICE_COMMAND_RESET);
+	if (rc)
+		goto exit;
+
+	switch (this->chip_id) {
+	case SYN_CHIP_7300:
+		t_ms = SYN_WAIT_TIME_OF_RESET_7300;
+		break;
+	case SYN_CHIP_7500:
+		t_ms = SYN_WAIT_TIME_OF_RESET_7500;
+		break;
+	default:
+		t_ms = SYN_WAIT_TIME_OF_RESET;
+		break;
+	}
+
+	msleep(t_ms);
+exit:
+	if (rc)
+		dev_err(&this->pdev->dev, "failed to soft reset\n");
 	return rc;
 }
 
@@ -1787,15 +1819,13 @@ static int clearpad_flash_disable(struct clearpad_t *this)
 	usleep_range(10000, 11000);
 
 	/* send a reset to the device to complete the flash procedure */
-	rc = clearpad_put(SYNF(this, F01_RMI, COMMAND, 0x00),
-						DEVICE_COMMAND_RESET);
+	rc = clearpad_soft_reset(this);
 	if (rc)
 		goto exit;
 
 	dev_info(&this->pdev->dev,
 			"flashing finished, resetting\n");
 	this->state = SYN_STATE_FLASH_DISABLE;
-	msleep(100);
 exit:
 	return rc;
 }
@@ -3930,9 +3960,7 @@ static ssize_t clearpad_pca_store(struct device *dev,
 	usleep_range(10000, 11000);
 
 	/* send a reset to the device to complete the flash procedure */
-	clearpad_put(SYNF(this, F01_RMI, COMMAND, 0x00),
-						DEVICE_COMMAND_RESET);
-	msleep(100);
+	rc = clearpad_soft_reset(this);
 
 err_unlock:
 	if (rc)
@@ -4970,8 +4998,8 @@ err_reset:
 	kfree(data);
 	LOCK(this);
 	this->state = SYN_STATE_WAIT_FOR_INT;
+	clearpad_soft_reset(this);
 	UNLOCK(this);
-	clearpad_put(SYNF(this, F01_RMI, COMMAND, 0x00), DEVICE_COMMAND_RESET);
 	wait_event_interruptible(this->task_none_wq,
 				clearpad_check_task(this, &state));
 	goto set_power;
@@ -5481,8 +5509,9 @@ static int __devinit clearpad_probe(struct platform_device *pdev)
 			goto err_irq;
 	}
 	if (this->chip_id == SYN_CHIP_3500) {
-		rc = clearpad_put(SYNF(this, F01_RMI, COMMAND, 0x00),
-				   DEVICE_COMMAND_RESET);
+		LOCK(this);
+		rc = clearpad_soft_reset(this);
+		UNLOCK(this);
 		if (rc)
 			goto err_irq;
 	}

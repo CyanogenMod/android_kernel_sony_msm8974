@@ -2227,6 +2227,9 @@ static const struct snd_kcontrol_new quat_mi2s_rx_voice_mixer_controls[] = {
 	SOC_SINGLE_EXT("VoLTE", MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
 	MSM_FRONTEND_DAI_VOLTE, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+	SOC_SINGLE_EXT("VoWLAN", MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
+	MSM_FRONTEND_DAI_VOWLAN, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
 	SOC_SINGLE_EXT("DTMF", MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
 	MSM_FRONTEND_DAI_DTMF_RX, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
@@ -3892,6 +3895,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"QUAT_MI2S_RX_Voice Mixer", "CSVoice", "CS-VOICE_DL1"},
 	{"QUAT_MI2S_RX_Voice Mixer", "Voice2", "VOICE2_DL"},
 	{"QUAT_MI2S_RX_Voice Mixer", "VoLTE", "VoLTE_DL"},
+	{"QUAT_MI2S_RX_Voice Mixer", "VoWLAN", "VoWLAN_DL"},
 	{"QUAT_MI2S_RX_Voice Mixer", "Voip", "VOIP_DL"},
 	{"QUAT_MI2S_RX_Voice Mixer", "DTMF", "DTMF_DL_HL"},
 	{"QUAT_MI2S_RX_Voice Mixer", "Voice Stub", "VOICE_STUB_DL"},
@@ -3999,6 +4003,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"VOIP_UL", NULL, "VOC_EXT_EC MUX"},
 	{"VoLTE_UL", NULL, "VOC_EXT_EC MUX"},
 	{"VOICE2_UL", NULL, "VOC_EXT_EC MUX"},
+	{"VoWLAN_UL", NULL, "VOC_EXT_EC MUX"},
 
 	{"AUDIO_REF_EC_UL1 MUX", "PRI_MI2S_TX" , "PRI_MI2S_TX"},
 	{"AUDIO_REF_EC_UL1 MUX", "SEC_MI2S_TX" , "SEC_MI2S_TX"},
@@ -4078,6 +4083,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"VoWLAN_Tx Mixer", "AUX_PCM_TX_VoWLAN", "AUX_PCM_TX"},
 	{"VoWLAN_Tx Mixer", "SEC_AUX_PCM_TX_VoWLAN", "SEC_AUX_PCM_TX"},
 	{"VoWLAN_Tx Mixer", "MI2S_TX_VoWLAN", "MI2S_TX"},
+	{"VoWLAN_Tx Mixer", "PRI_MI2S_TX_VoWLAN", "PRI_MI2S_TX"},
 	{"VoWLAN_UL", NULL, "VoWLAN_Tx Mixer"},
 
 	{"Voip_Tx Mixer", "PRI_TX_Voip", "PRI_I2S_TX"},

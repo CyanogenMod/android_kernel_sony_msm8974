@@ -2061,6 +2061,7 @@ void warn_alloc_failed(gfp_t gfp_mask, int order, const char *fmt, ...)
 	pr_warn("%s: page allocation failure: order:%d, mode:0x%x\n",
 		current->comm, order, gfp_mask);
 
+	trace_mm_page_alloc_fail(order);
 	dump_stack();
 	if (!should_suppress_show_mem())
 		show_mem(filter);
@@ -2635,6 +2636,9 @@ retry_cpuset:
 				preferred_zone, migratetype);
 
 	trace_mm_page_alloc(page, order, gfp_mask, migratetype);
+	if (order > 1)
+		trace_mm_page_alloc_highorder(page, order,
+					      gfp_mask, migratetype);
 
 out:
 	/*

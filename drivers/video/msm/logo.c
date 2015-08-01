@@ -3,7 +3,7 @@
  * Show Logo in RLE 565 format
  *
  * Copyright (C) 2008 Google Incorporated
- * Copyright (C) 2013 Sony Mobile Communications AB
+ * Copyright (c) 2015 Sony Mobile Communications Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -75,6 +75,11 @@ int load_565rle_image(char *filename)
 		printk(KERN_WARNING "%s: Can not access framebuffer\n",
 			__func__);
 		return -ENODEV;
+	}
+
+	if (!info->screen_base) {
+		printk(KERN_WARNING "Framebuffer memory not allocated\n");
+		return -ENOMEM;
 	}
 
 	fd = sys_open(filename, O_RDONLY, 0);
