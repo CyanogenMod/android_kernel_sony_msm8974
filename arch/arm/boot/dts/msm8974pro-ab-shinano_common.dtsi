@@ -156,6 +156,10 @@
 		compatible = "nxp,tfa98xx-codec";
 	};
 
+	qcom,wdt@f9017000 {
+		qcom,bark-time = <12000>;
+	};
+
 	qcom,msm-thermal {
 		qcom,core-control-mask = <0x6>;
 		qcom,freq-mitigation-value = <422400>;
