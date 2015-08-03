@@ -866,10 +866,6 @@
 	status = "ok";
 };
 
-&mdss_fb0 {
-	qcom,memory-reservation-size = <0x1200000>; /* size 19MB */
-};
-
 &mdss_dsi0 {
 	qcom,dsi-pref-prim-pan = <&dsi_default_gpio_0>;
 	vdd-supply = <&pm8941_lvs3>;
@@ -912,4 +908,14 @@
 
 &usb3 {
 	current_system_max_limit = <1800>;
+};
+
+/ {
+	memory {
+		fb_mem: fb_region@0 {
+			linux,contiguous-region;
+			reg = <0 0x1200000>;
+			label = "fb_mem";
+		};
+	};
 };
