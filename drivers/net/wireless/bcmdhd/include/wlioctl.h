@@ -24,7 +24,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wlioctl.h 516345 2014-11-19 11:58:57Z $
+ * $Id: wlioctl.h 537632 2015-02-27 02:51:28Z $
  */
 
 #ifndef _wlioctl_h_
@@ -1842,6 +1842,7 @@ typedef struct {
 	uint32	pciereset;	/* Secondary Bus Reset issued by driver */
 	uint32	cfgrestore;	/* configspace restore by driver */
 	uint32	reinitreason[NREINITREASONCOUNT]; /* reinitreason counters; 0: Unknown reason */
+	uint32	rxrtry;		/* num of received packets with retry bit on */
 } wl_cnt_t;
 
 typedef struct {
@@ -5077,5 +5078,41 @@ typedef struct wl_bssload_static {
 	uint16 aac;
 } wl_bssload_static_t;
 
+
+#define	WL_IF_STATS_T_VERSION 1	/* current version of wl_if_stats structure */
+
+/* per interface counters */
+typedef struct wl_if_stats {
+	uint16	version;		/* version of the structure */
+	uint16	length;			/* length of the entire structure */
+	uint32	PAD;			/* padding */
+
+	/* transmit stat counters */
+	uint64	txframe;		/* tx data frames */
+	uint64	txbyte;			/* tx data bytes */
+	uint64	txerror;		/* tx data errors (derived: sum of others) */
+	uint64  txnobuf;		/* tx out of buffer errors */
+	uint64  txrunt;			/* tx runt frames */
+	uint64  txfail;			/* tx failed frames */
+	uint64	txretry;		/* tx retry frames */
+	uint64	txretrie;		/* tx multiple retry frames */
+	uint64	txfrmsnt;		/* tx sent frames */
+	uint64	txmulti;		/* tx mulitcast sent frames */
+	uint64	txfrag;			/* tx fragments sent */
+
+	/* receive stat counters */
+	uint64	rxframe;		/* rx data frames */
+	uint64	rxbyte;			/* rx data bytes */
+	uint64	rxerror;		/* rx data errors (derived: sum of others) */
+	uint64	rxnobuf;		/* rx out of buffer errors */
+	uint64  rxrunt;			/* rx runt frames */
+	uint64  rxfragerr;		/* rx fragment errors */
+	uint64	rxmulti;		/* rx multicast frames */
+
+	uint64	txexptime;		/* DATA Tx frames suppressed due to timer expiration */
+	uint64	txrts;			/* RTS/CTS succeeeded count */
+	uint64	txnocts;		/* RTS/CTS faled count */
+}
+wl_if_stats_t;
 
 #endif /* _wlioctl_h_ */

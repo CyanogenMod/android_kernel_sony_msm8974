@@ -23,7 +23,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_linux.c 524130 2015-01-06 02:36:46Z $
+ * $Id: dhd_linux.c 548462 2015-04-13 09:02:48Z $
  */
 
 #include <typedefs.h>
@@ -5028,16 +5028,15 @@ aoe_update_host_ipv4_table(dhd_pub_t *dhd_pub, u32 ipa, bool add, int idx)
 	/* display what we've got */
 	ret = dhd_arp_get_arp_hostip_table(dhd_pub, ipv4_buf, sizeof(ipv4_buf), idx);
 	DHD_ARPOE(("%s: hostip table read from Dongle:\n", __FUNCTION__));
+	if (ret) {
+		DHD_ERROR(("%s failed\n", __FUNCTION__));
+		return;
+	}
 #ifdef AOE_DBG
 	dhd_print_buf(ipv4_buf, 32, 4); /* max 8 IPs 4b each */
 #endif
 	/* now we saved hoste_ip table, clr it in the dongle AOE */
 	dhd_aoe_hostip_clr(dhd_pub, idx);
-
-	if (ret) {
-		DHD_ERROR(("%s failed\n", __FUNCTION__));
-		return;
-	}
 
 	for (i = 0; i < MAX_IPV4_ENTRIES; i++) {
 		if (add && (ipv4_buf[i] == 0)) {
@@ -5976,8 +5975,12 @@ uint8* dhd_os_prealloc(dhd_pub_t *dhdpub, int section, uint size, bool kmalloc_i
 	gfp_t flags = CAN_SLEEP() ? GFP_KERNEL: GFP_ATOMIC;
 
 	buf = (uint8*)wifi_platform_prealloc(dhdpub->info->adapter, section, size);
-	if (buf == NULL && kmalloc_if_fail)
-		buf = kmalloc(size, flags);
+	if (buf == NULL) {
+		DHD_ERROR(("%s: failed to alloc memory, section: %d,"
+			" size: %dbytes", __FUNCTION__, section, size));
+		if (kmalloc_if_fail)
+			buf = kmalloc(size, flags);
+	}
 
 	return buf;
 }

@@ -1,6 +1,6 @@
 /* arch/arm/mach-msm/board-sony_shinano-wifi.c
  *
- * Copyright (C) 2013 Sony Mobile Communications AB.
+ * Copyright (C) 2013 Sony Mobile Communications Inc.
  * Copyright (C) 2013 LGE, Inc
  *
  * This software is licensed under the terms of the GNU General Public
@@ -32,16 +32,23 @@ static int batfet_ena;
 #define WIFI_IRQ_GPIO 67
 
 /* These definitions need to be aligned with bcmdhd */
-#define WLAN_STATIC_SCAN_BUF 5
 #define ESCAN_BUF_SIZE (64 * 1024) /* for WIPHY_ESCAN0 */
-#define PREALLOC_WLAN_SEC_NUM 4
-#define PREALLOC_WLAN_BUF_NUM 160
-#define PREALLOC_WLAN_SECTION_HEADER 24
+#define WLAN_MEM_ARRAY_SENTINEL \
+		(sizeof(wlan_mem_array)/sizeof(wlan_mem_array[0]))
 
-#define WLAN_SECTION_SIZE_0 (PREALLOC_WLAN_BUF_NUM * 128)  /* for PROT */
-#define WLAN_SECTION_SIZE_1 (PREALLOC_WLAN_BUF_NUM * 128)  /* for RXBUF */
-#define WLAN_SECTION_SIZE_2 (PREALLOC_WLAN_BUF_NUM * 512)  /* for DATABUF */
-#define WLAN_SECTION_SIZE_3 (PREALLOC_WLAN_BUF_NUM * 1024) /* for OSL_BUF */
+#define WLAN_STATIC_SKB (WLAN_MEM_ARRAY_SENTINEL+1)
+
+#if defined(CONFIG_64BIT)
+#define WLAN_DHD_INFO_BUF_SIZE                        (24 * 1024)
+#define WLAN_STATIC_DHD_WLFC_INFO_SIZE                (64 * 1024)
+#define WLAN_STATIC_DHD_WLFC_HANGER_SIZE              (128 * 1024)
+#else
+#define WLAN_DHD_INFO_BUF_SIZE                        (16 * 1024)
+#define WLAN_STATIC_DHD_WLFC_INFO_SIZE                (24 * 1024)
+#define WLAN_STATIC_DHD_WLFC_HANGER_SIZE              (64 * 1024)
+#endif /* CONFIG_64BIT */
+
+#define SIZE_ORDER(x) ((1 << x) * PAGE_SIZE)
 
 /* These definitions are copied from bcmdhd */
 #define DHD_SKB_HDRSIZE 336
@@ -58,14 +65,22 @@ struct wlan_mem_prealloc {
 	unsigned long size;
 };
 
-static struct wlan_mem_prealloc wlan_mem_array[PREALLOC_WLAN_SEC_NUM] = {
-	{ NULL, (WLAN_SECTION_SIZE_0 + PREALLOC_WLAN_SECTION_HEADER) },
-	{ NULL, (WLAN_SECTION_SIZE_1 + PREALLOC_WLAN_SECTION_HEADER) },
-	{ NULL, (WLAN_SECTION_SIZE_2 + PREALLOC_WLAN_SECTION_HEADER) },
-	{ NULL, (WLAN_SECTION_SIZE_3 + PREALLOC_WLAN_SECTION_HEADER) }
+static struct wlan_mem_prealloc wlan_mem_array[] = {
+	{NULL, (SIZE_ORDER(2))}, /* for PROT  (0) */
+	{NULL, (SIZE_ORDER(2))}, /* for RXBUF (1) */
+	{NULL, (SIZE_ORDER(4))}, /* for DATABUF (2) */
+	{NULL, (SIZE_ORDER(2))}, /* for osl (3) */
+	{NULL, (0)}, /* (4) */
+	{NULL, ESCAN_BUF_SIZE},  /* wlan_static_scan (5) */
+	{NULL, (0)}, /* (6) */
+	{NULL, WLAN_DHD_INFO_BUF_SIZE}, /* dhd_info (7) */
+	{NULL, WLAN_STATIC_DHD_WLFC_INFO_SIZE}, /* WLFC_HANGER_INFO (8) */
+	{NULL, (0)}, /* (9) */
+	{NULL, (0)}, /* (10) */
+	{NULL, (0)}, /* (11) */
+	{NULL, WLAN_STATIC_DHD_WLFC_HANGER_SIZE}, /* WLFC_HANGER_SIZE (12) */
 };
 
-static void *wlan_static_scan_buf;
 
 static int shinano_wifi_init_mem(void)
 {
@@ -89,16 +104,12 @@ static int shinano_wifi_init_mem(void)
 	if (!wlan_static_skb[i])
 		goto err_skb_alloc;
 
-	for (i = 0; i < PREALLOC_WLAN_SEC_NUM; i++) {
+	for (i = 0; i < WLAN_MEM_ARRAY_SENTINEL; i++) {
 		wlan_mem_array[i].mem_ptr =
 			kmalloc(wlan_mem_array[i].size, GFP_KERNEL);
 		if (!wlan_mem_array[i].mem_ptr)
 			goto err_mem_alloc;
 	}
-
-	wlan_static_scan_buf = kmalloc(ESCAN_BUF_SIZE, GFP_KERNEL);
-	if (!wlan_static_scan_buf)
-		goto err_mem_alloc;
 
 	return 0;
 
@@ -122,15 +133,28 @@ err_skb_alloc:
 
 static void *shinano_wifi_mem_prealloc(int section, unsigned long size)
 {
-	if (section == PREALLOC_WLAN_SEC_NUM)
+	if (section == WLAN_STATIC_SKB) {
+		printk(KERN_INFO "prealloc returning skb, section:%d size:%lu\n",
+			section, size);
 		return wlan_static_skb;
-	if (section == WLAN_STATIC_SCAN_BUF)
-		return wlan_static_scan_buf;
+	}
 
-	if ((section < 0) || (section > PREALLOC_WLAN_SEC_NUM))
+	if ((section < 0) || (section >= WLAN_MEM_ARRAY_SENTINEL)) {
+		printk(KERN_ERR "prealloc returning null %d %lu\n",
+			section, size);
 		return NULL;
-	if (size > wlan_mem_array[section].size)
+	}
+
+	if (size > wlan_mem_array[section].size) {
+		printk(KERN_ERR
+			"prealloc too small. Section:%d Size req:%lu Current size:%lu\n",
+			section, size, wlan_mem_array[section].size);
+		BUG();
 		return NULL;
+	}
+
+	printk(KERN_INFO "prealloc section %d, requested size: %lu, got size:%lu\n",
+			section, size, wlan_mem_array[section].size);
 	return wlan_mem_array[section].mem_ptr;
 }
 

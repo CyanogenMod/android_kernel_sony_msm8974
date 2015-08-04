@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_android.c 518916 2014-12-04 04:59:10Z $
+ * $Id: wl_android.c 547972 2015-04-10 03:41:41Z $
  */
 
 #include <linux/module.h>
@@ -920,10 +920,14 @@ static int
 wl_android_get_connection_stats(struct net_device *dev, char *command, int total_len)
 {
 	wl_cnt_t* cnt = NULL;
+#ifndef DISABLE_IF_COUNTERS
+	wl_if_stats_t* if_stats = NULL;
+#endif /* DISABLE_IF_COUNTERS */
+
 	int link_speed = 0;
 	struct connection_stats *output;
 	unsigned int bufsize = 0;
-	int bytes_written = 0;
+	int bytes_written = -1;
 	int ret = 0;
 
 	WL_INFO(("%s: enter Get Connection Stats\n", __FUNCTION__));
@@ -941,24 +945,82 @@ wl_android_get_connection_stats(struct net_device *dev, char *command, int total
 		goto error;
 	}
 
-	if ((cnt = kmalloc(sizeof(*cnt), GFP_KERNEL)) == NULL) {
-		WL_ERR(("kmalloc failed\n"));
-		return -1;
-	}
-	memset(cnt, 0, sizeof(*cnt));
+	output = (struct connection_stats *)command;
 
-	ret = wldev_iovar_getbuf(dev, "counters", NULL, 0, (char *)cnt, sizeof(wl_cnt_t), NULL);
+#ifndef DISABLE_IF_COUNTERS
+	if ((if_stats = kmalloc(sizeof(*if_stats), GFP_KERNEL)) == NULL) {
+		WL_ERR(("%s(%d): kmalloc failed\n", __FUNCTION__, __LINE__));
+		goto error;
+	}
+	memset(if_stats, 0, sizeof(*if_stats));
+
+	ret = wldev_iovar_getbuf(dev, "if_counters", NULL, 0,
+		(char *)if_stats, sizeof(*if_stats), NULL);
 	if (ret) {
-		WL_ERR(("%s: wldev_iovar_getbuf() failed, ret=%d\n",
+		WL_ERR(("%s: if_counters not supported ret=%d\n",
 			__FUNCTION__, ret));
-		goto error;
-	}
 
-	if (dtoh16(cnt->version) > WL_CNT_T_VERSION) {
-		WL_ERR(("%s: incorrect version of wl_cnt_t, expected=%u got=%u\n",
-			__FUNCTION__,  WL_CNT_T_VERSION, cnt->version));
-		goto error;
+		/* In case if_stats IOVAR is not supported, get information from counters. */
+#endif /* DISABLE_IF_COUNTERS */
+		if ((cnt = kmalloc(sizeof(*cnt), GFP_KERNEL)) == NULL) {
+			WL_ERR(("%s(%d): kmalloc failed\n", __FUNCTION__, __LINE__));
+			goto error;
+		}
+		memset(cnt, 0, sizeof(*cnt));
+
+		ret = wldev_iovar_getbuf(dev, "counters", NULL, 0,
+			(char *)cnt, sizeof(wl_cnt_t), NULL);
+		if (ret) {
+			WL_ERR(("%s: wldev_iovar_getbuf() failed, ret=%d\n",
+				__FUNCTION__, ret));
+			goto error;
+		}
+
+		if (dtoh16(cnt->version) > WL_CNT_T_VERSION) {
+			WL_ERR(("%s: incorrect version of wl_cnt_t, expected=%u got=%u\n",
+				__FUNCTION__,  WL_CNT_T_VERSION, cnt->version));
+			goto error;
+		}
+
+		output->txframe   = dtoh32(cnt->txframe);
+		output->txbyte    = dtoh32(cnt->txbyte);
+		output->txerror   = dtoh32(cnt->txerror);
+		output->rxframe   = dtoh32(cnt->rxframe);
+		output->rxbyte    = dtoh32(cnt->rxbyte);
+		output->txfail    = dtoh32(cnt->txfail);
+		output->txretry   = dtoh32(cnt->txretry);
+		output->txretrie  = dtoh32(cnt->txretrie);
+		output->txrts     = dtoh32(cnt->txrts);
+		output->txnocts   = dtoh32(cnt->txnocts);
+		output->txexptime = dtoh32(cnt->txexptime);
+#ifndef DISABLE_IF_COUNTERS
+	} else {
+		/* Populate from if_stats. */
+		if (dtoh16(if_stats->version) > WL_IF_STATS_T_VERSION) {
+			WL_ERR(("%s: incorrect version of wl_if_stats_t, expected=%u got=%u\n",
+				__FUNCTION__,  WL_IF_STATS_T_VERSION, if_stats->version));
+			goto error;
+		}
+
+		output->txframe   = (uint32)dtoh64(if_stats->txframe);
+		output->txbyte    = (uint32)dtoh64(if_stats->txbyte);
+		output->txerror   = (uint32)dtoh64(if_stats->txerror);
+		output->rxframe   = (uint32)dtoh64(if_stats->rxframe);
+		output->rxbyte    = (uint32)dtoh64(if_stats->rxbyte);
+		output->txfail    = (uint32)dtoh64(if_stats->txfail);
+		output->txretry   = (uint32)dtoh64(if_stats->txretry);
+		output->txretrie  = (uint32)dtoh64(if_stats->txretrie);
+		if (dtoh16(if_stats->length) > OFFSETOF(wl_if_stats_t, txexptime)) {
+			output->txexptime = (uint32)dtoh64(if_stats->txexptime);
+			output->txrts     = (uint32)dtoh64(if_stats->txrts);
+			output->txnocts   = (uint32)dtoh64(if_stats->txnocts);
+		} else {
+			output->txexptime = 0;
+			output->txrts     = 0;
+			output->txnocts   = 0;
+		}
 	}
+#endif /* DISABLE_IF_COUNTERS */
 
 	/* link_speed is in kbps */
 	ret = wldev_get_link_speed(dev, &link_speed);
@@ -967,19 +1029,6 @@ wl_android_get_connection_stats(struct net_device *dev, char *command, int total
 			__FUNCTION__, ret, link_speed));
 		goto error;
 	}
-
-	output = (struct connection_stats *)command;
-	output->txframe   = dtoh32(cnt->txframe);
-	output->txbyte    = dtoh32(cnt->txbyte);
-	output->txerror   = dtoh32(cnt->txerror);
-	output->rxframe   = dtoh32(cnt->rxframe);
-	output->rxbyte    = dtoh32(cnt->rxbyte);
-	output->txfail    = dtoh32(cnt->txfail);
-	output->txretry   = dtoh32(cnt->txretry);
-	output->txretrie  = dtoh32(cnt->txretrie);
-	output->txrts     = dtoh32(cnt->txrts);
-	output->txnocts   = dtoh32(cnt->txnocts);
-	output->txexptime = dtoh32(cnt->txexptime);
 	output->txrate    = link_speed;
 
 	/* Channel idle ratio. */
@@ -987,16 +1036,19 @@ wl_android_get_connection_stats(struct net_device *dev, char *command, int total
 		output->chan_idle = 0;
 	};
 
-	kfree(cnt);
-
 	bytes_written = sizeof(struct connection_stats);
-	return bytes_written;
 
 error:
+#ifndef DISABLE_IF_COUNTERS
+	if (if_stats) {
+		kfree(if_stats);
+	}
+#endif /* DISABLE_IF_COUNTERS */
 	if (cnt) {
 		kfree(cnt);
 	}
-	return -1;
+
+	return bytes_written;
 }
 #endif /* CONNECTION_STATISTICS */
 

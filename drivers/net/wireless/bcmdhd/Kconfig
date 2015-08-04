@@ -27,6 +27,13 @@ config BCM4354
 	  This module adds support for wireless adapters based on
 	  Broadcom 4354 chipset.
 
+config BCM43455
+	bool "Broadcom 43455 wireless cards support"
+	depends on BCMDHD
+	---help---
+	  This module adds support for wireless adapters based on
+	  Broadcom 43455 chipset.
+
 endchoice
 
 config BCMDHD_FW_PATH

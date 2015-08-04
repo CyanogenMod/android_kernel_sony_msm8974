@@ -22,7 +22,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: linux_osl.c 476208 2014-05-08 05:18:26Z $
+ * $Id: linux_osl.c 548460 2015-04-13 08:55:51Z $
  */
 
 #define LINUX_PORT
@@ -54,12 +54,16 @@
 #define DHD_SKB_2PAGE_BUFSIZE	((PAGE_SIZE*2)-DHD_SKB_HDRSIZE)
 #define DHD_SKB_4PAGE_BUFSIZE	((PAGE_SIZE*4)-DHD_SKB_HDRSIZE)
 
+#ifdef CUSTOMER_HW5
+#define STATIC_BUF_MAX_NUM	1
+#else
 #define STATIC_BUF_MAX_NUM	16
+#endif /* CUSTOMER_HW5 */
 #define STATIC_BUF_SIZE	(PAGE_SIZE*2)
 #define STATIC_BUF_TOTAL_LEN	(STATIC_BUF_MAX_NUM * STATIC_BUF_SIZE)
 
 typedef struct bcm_static_buf {
-	struct semaphore static_sem;
+	spinlock_t static_lock;
 	unsigned char *buf_ptr;
 	unsigned char buf_use[STATIC_BUF_MAX_NUM];
 } bcm_static_buf_t;
@@ -300,10 +304,9 @@ int osl_static_mem_init(osl_t *osh, void *adapter)
 				return -ENOMEM;
 			}
 			else
-				printk("alloc static buf at %x!\n", (unsigned int)bcm_static_buf);
+				printk("alloc static buf at %p!\n", bcm_static_buf);
 
-
-			sema_init(&bcm_static_buf->static_sem, 1);
+			spin_lock_init(&bcm_static_buf->static_lock);
 
 			bcm_static_buf->buf_ptr = (unsigned char *)bcm_static_buf + STATIC_BUF_SIZE;
 		}
@@ -312,7 +315,14 @@ int osl_static_mem_init(osl_t *osh, void *adapter)
 			int i;
 			void *skb_buff_ptr = 0;
 			bcm_static_skb = (bcm_static_pkt_t *)((char *)bcm_static_buf + 2048);
+#ifdef CUSTOMER_HW5
+			/* The SKB static buffer ID is defined as latest id of dhd_prealloc_index
+			 * + 1 in dhd.h
+			 */
+			skb_buff_ptr = wifi_platform_prealloc(adapter, 14, 0);
+#else
 			skb_buff_ptr = wifi_platform_prealloc(adapter, 4, 0);
+#endif /* CUSTOMER_HW5 */
 			if (!skb_buff_ptr) {
 				printk("cannot alloc static buf!\n");
 				bcm_static_buf = NULL;
@@ -788,7 +798,11 @@ osl_pktget_static(osl_t *osh, uint len)
 			bcm_static_skb->pkt_use[i] = 1;
 
 			skb = bcm_static_skb->skb_4k[i];
+#ifdef NET_SKBUFF_DATA_USES_OFFSET
+			skb_set_tail_pointer(skb, len);
+#else
 			skb->tail = skb->data + len;
+#endif /* NET_SKBUFF_DATA_USES_OFFSET */
 			skb->len = len;
 
 			up(&bcm_static_skb->osl_pkt_sem);
@@ -806,7 +820,11 @@ osl_pktget_static(osl_t *osh, uint len)
 		if (i != STATIC_PKT_MAX_NUM) {
 			bcm_static_skb->pkt_use[i + STATIC_PKT_MAX_NUM] = 1;
 			skb = bcm_static_skb->skb_8k[i];
+#ifdef NET_SKBUFF_DATA_USES_OFFSET
+			skb_set_tail_pointer(skb, len);
+#else
 			skb->tail = skb->data + len;
+#endif /* NET_SKBUFF_DATA_USES_OFFSET */
 			skb->len = len;
 
 			up(&bcm_static_skb->osl_pkt_sem);
@@ -819,13 +837,17 @@ osl_pktget_static(osl_t *osh, uint len)
 		bcm_static_skb->pkt_use[STATIC_PKT_MAX_NUM * 2] = 1;
 
 		skb = bcm_static_skb->skb_16k;
+#ifdef NET_SKBUFF_DATA_USES_OFFSET
+		skb_set_tail_pointer(skb, len);
+#else
 		skb->tail = skb->data + len;
+#endif /* NET_SKBUFF_DATA_USES_OFFSET */
 		skb->len = len;
 
 		up(&bcm_static_skb->osl_pkt_sem);
 		return skb;
 	}
-#endif
+#endif /* ENHANCED_STATIC_BUF */
 
 	up(&bcm_static_skb->osl_pkt_sem);
 	printk("%s: all static pkt in use!\n", __FUNCTION__);
@@ -970,10 +992,11 @@ osl_malloc(osl_t *osh, uint size)
 #ifdef CONFIG_DHD_USE_STATIC_BUF
 	if (bcm_static_buf)
 	{
+		unsigned long irq_flags;
 		int i = 0;
 		if ((size >= PAGE_SIZE)&&(size <= STATIC_BUF_SIZE))
 		{
-			down(&bcm_static_buf->static_sem);
+			spin_lock_irqsave(&bcm_static_buf->static_lock, irq_flags);
 
 			for (i = 0; i < STATIC_BUF_MAX_NUM; i++)
 			{
@@ -983,13 +1006,13 @@ osl_malloc(osl_t *osh, uint size)
 
 			if (i == STATIC_BUF_MAX_NUM)
 			{
-				up(&bcm_static_buf->static_sem);
+				spin_unlock_irqrestore(&bcm_static_buf->static_lock, irq_flags);
 				printk("all static buff in use!\n");
 				goto original;
 			}
 
 			bcm_static_buf->buf_use[i] = 1;
-			up(&bcm_static_buf->static_sem);
+			spin_unlock_irqrestore(&bcm_static_buf->static_lock, irq_flags);
 
 			bzero(bcm_static_buf->buf_ptr+STATIC_BUF_SIZE*i, size);
 			if (osh)
@@ -1032,6 +1055,8 @@ void
 osl_mfree(osl_t *osh, void *addr, uint size)
 {
 #ifdef CONFIG_DHD_USE_STATIC_BUF
+	unsigned long flags;
+
 	if (bcm_static_buf)
 	{
 		if ((addr > (void *)bcm_static_buf) && ((unsigned char *)addr
@@ -1041,9 +1066,9 @@ osl_mfree(osl_t *osh, void *addr, uint size)
 
 			buf_idx = ((unsigned char *)addr - bcm_static_buf->buf_ptr)/STATIC_BUF_SIZE;
 
-			down(&bcm_static_buf->static_sem);
+			spin_lock_irqsave(&bcm_static_buf->static_lock, flags);
 			bcm_static_buf->buf_use[buf_idx] = 0;
-			up(&bcm_static_buf->static_sem);
+			spin_unlock_irqrestore(&bcm_static_buf->static_lock, flags);
 
 			if (osh && osh->cmn) {
 				ASSERT(osh->magic == OS_HANDLE_MAGIC);

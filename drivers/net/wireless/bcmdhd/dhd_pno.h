@@ -403,6 +403,7 @@ typedef struct dhd_pno_status_info {
 	enum dhd_pno_mode pno_mode;
 	dhd_pno_params_t pno_params_arr[INDEX_MODE_MAX];
 	struct list_head head_list;
+	bool work_flag;
 } dhd_pno_status_info_t;
 
 /* wrapper functions */

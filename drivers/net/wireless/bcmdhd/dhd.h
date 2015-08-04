@@ -25,7 +25,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd.h 516345 2014-11-19 11:58:57Z $
+ * $Id: dhd.h 548462 2015-04-13 09:02:48Z $
  */
 
 /****************
@@ -146,7 +146,9 @@ enum dhd_prealloc_index {
 #if defined(STATIC_WL_PRIV_STRUCT)
 	DHD_PREALLOC_WIPHY_ESCAN0 = 5,
 #endif /* STATIC_WL_PRIV_STRUCT */
-	DHD_PREALLOC_DHD_INFO = 7
+	DHD_PREALLOC_DHD_INFO = 7,
+	DHD_PREALLOC_DHD_WLFC_INFO = 8,
+	DHD_PREALLOC_DHD_WLFC_HANGER = 12
 };
 
 /* Packet alignment for most efficient SDIO (can change based on platform) */

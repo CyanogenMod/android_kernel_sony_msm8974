@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_cfg80211.h 516345 2014-11-19 11:58:57Z $
+ * $Id: wl_cfg80211.h 537581 2015-02-27 00:58:37Z $
  */
 
 #ifndef _wl_cfg80211_h_
@@ -46,6 +46,7 @@ struct wl_ibss;
 
 #define htod32(i) (i)
 #define htod16(i) (i)
+#define dtoh64(i) (i)
 #define dtoh32(i) (i)
 #define dtoh16(i) (i)
 #define htodchanspec(i) (i)
@@ -597,6 +598,7 @@ struct bcm_cfg80211 {
 	s32 tdls_mgmt_freq;
 #endif /* WLTDLS */
 	bool nan_running;
+	bool need_wait_afrx;
 };
 
 
