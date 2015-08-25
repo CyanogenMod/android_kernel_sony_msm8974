@@ -3,4 +3,5 @@
 #
 config_data.h
 config_data.gz
+hz.bc
 timeconst.h
