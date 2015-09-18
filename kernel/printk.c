@@ -44,7 +44,6 @@
 
 #include <asm/uaccess.h>
 
-#include <mach/msm_rtb.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/printk.h>
 
@@ -749,11 +748,6 @@ asmlinkage int printk(const char *fmt, ...)
 {
 	va_list args;
 	int r;
-#ifdef CONFIG_MSM_RTB
-	void *caller = __builtin_return_address(0);
-
-	uncached_logk_pc(LOGK_LOGBUF, caller, (void *)log_end);
-#endif
 
 #ifdef CONFIG_KGDB_KDB
 	if (unlikely(kdb_trap_printk)) {
@@ -889,7 +883,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	/* Emit the output into the temporary buffer */
 	printed_len += vscnprintf(printk_buf + printed_len,
 				  sizeof(printk_buf) - printed_len, fmt, args);
-
 
 	p = printk_buf;
 
