@@ -16,6 +16,10 @@
 
 
 &soc {
+	ramoops {
+		android,ramoops-buffer-start = <0xdff00000>;
+	};
+
 	/* I2C : BLSP6 */
 	i2c@f9928000 {
 		nfc@28 {
