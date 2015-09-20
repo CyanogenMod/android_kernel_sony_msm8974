@@ -12,7 +12,6 @@
  */
 
 &mdss_mdp {
-	qcom,mdss-ib-factor = <2 1>;		/* 2 times  */
 	dsi_renesas_default: somc,renesas_default_panel {
 		qcom,mdss-dsi-panel-name = "default renesas 1080p video";
 		qcom,mdss-dsi-panel-controller = <&mdss_dsi0>;

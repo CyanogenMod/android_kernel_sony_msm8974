@@ -865,6 +865,7 @@
 	qcom,vbatdet-delta-soc = <1>;
 	qcom,thermal-mitigation = <1300 1300 1100 900 700 500 300 200 100 0>;
 	qcom,tchg-mins = <512>;
+	qcom,vbatweak-mv = <3200>;
 };
 
 &pm8941_bms {
