@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2013,2015 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,7 +37,6 @@ static int auto_detect;
 #define MSM_PRONTO_PHYS         0xfb21b000
 
 #define RIVA_PMU_OFFSET         0x28
-#define PRONTO_PMU_OFFSET       0x1004
 
 #define RIVA_SPARE_OFFSET       0x0b4
 #define PRONTO_SPARE_OFFSET     0x1088
@@ -45,12 +44,20 @@ static int auto_detect;
 
 #define PRONTO_IRIS_REG_READ_OFFSET       0x1134
 #define PRONTO_IRIS_REG_CHIP_ID           0x04
+/* IRIS card chip ID's */
+#define WCN3660       0x0200
+#define WCN3660A      0x0300
+#define WCN3660B      0x0400
+#define WCN3620       0x5111
+#define WCN3620A      0x5112
+#define WCN3610       0x9101
 
 #define WCNSS_PMU_CFG_IRIS_XO_CFG          BIT(3)
 #define WCNSS_PMU_CFG_IRIS_XO_EN           BIT(4)
-#define WCNSS_PMU_CFG_GC_BUS_MUX_SEL_TOP   BIT(5)
 #define WCNSS_PMU_CFG_IRIS_XO_CFG_STS      BIT(6) /* 1: in progress, 0: done */
 
+#define WCNSS_PMU_CFG_IRIS_RESET           BIT(7)
+#define WCNSS_PMU_CFG_IRIS_RESET_STS       BIT(8) /* 1: in progress, 0: done */
 #define WCNSS_PMU_CFG_IRIS_XO_READ         BIT(9)
 #define WCNSS_PMU_CFG_IRIS_XO_READ_STS     BIT(10)
 
@@ -141,10 +148,44 @@ int xo_auto_detect(u32 reg)
 	}
 }
 
+int validate_iris_chip_id(u32 reg)
+{
+	int iris_id;
+	iris_id = reg >> 16;
+
+	switch (iris_id) {
+	case WCN3660:
+	case WCN3660A:
+	case WCN3660B:
+	case WCN3620:
+	case WCN3620A:
+	case WCN3610:
+		return 0;
+	default:
+		return 1;
+	}
+}
+
+void  wcnss_iris_reset(u32 reg, void __iomem *pmu_conf_reg)
+{
+	/* Reset IRIS */
+	reg |= WCNSS_PMU_CFG_IRIS_RESET;
+	writel_relaxed(reg, pmu_conf_reg);
+
+	/* Wait for PMU_CFG.iris_reg_reset_sts */
+	while (readl_relaxed(pmu_conf_reg) &
+			WCNSS_PMU_CFG_IRIS_RESET_STS)
+		cpu_relax();
+
+	/* Reset iris reset bit */
+	reg &= ~WCNSS_PMU_CFG_IRIS_RESET;
+	writel_relaxed(reg, pmu_conf_reg);
+}
+
 static int configure_iris_xo(struct device *dev, bool use_48mhz_xo, int on,
 			int *iris_xo_set)
 {
-	u32 reg = 0;
+	u32 reg = 0, i = 0;
 	u32 iris_reg = WCNSS_INVALID_IRIS_REG;
 	int rc = 0;
 	int size = 0;
@@ -218,22 +259,44 @@ static int configure_iris_xo(struct device *dev, bool use_48mhz_xo, int on,
 			iris_reg = readl_relaxed(iris_read_reg);
 		}
 
+		wcnss_iris_reset(reg, pmu_conf_reg);
+
 		if (iris_reg != WCNSS_INVALID_IRIS_REG) {
 			iris_reg &= 0xffff;
 			iris_reg |= PRONTO_IRIS_REG_CHIP_ID;
 			writel_relaxed(iris_reg, iris_read_reg);
+			do {
+				/* Iris read */
+				reg = readl_relaxed(pmu_conf_reg);
+				reg |= WCNSS_PMU_CFG_IRIS_XO_READ;
+				writel_relaxed(reg, pmu_conf_reg);
 
-			/* Iris read */
-			reg = readl_relaxed(pmu_conf_reg);
-			reg |= WCNSS_PMU_CFG_IRIS_XO_READ;
-			writel_relaxed(reg, pmu_conf_reg);
+				/* Wait for PMU_CFG.iris_reg_read_sts */
+				while (readl_relaxed(pmu_conf_reg) &
+						WCNSS_PMU_CFG_IRIS_XO_READ_STS)
+					cpu_relax();
 
-			/* Wait for PMU_CFG.iris_reg_read_sts */
-			while (readl_relaxed(pmu_conf_reg) &
-					WCNSS_PMU_CFG_IRIS_XO_READ_STS)
-				cpu_relax();
+				iris_reg = readl_relaxed(iris_read_reg);
+				pr_info("wcnss: IRIS Reg: %08x\n", iris_reg);
 
-			iris_reg = readl_relaxed(iris_read_reg);
+				if (validate_iris_chip_id(iris_reg) && i >= 4) {
+					pr_info("wcnss: IRIS Card absent/invalid\n");
+					auto_detect = WCNSS_XO_INVALID;
+					/* Reset iris read bit */
+					reg &= ~WCNSS_PMU_CFG_IRIS_XO_READ;
+					/* Clear XO_MODE[b2:b1] bits.
+					 * Clear implies 19.2 MHz TCXO
+					 */
+					reg &= ~(WCNSS_PMU_CFG_IRIS_XO_MODE);
+					goto xo_configure;
+				} else if (!validate_iris_chip_id(iris_reg)) {
+					pr_debug("wcnss: IRIS Card is present\n");
+					break;
+				}
+				reg &= ~WCNSS_PMU_CFG_IRIS_XO_READ;
+				writel_relaxed(reg, pmu_conf_reg);
+				wcnss_iris_reset(reg, pmu_conf_reg);
+			} while (i++ < 5);
 			auto_detect = xo_auto_detect(iris_reg);
 
 			/* Reset iris read bit */
@@ -256,7 +319,10 @@ static int configure_iris_xo(struct device *dev, bool use_48mhz_xo, int on,
 				*iris_xo_set = WCNSS_XO_48MHZ;
 		}
 
+xo_configure:
 		writel_relaxed(reg, pmu_conf_reg);
+
+		wcnss_iris_reset(reg, pmu_conf_reg);
 
 		/* Start IRIS XO configuration */
 		reg |= WCNSS_PMU_CFG_IRIS_XO_CFG;
