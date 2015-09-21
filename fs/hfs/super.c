@@ -115,6 +115,7 @@ static int hfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 static int hfs_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_NODIRATIME;
 	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
 		return 0;
@@ -483,6 +484,12 @@ static int __init init_hfs_fs(void)
 static void __exit exit_hfs_fs(void)
 {
 	unregister_filesystem(&hfs_fs_type);
+
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(hfs_inode_cachep);
 }
 

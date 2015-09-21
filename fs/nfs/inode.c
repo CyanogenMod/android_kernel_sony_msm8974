@@ -121,7 +121,7 @@ static void nfs_clear_inode(struct inode *inode)
 void nfs_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 	nfs_clear_inode(inode);
 }
 
@@ -1500,7 +1500,7 @@ static int nfs_update_inode(struct inode *inode, struct nfs_fattr *fattr)
 void nfs4_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 	pnfs_return_layout(inode);
 	pnfs_destroy_layout(NFS_I(inode));
 	/* If we are holding a delegation, return it! */
@@ -1583,6 +1583,11 @@ static int __init nfs_init_inodecache(void)
 
 static void nfs_destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(nfs_inode_cachep);
 }
 

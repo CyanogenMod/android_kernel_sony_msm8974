@@ -1182,6 +1182,8 @@ static int gfs2_remount_fs(struct super_block *sb, int *flags, char *data)
 	struct gfs2_tune *gt = &sdp->sd_tune;
 	int error;
 
+	sync_filesystem(sb);
+
 	spin_lock(&gt->gt_spin);
 	args.ar_commit = gt->gt_logd_secs;
 	args.ar_quota_quantum = gt->gt_quota_quantum;
@@ -1554,7 +1556,7 @@ out_unlock:
 out:
 	/* Case 3 starts here */
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 	gfs2_dir_hash_inval(ip);
 	ip->i_gl->gl_object = NULL;
 	flush_delayed_work_sync(&ip->i_gl->gl_work);

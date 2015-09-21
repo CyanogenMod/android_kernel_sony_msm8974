@@ -790,7 +790,7 @@ out:
 /*
  * llseek.  be sure to verify file size on SEEK_END.
  */
-static loff_t ceph_llseek(struct file *file, loff_t offset, int origin)
+static loff_t ceph_llseek(struct file *file, loff_t offset, int whence)
 {
 	struct inode *inode = file->f_mapping->host;
 	int ret;
@@ -798,7 +798,7 @@ static loff_t ceph_llseek(struct file *file, loff_t offset, int origin)
 	mutex_lock(&inode->i_mutex);
 	__ceph_do_pending_vmtruncate(inode);
 
-	if (origin == SEEK_END || origin == SEEK_DATA || origin == SEEK_HOLE) {
+	if (whence == SEEK_END || whence == SEEK_DATA || whence == SEEK_HOLE) {
 		ret = ceph_do_getattr(inode, CEPH_STAT_CAP_SIZE);
 		if (ret < 0) {
 			offset = ret;
@@ -806,7 +806,7 @@ static loff_t ceph_llseek(struct file *file, loff_t offset, int origin)
 		}
 	}
 
-	switch (origin) {
+	switch (whence) {
 	case SEEK_END:
 		offset += inode->i_size;
 		break;

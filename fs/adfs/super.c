@@ -208,6 +208,7 @@ static int parse_options(struct super_block *sb, char *options)
 
 static int adfs_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_NODIRATIME;
 	return parse_options(sb, data);
 }
@@ -276,6 +277,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(adfs_inode_cachep);
 }
 

@@ -207,6 +207,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(ext2_inode_cachep);
 }
 
@@ -1207,6 +1212,7 @@ static int ext2_remount (struct super_block * sb, int * flags, char * data)
 	unsigned long old_sb_flags;
 	int err;
 
+	sync_filesystem(sb);
 	spin_lock(&sbi->s_lock);
 
 	/* Store the old options */

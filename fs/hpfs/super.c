@@ -210,6 +210,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(hpfs_inode_cachep);
 }
 
@@ -386,6 +391,8 @@ static int hpfs_remount_fs(struct super_block *s, int *flags, char *data)
 	struct hpfs_sb_info *sbi = hpfs_sb(s);
 	char *new_opts = kstrdup(data, GFP_KERNEL);
 	
+	sync_filesystem(s);
+
 	*flags |= MS_NOATIME;
 	
 	hpfs_lock(s);

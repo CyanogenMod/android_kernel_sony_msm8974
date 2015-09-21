@@ -125,6 +125,7 @@ vxfs_statfs(struct dentry *dentry, struct kstatfs *bufp)
 
 static int vxfs_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_RDONLY;
 	return 0;
 }
@@ -279,6 +280,11 @@ static void __exit
 vxfs_cleanup(void)
 {
 	unregister_filesystem(&vxfs_fs_type);
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(vxfs_inode_cachep);
 }
 

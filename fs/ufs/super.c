@@ -1264,6 +1264,7 @@ static int ufs_remount (struct super_block *sb, int *mount_flags, char *data)
 	unsigned new_mount_opt, ufstype;
 	unsigned flags;
 
+	sync_filesystem(sb);
 	lock_ufs(sb);
 	lock_super(sb);
 	uspi = UFS_SB(sb)->s_uspi;
@@ -1452,6 +1453,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(ufs_inode_cachep);
 }
 

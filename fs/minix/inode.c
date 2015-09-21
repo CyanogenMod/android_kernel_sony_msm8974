@@ -32,7 +32,7 @@ static void minix_evict_inode(struct inode *inode)
 		minix_truncate(inode);
 	}
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 	if (!inode->i_nlink)
 		minix_free_inode(inode);
 }
@@ -100,6 +100,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(minix_inode_cachep);
 }
 
@@ -118,6 +123,7 @@ static int minix_remount (struct super_block * sb, int * flags, char * data)
 	struct minix_sb_info * sbi = minix_sb(sb);
 	struct minix_super_block * ms;
 
+	sync_filesystem(sb);
 	ms = sbi->s_ms;
 	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
 		return 0;

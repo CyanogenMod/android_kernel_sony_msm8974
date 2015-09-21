@@ -89,11 +89,17 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(ncp_inode_cachep);
 }
 
 static int ncp_remount(struct super_block *sb, int *flags, char* data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_NODIRATIME;
 	return 0;
 }
@@ -292,7 +298,7 @@ static void
 ncp_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 
 	if (S_ISDIR(inode->i_mode)) {
 		DDPRINTK("ncp_evict_inode: put directory %ld\n", inode->i_ino);

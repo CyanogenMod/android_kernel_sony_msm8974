@@ -272,7 +272,7 @@ static void
 cifs_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 	cifs_fscache_release_inode_cookie(inode);
 }
 
@@ -493,6 +493,7 @@ static int cifs_show_stats(struct seq_file *s, struct dentry *root)
 
 static int cifs_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_NODIRATIME;
 	return 0;
 }
@@ -693,13 +694,13 @@ static ssize_t cifs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	return written;
 }
 
-static loff_t cifs_llseek(struct file *file, loff_t offset, int origin)
+static loff_t cifs_llseek(struct file *file, loff_t offset, int whence)
 {
 	/*
-	 * origin == SEEK_END || SEEK_DATA || SEEK_HOLE => we must revalidate
+	 * whence == SEEK_END || SEEK_DATA || SEEK_HOLE => we must revalidate
 	 * the cached file length
 	 */
-	if (origin != SEEK_SET && origin != SEEK_CUR) {
+	if (whence != SEEK_SET && whence != SEEK_CUR) {
 		int rc;
 		struct inode *inode = file->f_path.dentry->d_inode;
 
@@ -726,7 +727,7 @@ static loff_t cifs_llseek(struct file *file, loff_t offset, int origin)
 		if (rc < 0)
 			return (loff_t)rc;
 	}
-	return generic_file_llseek(file, offset, origin);
+	return generic_file_llseek(file, offset, whence);
 }
 
 static int cifs_setlease(struct file *file, long arg, struct file_lock **lease)
@@ -966,6 +967,11 @@ cifs_init_inodecache(void)
 static void
 cifs_destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(cifs_inode_cachep);
 }
 

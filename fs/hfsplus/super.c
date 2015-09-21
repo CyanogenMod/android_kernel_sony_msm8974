@@ -154,7 +154,7 @@ static void hfsplus_evict_inode(struct inode *inode)
 {
 	dprint(DBG_INODE, "hfsplus_evict_inode: %lu\n", inode->i_ino);
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 	if (HFSPLUS_IS_RSRC(inode)) {
 		HFSPLUS_I(HFSPLUS_I(inode)->rsrc_inode)->rsrc_inode = NULL;
 		iput(HFSPLUS_I(inode)->rsrc_inode);
@@ -286,6 +286,7 @@ static int hfsplus_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 static int hfsplus_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
 		return 0;
 	if (!(*flags & MS_RDONLY)) {
@@ -615,6 +616,12 @@ static int __init init_hfsplus_fs(void)
 static void __exit exit_hfsplus_fs(void)
 {
 	unregister_filesystem(&hfsplus_fs_type);
+
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(hfsplus_inode_cachep);
 }
 

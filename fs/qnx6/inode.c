@@ -55,6 +55,7 @@ static int qnx6_show_options(struct seq_file *seq, struct dentry *root)
 
 static int qnx6_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_RDONLY;
 	return 0;
 }
@@ -652,6 +653,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(qnx6_inode_cachep);
 }
 

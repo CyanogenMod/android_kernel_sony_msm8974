@@ -3756,7 +3756,7 @@ void btrfs_evict_inode(struct inode *inode)
 	btrfs_end_transaction(trans, root);
 	btrfs_btree_balance_dirty(root, nr);
 no_delete:
-	end_writeback(inode);
+	clear_inode(inode);
 	return;
 }
 
@@ -7021,6 +7021,11 @@ static void init_once(void *foo)
 
 void btrfs_destroy_cachep(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	if (btrfs_inode_cachep)
 		kmem_cache_destroy(btrfs_inode_cachep);
 	if (btrfs_trans_handle_cachep)

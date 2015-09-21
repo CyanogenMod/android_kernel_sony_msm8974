@@ -1005,13 +1005,18 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(ext4_inode_cachep);
 }
 
 void ext4_clear_inode(struct inode *inode)
 {
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 	dquot_drop(inode);
 	ext4_discard_preallocations(inode);
 	if (EXT4_I(inode)->jinode) {
@@ -4242,6 +4247,8 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 	int i;
 #endif
 	char *orig_data = kstrdup(data, GFP_KERNEL);
+
+	sync_filesystem(sb);
 
 	/* Store the original options */
 	lock_super(sb);

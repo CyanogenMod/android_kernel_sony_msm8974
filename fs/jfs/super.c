@@ -368,6 +368,7 @@ static int jfs_remount(struct super_block *sb, int *flags, char *data)
 	int flag = JFS_SBI(sb)->flag;
 	int ret;
 
+	sync_filesystem(sb);
 	if (!parse_options(data, sb, &newLVSize, &flag)) {
 		return -EINVAL;
 	}
@@ -898,6 +899,12 @@ static void __exit exit_jfs_fs(void)
 	jfs_proc_clean();
 #endif
 	unregister_filesystem(&jfs_fs_type);
+
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(jfs_inode_cachep);
 }
 

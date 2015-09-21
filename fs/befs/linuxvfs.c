@@ -454,6 +454,11 @@ befs_init_inodecache(void)
 static void
 befs_destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(befs_inode_cachep);
 }
 
@@ -892,6 +897,7 @@ befs_fill_super(struct super_block *sb, void *data, int silent)
 static int
 befs_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	if (!(*flags & MS_RDONLY))
 		return -EINVAL;
 	return 0;

@@ -54,7 +54,7 @@ static loff_t lseek_execute(struct file *file, struct inode *inode,
  * generic_file_llseek_size - generic llseek implementation for regular files
  * @file:	file structure to seek on
  * @offset:	file offset to seek to
- * @origin:	type of seek
+ * @whence:	type of seek
  * @size:	max size of file system
  *
  * This is a variant of generic_file_llseek that allows passing in a custom
@@ -66,12 +66,12 @@ static loff_t lseek_execute(struct file *file, struct inode *inode,
  * read/writes behave like SEEK_SET against seeks.
  */
 loff_t
-generic_file_llseek_size(struct file *file, loff_t offset, int origin,
+generic_file_llseek_size(struct file *file, loff_t offset, int whence,
 		loff_t maxsize)
 {
 	struct inode *inode = file->f_mapping->host;
 
-	switch (origin) {
+	switch (whence) {
 	case SEEK_END:
 		offset += i_size_read(inode);
 		break;
@@ -121,17 +121,17 @@ EXPORT_SYMBOL(generic_file_llseek_size);
  * generic_file_llseek - generic llseek implementation for regular files
  * @file:	file structure to seek on
  * @offset:	file offset to seek to
- * @origin:	type of seek
+ * @whence:	type of seek
  *
  * This is a generic implemenation of ->llseek useable for all normal local
  * filesystems.  It just updates the file offset to the value specified by
- * @offset and @origin under i_mutex.
+ * @offset and @whence under i_mutex.
  */
-loff_t generic_file_llseek(struct file *file, loff_t offset, int origin)
+loff_t generic_file_llseek(struct file *file, loff_t offset, int whence)
 {
 	struct inode *inode = file->f_mapping->host;
 
-	return generic_file_llseek_size(file, offset, origin,
+	return generic_file_llseek_size(file, offset, whence,
 					inode->i_sb->s_maxbytes);
 }
 EXPORT_SYMBOL(generic_file_llseek);
@@ -140,32 +140,32 @@ EXPORT_SYMBOL(generic_file_llseek);
  * noop_llseek - No Operation Performed llseek implementation
  * @file:	file structure to seek on
  * @offset:	file offset to seek to
- * @origin:	type of seek
+ * @whence:	type of seek
  *
  * This is an implementation of ->llseek useable for the rare special case when
  * userspace expects the seek to succeed but the (device) file is actually not
  * able to perform the seek. In this case you use noop_llseek() instead of
  * falling back to the default implementation of ->llseek.
  */
-loff_t noop_llseek(struct file *file, loff_t offset, int origin)
+loff_t noop_llseek(struct file *file, loff_t offset, int whence)
 {
 	return file->f_pos;
 }
 EXPORT_SYMBOL(noop_llseek);
 
-loff_t no_llseek(struct file *file, loff_t offset, int origin)
+loff_t no_llseek(struct file *file, loff_t offset, int whence)
 {
 	return -ESPIPE;
 }
 EXPORT_SYMBOL(no_llseek);
 
-loff_t default_llseek(struct file *file, loff_t offset, int origin)
+loff_t default_llseek(struct file *file, loff_t offset, int whence)
 {
 	struct inode *inode = file->f_path.dentry->d_inode;
 	loff_t retval;
 
 	mutex_lock(&inode->i_mutex);
-	switch (origin) {
+	switch (whence) {
 		case SEEK_END:
 			offset += i_size_read(inode);
 			break;
@@ -214,7 +214,7 @@ out:
 }
 EXPORT_SYMBOL(default_llseek);
 
-loff_t vfs_llseek(struct file *file, loff_t offset, int origin)
+loff_t vfs_llseek(struct file *file, loff_t offset, int whence)
 {
 	loff_t (*fn)(struct file *, loff_t, int);
 
@@ -223,11 +223,11 @@ loff_t vfs_llseek(struct file *file, loff_t offset, int origin)
 		if (file->f_op && file->f_op->llseek)
 			fn = file->f_op->llseek;
 	}
-	return fn(file, offset, origin);
+	return fn(file, offset, whence);
 }
 EXPORT_SYMBOL(vfs_llseek);
 
-SYSCALL_DEFINE3(lseek, unsigned int, fd, off_t, offset, unsigned int, origin)
+SYSCALL_DEFINE3(lseek, unsigned int, fd, off_t, offset, unsigned int, whence)
 {
 	off_t retval;
 	struct file * file;
@@ -239,8 +239,8 @@ SYSCALL_DEFINE3(lseek, unsigned int, fd, off_t, offset, unsigned int, origin)
 		goto bad;
 
 	retval = -EINVAL;
-	if (origin <= SEEK_MAX) {
-		loff_t res = vfs_llseek(file, offset, origin);
+	if (whence <= SEEK_MAX) {
+		loff_t res = vfs_llseek(file, offset, whence);
 		retval = res;
 		if (res != (loff_t)retval)
 			retval = -EOVERFLOW;	/* LFS: should only happen on 32 bit platforms */
@@ -253,7 +253,7 @@ bad:
 #ifdef __ARCH_WANT_SYS_LLSEEK
 SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned long, offset_high,
 		unsigned long, offset_low, loff_t __user *, result,
-		unsigned int, origin)
+		unsigned int, whence)
 {
 	int retval;
 	struct file * file;
@@ -266,11 +266,11 @@ SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned long, offset_high,
 		goto bad;
 
 	retval = -EINVAL;
-	if (origin > SEEK_MAX)
+	if (whence > SEEK_MAX)
 		goto out_putf;
 
 	offset = vfs_llseek(file, ((loff_t) offset_high << 32) | offset_low,
-			origin);
+			whence);
 
 	retval = (int)offset;
 	if (offset >= 0) {

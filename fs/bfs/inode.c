@@ -174,7 +174,7 @@ static void bfs_evict_inode(struct inode *inode)
 
 	truncate_inode_pages(&inode->i_data, 0);
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 
 	if (inode->i_nlink)
 		return;
@@ -280,6 +280,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(bfs_inode_cachep);
 }
 

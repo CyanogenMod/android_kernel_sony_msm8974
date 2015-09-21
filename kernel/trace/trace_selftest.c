@@ -103,54 +103,67 @@ static inline void warn_failed_init_tracer(struct tracer *trace, int init_ret)
 
 static int trace_selftest_test_probe1_cnt;
 static void trace_selftest_test_probe1_func(unsigned long ip,
-					    unsigned long pip)
+					    unsigned long pip,
+					    struct ftrace_ops *op,
+					    struct pt_regs *pt_regs)
 {
 	trace_selftest_test_probe1_cnt++;
 }
 
 static int trace_selftest_test_probe2_cnt;
 static void trace_selftest_test_probe2_func(unsigned long ip,
-					    unsigned long pip)
+					    unsigned long pip,
+					    struct ftrace_ops *op,
+					    struct pt_regs *pt_regs)
 {
 	trace_selftest_test_probe2_cnt++;
 }
 
 static int trace_selftest_test_probe3_cnt;
 static void trace_selftest_test_probe3_func(unsigned long ip,
-					    unsigned long pip)
+					    unsigned long pip,
+					    struct ftrace_ops *op,
+					    struct pt_regs *pt_regs)
 {
 	trace_selftest_test_probe3_cnt++;
 }
 
 static int trace_selftest_test_global_cnt;
 static void trace_selftest_test_global_func(unsigned long ip,
-					    unsigned long pip)
+					    unsigned long pip,
+					    struct ftrace_ops *op,
+					    struct pt_regs *pt_regs)
 {
 	trace_selftest_test_global_cnt++;
 }
 
 static int trace_selftest_test_dyn_cnt;
 static void trace_selftest_test_dyn_func(unsigned long ip,
-					 unsigned long pip)
+					 unsigned long pip,
+					 struct ftrace_ops *op,
+					 struct pt_regs *pt_regs)
 {
 	trace_selftest_test_dyn_cnt++;
 }
 
 static struct ftrace_ops test_probe1 = {
 	.func			= trace_selftest_test_probe1_func,
+	.flags			= FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static struct ftrace_ops test_probe2 = {
 	.func			= trace_selftest_test_probe2_func,
+	.flags			= FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static struct ftrace_ops test_probe3 = {
 	.func			= trace_selftest_test_probe3_func,
+	.flags			= FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static struct ftrace_ops test_global = {
-	.func			= trace_selftest_test_global_func,
-	.flags			= FTRACE_OPS_FL_GLOBAL,
+	.func		= trace_selftest_test_global_func,
+	.flags		= FTRACE_OPS_FL_GLOBAL | FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static void print_counts(void)

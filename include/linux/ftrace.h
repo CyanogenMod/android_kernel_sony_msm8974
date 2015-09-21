@@ -10,6 +10,7 @@
 #include <linux/kallsyms.h>
 #include <linux/linkage.h>
 #include <linux/bitops.h>
+#include <linux/ptrace.h>
 #include <linux/ktime.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -17,6 +18,28 @@
 #include <linux/fs.h>
 
 #include <asm/ftrace.h>
+
+/*
+ * If the arch supports passing the variable contents of
+ * function_trace_op as the third parameter back from the
+ * mcount call, then the arch should define this as 1.
+ */
+#ifndef ARCH_SUPPORTS_FTRACE_OPS
+#define ARCH_SUPPORTS_FTRACE_OPS 0
+#endif
+
+/*
+ * If the arch's mcount caller does not support all of ftrace's
+ * features, then it must call an indirect function that
+ * does. Or at least does enough to prevent any unwelcomed side effects.
+ */
+#if !defined(CONFIG_HAVE_FUNCTION_TRACE_MCOUNT_TEST) || \
+	!ARCH_SUPPORTS_FTRACE_OPS
+# define FTRACE_FORCE_LIST_FUNC 1
+#else
+# define FTRACE_FORCE_LIST_FUNC 0
+#endif
+
 
 struct module;
 struct ftrace_hash;
@@ -29,7 +52,10 @@ ftrace_enable_sysctl(struct ctl_table *table, int write,
 		     void __user *buffer, size_t *lenp,
 		     loff_t *ppos);
 
-typedef void (*ftrace_func_t)(unsigned long ip, unsigned long parent_ip);
+struct ftrace_ops;
+
+typedef void (*ftrace_func_t)(unsigned long ip, unsigned long parent_ip,
+			      struct ftrace_ops *op, struct pt_regs *regs);
 
 /*
  * FTRACE_OPS_FL_* bits denote the state of ftrace_ops struct and are
@@ -45,12 +71,17 @@ typedef void (*ftrace_func_t)(unsigned long ip, unsigned long parent_ip);
  *           could be controled by following calls:
  *             ftrace_function_local_enable
  *             ftrace_function_local_disable
+ * RECURSION_SAFE - The ftrace_ops can set this to tell the ftrace infrastructure
+ *            that the call back has its own recursion protection. If it does
+ *            not set this, then the ftrace infrastructure will add recursion
+ *            protection for the caller.
  */
 enum {
 	FTRACE_OPS_FL_ENABLED		= 1 << 0,
 	FTRACE_OPS_FL_GLOBAL		= 1 << 1,
 	FTRACE_OPS_FL_DYNAMIC		= 1 << 2,
 	FTRACE_OPS_FL_CONTROL		= 1 << 3,
+	FTRACE_OPS_FL_RECURSION_SAFE	= 1 << 6,
 };
 
 struct ftrace_ops {
@@ -163,7 +194,8 @@ static inline int ftrace_function_local_disabled(struct ftrace_ops *ops)
 	return *this_cpu_ptr(ops->disabled);
 }
 
-extern void ftrace_stub(unsigned long a0, unsigned long a1);
+extern void ftrace_stub(unsigned long a0, unsigned long a1,
+			struct ftrace_ops *op, struct pt_regs *regs);
 
 #else /* !CONFIG_FUNCTION_TRACER */
 /*
@@ -289,7 +321,7 @@ struct dyn_ftrace *ftrace_rec_iter_record(struct ftrace_rec_iter *iter);
 int ftrace_update_record(struct dyn_ftrace *rec, int enable);
 int ftrace_test_record(struct dyn_ftrace *rec, int enable);
 void ftrace_run_stop_machine(int command);
-int ftrace_location(unsigned long ip);
+unsigned long ftrace_location(unsigned long ip);
 
 extern ftrace_func_t ftrace_trace_function;
 
@@ -299,7 +331,7 @@ ssize_t ftrace_filter_write(struct file *file, const char __user *ubuf,
 			    size_t cnt, loff_t *ppos);
 ssize_t ftrace_notrace_write(struct file *file, const char __user *ubuf,
 			     size_t cnt, loff_t *ppos);
-loff_t ftrace_regex_lseek(struct file *file, loff_t offset, int origin);
+loff_t ftrace_regex_lseek(struct file *file, loff_t offset, int whence);
 int ftrace_regex_release(struct inode *inode, struct file *file);
 
 void __init
@@ -312,6 +344,8 @@ extern int ftrace_update_ftrace_func(ftrace_func_t func);
 extern void ftrace_caller(void);
 extern void ftrace_call(void);
 extern void mcount_call(void);
+
+void ftrace_modify_all_code(int command);
 
 #ifndef FTRACE_ADDR
 #define FTRACE_ADDR ((unsigned long)ftrace_caller)
@@ -412,7 +446,7 @@ static inline ssize_t ftrace_filter_write(struct file *file, const char __user *
 			    size_t cnt, loff_t *ppos) { return -ENODEV; }
 static inline ssize_t ftrace_notrace_write(struct file *file, const char __user *ubuf,
 			     size_t cnt, loff_t *ppos) { return -ENODEV; }
-static inline loff_t ftrace_regex_lseek(struct file *file, loff_t offset, int origin)
+static inline loff_t ftrace_regex_lseek(struct file *file, loff_t offset, int whence)
 {
 	return -ENODEV;
 }

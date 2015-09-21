@@ -1745,8 +1745,8 @@ struct super_operations {
  * I_FREEING		Set when inode is about to be freed but still has dirty
  *			pages or buffers attached or the inode itself is still
  *			dirty.
- * I_CLEAR		Added by end_writeback().  In this state the inode is clean
- *			and can be destroyed.  Inode keeps I_FREEING.
+ * I_CLEAR		Added by clear_inode().  In this state the inode is
+ *			clean and can be destroyed.  Inode keeps I_FREEING.
  *
  *			Inodes that are I_WILL_FREE, I_FREEING or I_CLEAR are
  *			prohibited for many purposes.  iget() must wait for
@@ -2291,9 +2291,9 @@ extern ino_t find_inode_number(struct dentry *, struct qstr *);
 #include <linux/err.h>
 
 /* needed for stackable file system support */
-extern loff_t default_llseek(struct file *file, loff_t offset, int origin);
+extern loff_t default_llseek(struct file *file, loff_t offset, int whence);
 
-extern loff_t vfs_llseek(struct file *file, loff_t offset, int origin);
+extern loff_t vfs_llseek(struct file *file, loff_t offset, int whence);
 
 extern int inode_init_always(struct super_block *, struct inode *);
 extern void inode_init_once(struct inode *);
@@ -2330,7 +2330,7 @@ extern unsigned int get_next_ino(void);
 
 extern void __iget(struct inode * inode);
 extern void iget_failed(struct inode *);
-extern void end_writeback(struct inode *);
+extern void clear_inode(struct inode *);
 extern void __destroy_inode(struct inode *);
 extern struct inode *new_inode_pseudo(struct super_block *sb);
 extern struct inode *new_inode(struct super_block *sb);
@@ -2399,11 +2399,11 @@ extern long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
 
 extern void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping);
-extern loff_t noop_llseek(struct file *file, loff_t offset, int origin);
-extern loff_t no_llseek(struct file *file, loff_t offset, int origin);
-extern loff_t generic_file_llseek(struct file *file, loff_t offset, int origin);
+extern loff_t noop_llseek(struct file *file, loff_t offset, int whence);
+extern loff_t no_llseek(struct file *file, loff_t offset, int whence);
+extern loff_t generic_file_llseek(struct file *file, loff_t offset, int whence);
 extern loff_t generic_file_llseek_size(struct file *file, loff_t offset,
-		int origin, loff_t maxsize);
+		int whence, loff_t maxsize);
 extern int generic_file_open(struct inode * inode, struct file * filp);
 extern int nonseekable_open(struct inode * inode, struct file * filp);
 

@@ -378,7 +378,7 @@ out:
 		smp_wmb();
 	}
 done:
-	end_writeback(inode);
+	clear_inode(inode);
 }
 
 static void ubifs_dirty_inode(struct inode *inode, int flags)
@@ -1854,6 +1854,7 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
 	int err;
 	struct ubifs_info *c = sb->s_fs_info;
 
+	sync_filesystem(sb);
 	dbg_gen("old flags %#lx, new flags %#x", sb->s_flags, *flags);
 
 	err = ubifs_parse_options(c, data, 1);
@@ -2305,6 +2306,12 @@ static void __exit ubifs_exit(void)
 	dbg_debugfs_exit();
 	ubifs_compressors_exit();
 	unregister_shrinker(&ubifs_shrinker_info);
+
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(ubifs_inode_slab);
 	unregister_filesystem(&ubifs_fs_type);
 }

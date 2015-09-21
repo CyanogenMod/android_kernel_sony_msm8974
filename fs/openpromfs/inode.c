@@ -375,6 +375,7 @@ static struct inode *openprom_iget(struct super_block *sb, ino_t ino)
 
 static int openprom_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_NOATIME;
 	return 0;
 }
@@ -463,6 +464,11 @@ static int __init init_openprom_fs(void)
 static void __exit exit_openprom_fs(void)
 {
 	unregister_filesystem(&openprom_fs_type);
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(op_inode_cachep);
 }
 

@@ -1,6 +1,7 @@
 /*
  * Persistent Storage - platform driver interface parts.
  *
+ * Copyright (C) 2007-2008 Google, Inc.
  * Copyright (C) 2010 Intel Corporation <tony.luck@intel.com>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -17,11 +18,14 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/atomic.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/kmsg_dump.h>
+#include <linux/console.h>
 #include <linux/module.h>
 #include <linux/pstore.h>
 #include <linux/string.h>
@@ -29,6 +33,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/hardirq.h>
+#include <linux/jiffies.h>
 #include <linux/workqueue.h>
 
 #include "internal.h"
@@ -38,7 +43,12 @@
  * whether the system is actually still running well enough
  * to let someone see the entry
  */
-#define	PSTORE_INTERVAL	(60 * HZ)
+static int pstore_update_ms = -1;
+module_param_named(update_ms, pstore_update_ms, int, 0600);
+MODULE_PARM_DESC(update_ms, "milliseconds before pstore updates its content "
+		 "(default is -1, which means runtime updates are disabled; "
+		 "enabling this option is not safe, it may lead to further "
+		 "corruption on Oopses)");
 
 static int pstore_new_entry;
 
@@ -53,7 +63,7 @@ static DECLARE_WORK(pstore_work, pstore_dowork);
  * calls to pstore_register()
  */
 static DEFINE_SPINLOCK(pstore_lock);
-static struct pstore_info *psinfo;
+struct pstore_info *psinfo;
 
 static char *backend;
 
@@ -115,20 +125,15 @@ EXPORT_SYMBOL_GPL(pstore_cannot_block_path);
  * as we can from the end of the buffer.
  */
 static void pstore_dump(struct kmsg_dumper *dumper,
-	    enum kmsg_dump_reason reason,
-	    const char *s1, unsigned long l1,
-	    const char *s2, unsigned long l2)
+			enum kmsg_dump_reason reason)
 {
-	unsigned long	s1_start, s2_start;
-	unsigned long	l1_cpy, l2_cpy;
-	unsigned long	size, total = 0;
-	char		*dst;
+	unsigned long	total = 0;
 	const char	*why;
 	u64		id;
-	int		hsize, ret;
 	unsigned int	part = 1;
 	unsigned long	flags = 0;
 	int		is_locked = 0;
+	int		ret;
 
 	why = get_reason_str(reason);
 
@@ -142,30 +147,25 @@ static void pstore_dump(struct kmsg_dumper *dumper,
 		spin_lock_irqsave(&psinfo->buf_lock, flags);
 	oopscount++;
 	while (total < kmsg_bytes) {
+		char *dst;
+		unsigned long size;
+		int hsize;
+		size_t len;
+
 		dst = psinfo->buf;
 		hsize = sprintf(dst, "%s#%d Part%d\n", why, oopscount, part);
 		size = psinfo->bufsize - hsize;
 		dst += hsize;
 
-		l2_cpy = min(l2, size);
-		l1_cpy = min(l1, size - l2_cpy);
-
-		if (l1_cpy + l2_cpy == 0)
+		if (!kmsg_dump_get_buffer(dumper, true, dst, size, &len))
 			break;
 
-		s2_start = l2 - l2_cpy;
-		s1_start = l1 - l1_cpy;
-
-		memcpy(dst, s1 + s1_start, l1_cpy);
-		memcpy(dst + l1_cpy, s2 + s2_start, l2_cpy);
-
 		ret = psinfo->write(PSTORE_TYPE_DMESG, reason, &id, part,
-				   hsize + l1_cpy + l2_cpy, psinfo);
+				    oopscount, hsize + len, psinfo);
 		if (ret == 0 && reason == KMSG_DUMP_OOPS && pstore_is_mounted())
 			pstore_new_entry = 1;
-		l1 -= l1_cpy;
-		l2 -= l2_cpy;
-		total += l1_cpy + l2_cpy;
+
+		total += hsize + len;
 		part++;
 	}
 	if (pstore_cannot_block_path(reason)) {
@@ -178,6 +178,97 @@ static void pstore_dump(struct kmsg_dumper *dumper,
 static struct kmsg_dumper pstore_dumper = {
 	.dump = pstore_dump,
 };
+
+
+
+/* Export function to save device specific power up
+ * data
+ *
+ */
+
+int  pstore_annotate(const char *buf)
+{
+	unsigned cnt = strlen(buf);
+	const char *end = buf + cnt;
+
+	while (buf < end) {
+		unsigned long flags;
+		int ret;
+		u64 id;
+
+		if (cnt > psinfo->bufsize)
+			cnt = psinfo->bufsize;
+
+		if (oops_in_progress) {
+			if (!spin_trylock_irqsave(&psinfo->buf_lock, flags))
+				break;
+		} else {
+			spin_lock_irqsave(&psinfo->buf_lock, flags);
+		}
+		memcpy(psinfo->buf, buf, cnt);
+		ret = psinfo->write(PSTORE_TYPE_ANNOTATE, 0, &id, 0, 0,
+			cnt, psinfo);
+		spin_unlock_irqrestore(&psinfo->buf_lock, flags);
+
+		pr_debug("ret %d wrote bytes %d\n", ret, cnt);
+		buf += cnt;
+		cnt = end - buf;
+	}
+
+	return 0;
+
+}
+EXPORT_SYMBOL_GPL(pstore_annotate);
+
+
+#ifdef CONFIG_PSTORE_CONSOLE
+static void pstore_console_write(struct console *con, const char *s, unsigned c)
+{
+	const char *e = s + c;
+
+	while (s < e) {
+		unsigned long flags;
+		u64 id;
+
+		if (c > psinfo->bufsize)
+			c = psinfo->bufsize;
+
+		if (oops_in_progress) {
+			if (!spin_trylock_irqsave(&psinfo->buf_lock, flags))
+				break;
+		} else {
+			spin_lock_irqsave(&psinfo->buf_lock, flags);
+		}
+		memcpy(psinfo->buf, s, c);
+		psinfo->write(PSTORE_TYPE_CONSOLE, 0, &id, 0, 0, c, psinfo);
+		spin_unlock_irqrestore(&psinfo->buf_lock, flags);
+		s += c;
+		c = e - s;
+	}
+}
+
+static struct console pstore_console = {
+	.name	= "pstore",
+	.write	= pstore_console_write,
+	.flags	= CON_PRINTBUFFER | CON_ENABLED | CON_ANYTIME,
+	.index	= -1,
+};
+
+static void pstore_register_console(void)
+{
+	register_console(&pstore_console);
+}
+#else
+static void pstore_register_console(void) {}
+#endif
+
+static int pstore_write_compat(enum pstore_type_id type,
+			       enum kmsg_dump_reason reason,
+			       u64 *id, unsigned int part, int count,
+			       size_t size, struct pstore_info *psi)
+{
+	return psi->write_buf(type, reason, id, part, psinfo->buf, size, psi);
+}
 
 /*
  * platform specific persistent storage driver registers with
@@ -203,6 +294,8 @@ int pstore_register(struct pstore_info *psi)
 		return -EINVAL;
 	}
 
+	if (!psi->write)
+		psi->write = pstore_write_compat;
 	psinfo = psi;
 	mutex_init(&psinfo->read_mutex);
 	spin_unlock(&pstore_lock);
@@ -216,9 +309,15 @@ int pstore_register(struct pstore_info *psi)
 		pstore_get_records(0);
 
 	kmsg_dump_register(&pstore_dumper);
+	pstore_register_console();
+	pstore_register_ftrace();
 
-	pstore_timer.expires = jiffies + PSTORE_INTERVAL;
-	add_timer(&pstore_timer);
+	if (pstore_update_ms >= 0) {
+		pstore_timer.expires = jiffies +
+			msecs_to_jiffies(pstore_update_ms);
+		add_timer(&pstore_timer);
+	}
+	pr_info("psi registered\n");
 
 	return 0;
 }
@@ -236,6 +335,7 @@ void pstore_get_records(int quiet)
 	char			*buf = NULL;
 	ssize_t			size;
 	u64			id;
+	int			count;
 	enum pstore_type_id	type;
 	struct timespec		time;
 	int			failed = 0, rc;
@@ -247,13 +347,14 @@ void pstore_get_records(int quiet)
 	if (psi->open && psi->open(psi))
 		goto out;
 
-	while ((size = psi->read(&id, &type, &time, &buf, psi)) > 0) {
-		rc = pstore_mkfile(type, psi->name, id, buf, (size_t)size,
-				  time, psi);
+	while ((size = psi->read(&id, &type, &count, &time, &buf, psi)) > 0) {
+		rc = pstore_mkfile(type, psi->name, id, count, buf,
+				  (size_t)size, time, psi);
 		kfree(buf);
 		buf = NULL;
 		if (rc && (rc != -EEXIST || !quiet))
 			failed++;
+		pr_info("Found record type %d, psi name %s\n", type, psi->name);
 	}
 	if (psi->close)
 		psi->close(psi);
@@ -277,7 +378,7 @@ static void pstore_timefunc(unsigned long dummy)
 		schedule_work(&pstore_work);
 	}
 
-	mod_timer(&pstore_timer, jiffies + PSTORE_INTERVAL);
+	mod_timer(&pstore_timer, jiffies + msecs_to_jiffies(pstore_update_ms));
 }
 
 module_param(backend, charp, 0444);

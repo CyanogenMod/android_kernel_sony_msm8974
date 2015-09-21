@@ -46,6 +46,7 @@ static int qnx4_remount(struct super_block *sb, int *flags, char *data)
 {
 	struct qnx4_sb_info *qs;
 
+	sync_filesystem(sb);
 	qs = qnx4_sb(sb);
 	qs->Version = QNX4_VERSION;
 	*flags |= MS_RDONLY;
@@ -391,6 +392,11 @@ static int init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(qnx4_inode_cachep);
 }
 

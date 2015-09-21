@@ -371,6 +371,7 @@ static int squashfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 static int squashfs_remount(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	*flags |= MS_RDONLY;
 	return 0;
 }
@@ -425,6 +426,11 @@ static int __init init_inodecache(void)
 
 static void destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(squashfs_inode_cachep);
 }
 

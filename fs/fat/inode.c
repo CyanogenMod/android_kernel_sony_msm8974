@@ -454,7 +454,7 @@ static void fat_evict_inode(struct inode *inode)
 		fat_truncate_blocks(inode, 0);
 	}
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 	fat_cache_inval_inode(inode);
 	fat_detach(inode);
 }
@@ -601,6 +601,11 @@ static int __init fat_init_inodecache(void)
 
 static void __exit fat_destroy_inodecache(void)
 {
+	/*
+	 * Make sure all delayed rcu free inodes are flushed before we
+	 * destroy cache.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(fat_inode_cachep);
 }
 
@@ -609,6 +614,8 @@ static int fat_remount(struct super_block *sb, int *flags, char *data)
 	int new_rdonly;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	*flags |= MS_NODIRATIME | (sbi->options.isvfat ? 0 : MS_NOATIME);
+
+	sync_filesystem(sb);
 
 	/* make sure we update state on remount. */
 	new_rdonly = *flags & MS_RDONLY;

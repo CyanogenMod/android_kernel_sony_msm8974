@@ -215,7 +215,7 @@ static int ext4_file_open(struct inode * inode, struct file * filp)
  * block-mapped and extent-mapped maxbytes values. This should
  * otherwise be identical with generic_file_llseek().
  */
-loff_t ext4_llseek(struct file *file, loff_t offset, int origin)
+loff_t ext4_llseek(struct file *file, loff_t offset, int whence)
 {
 	struct inode *inode = file->f_mapping->host;
 	loff_t maxbytes;
@@ -225,7 +225,7 @@ loff_t ext4_llseek(struct file *file, loff_t offset, int origin)
 	else
 		maxbytes = inode->i_sb->s_maxbytes;
 
-	return generic_file_llseek_size(file, offset, origin, maxbytes);
+	return generic_file_llseek_size(file, offset, whence, maxbytes);
 }
 
 const struct file_operations ext4_file_operations = {
