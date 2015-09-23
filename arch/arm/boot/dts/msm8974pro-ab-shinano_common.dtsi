@@ -13,6 +13,22 @@
  */
 
 &soc {
+	ramoops {
+		compatible = "ramoops";
+		status = "ok";
+
+		android,ramoops-buffer-start = <0xdff00000>;
+		android,ramoops-buffer-size = <0xfffff>;
+		android,ramoops-console-size = <0x7ffff>;
+		android,ramoops-record-size = <0x7f800>;
+		android,ramoops-annotate-size = <0x800>;
+		android,ramoops-dump-oops = <0x1>;
+		android,ramoops-hole {
+			 compatible = "qcom,msm-contig-mem";
+		 qcom,memblock-reserve = <0xdff00000 0xfffff>;
+		};
+	};
+
 	qcom,hdmi_tx@fd922100 {
 		status = "ok";
 	};
