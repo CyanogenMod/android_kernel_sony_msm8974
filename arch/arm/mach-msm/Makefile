@@ -325,6 +325,8 @@ else ifdef CONFIG_MACH_SONY_CASTOR_WINDY
 	obj-$(CONFIG_MACH_SONY_CASTOR_WINDY) += board-sony_castor_windy-gpiomux.o board-sony_shinano-nfc.o bms-batterydata-vega.o
 else ifdef CONFIG_MACH_SONY_LEO
 	obj-$(CONFIG_MACH_SONY_LEO) += board-sony_leo-gpiomux.o board-sony_leo_samba-gpiomux-diff.o bms-batterydata-leo.o board-sony_shinano-nfc.o
+else ifdef CONFIG_MACH_SONY_LEO_DSDS
+	obj-$(CONFIG_MACH_SONY_LEO_DSDS) += board-sony_leo_dsds-gpiomux.o bms-batterydata-leo.o board-sony_shinano-nfc.o
 else ifdef CONFIG_MACH_SONY_ARIES
 	obj-$(CONFIG_MACH_SONY_ARIES) += board-sony_aries-gpiomux.o bms-batterydata-aries.o board-sony_shinano-nfc.o
 else ifdef CONFIG_MACH_SONY_SCORPION
