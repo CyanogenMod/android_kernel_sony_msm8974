@@ -1223,6 +1223,16 @@ config MACH_SONY_LEO
 	  If you enable this config,
 	  Please use SONY Mobile source tree.
 
+config MACH_SONY_LEO_DSDS
+	depends on ARCH_MSM8974
+	bool "Sony Mobile Leo DSDS"
+	select MACH_SONY_SHINANO
+	help
+	  Support for the SONY Mobile Leo DSDS device.
+	  It is based on QCOM MSM8974 AC chipset.
+	  If you enable this config,
+	  Please use SONY Mobile source tree.
+
 config MACH_SONY_ARIES
 	depends on ARCH_MSM8974
 	bool "Sony Mobile Aries"
