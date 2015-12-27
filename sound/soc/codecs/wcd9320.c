@@ -1513,9 +1513,9 @@ static const struct snd_kcontrol_new taiko_2_x_analog_gain_controls[] = {
 	SOC_ENUM_EXT("EAR PA Gain", taiko_2_x_ear_pa_gain_enum,
 		taiko_pa_gain_get, taiko_pa_gain_put),
 
-	SOC_SINGLE_TLV("HPHL Volume", TAIKO_A_RX_HPH_L_GAIN, 0, 20, 1,
+	SOC_SINGLE_TLV("HPHL Volume", TAIKO_A_RX_HPH_L_GAIN, 0, 14, 1,
 		line_gain),
-	SOC_SINGLE_TLV("HPHR Volume", TAIKO_A_RX_HPH_R_GAIN, 0, 20, 1,
+	SOC_SINGLE_TLV("HPHR Volume", TAIKO_A_RX_HPH_R_GAIN, 0, 14, 1,
 		line_gain),
 
 	SOC_SINGLE_TLV("LINEOUT1 Volume", TAIKO_A_RX_LINE_1_GAIN, 0, 20, 1,
