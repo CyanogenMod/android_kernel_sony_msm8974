@@ -25,7 +25,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd.h 548462 2015-04-13 09:02:48Z $
+ * $Id: dhd.h 571132 2015-07-14 12:09:10Z $
  */
 
 /****************
@@ -343,6 +343,9 @@ typedef struct dhd_pub {
 #endif
 	uint8 *soc_ram;
 	uint32 soc_ram_length;
+#ifdef DHD_LOSSLESS_ROAMING
+	uint8	dequeue_prec_map;
+#endif /* DHD_LOSSLESS_ROAMING */
 } dhd_pub_t;
 #if defined(CUSTOMER_HW5)
 #define MAX_RESCHED_CNT 600
@@ -837,6 +840,18 @@ extern int dhd_del_scan_timer(dhd_pub_t *dhd_pub);
 extern int dhd_set_scan_timeout(dhd_pub_t *pub, uint32 timeout);
 extern uint32 dhd_get_scan_timeout(dhd_pub_t *pub);
 #endif /* DHD_DEBUG */
+
+#ifdef SET_RETRY_LIMIT
+#define DEFAULT_SHORT_RETRY_LIMIT	13
+#ifndef CUSTOM_SRL_SETTING
+#define CUSTOM_SRL_SETTING		DEFAULT_SHORT_RETRY_LIMIT
+#endif
+
+#define DEFAULT_LONG_RETRY_LIMIT	13
+#ifndef CUSTOM_LRL_SETTING
+#define CUSTOM_LRL_SETTING		DEFAULT_LONG_RETRY_LIMIT
+#endif
+#endif /* SET_RETRY_LIMIT */
 
 #define MAX_DTIM_SKIP_BEACON_INTERVAL	100 /* max allowed associated AP beacon for DTIM skip */
 #ifndef MAX_DTIM_ALLOWED_INTERVAL
