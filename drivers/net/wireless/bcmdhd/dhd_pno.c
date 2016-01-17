@@ -24,6 +24,11 @@
  *
  * $Id: dhd_pno.c 423669 2013-09-18 13:01:55Z yangj$
  */
+
+#if defined(GSCAN_SUPPORT) && !defined(PNO_SUPPORT)
+#error "GSCAN needs PNO to be enabled!"
+#endif
+
 #ifdef PNO_SUPPORT
 #include <typedefs.h>
 #include <osl.h>
@@ -44,6 +49,9 @@
 #include <dhd.h>
 #include <dhd_pno.h>
 #include <dhd_dbg.h>
+#ifdef GSCAN_SUPPORT
+#include <linux/gcd.h>
+#endif /* GSCAN_SUPPORT */
 
 #ifdef __BIG_ENDIAN
 #include <bcmendian.h>
@@ -193,32 +201,6 @@ _dhd_pno_gscan_cfg(dhd_pub_t *dhd, wl_pfn_gscan_cfg_t *pfncfg_gscan_param, int s
 	}
 exit:
 	return err;
-}
-
-static bool
-is_one_shot_gscan(struct dhd_pno_gscan_params *gscan_params)
-{
-	int i;
-	dhd_pno_gscan_channel_bucket_t *gscan_bucket;
-
-	gscan_bucket = gscan_params->channel_bucket;
-	for (i = 0; i < gscan_params->nchannel_buckets; i++) {
-		if (gscan_bucket[i].report_flag & CH_BUCKET_REPORT_ONE_SHOT)
-			return TRUE;
-	}
-	return FALSE;
-}
-
-static
-uint32 find_gcf(uint32 num1, uint32 num2)
-{
-	uint32 tmp;
-	/* Euclidean algo */
-	while ((tmp = (num1 % num2))) {
-		num1 = num2;
-		num2 = tmp;
-	}
-	return num2;
 }
 
 static bool
@@ -449,8 +431,8 @@ _dhd_pno_set(dhd_pub_t *dhd, const dhd_pno_params_t *pno_params, dhd_pno_mode_t 
 
 			_params = &(_pno_state->pno_params_arr[INDEX_OF_LEGACY_PARAMS]);
 
-			pfn_param.scan_freq = find_gcf(pno_params->params_gscan.scan_fr,
-				_params->params_legacy.scan_fr);
+			pfn_param.scan_freq = gcd(pno_params->params_gscan.scan_fr,
+			                 _params->params_legacy.scan_fr);
 
 			if ((_params->params_legacy.pno_repeat != 0) ||
 			(_params->params_legacy.pno_freq_expo_max != 0)) {
@@ -1533,21 +1515,6 @@ static void dhd_pno_reset_cfg_gscan(dhd_pno_params_t *_params,
 }
 
 void
-dhd_end_one_shot_gscan(dhd_pub_t *dhd)
-{
-	dhd_pno_status_info_t *_pno_state;
-	dhd_pno_params_t	*_params;
-
-	_pno_state = PNO_GET_PNOSTATE(dhd);
-	_params = &_pno_state->pno_params_arr[INDEX_OF_GSCAN_PARAMS];
-
-	if (_pno_state->pno_mode & DHD_PNO_GSCAN_MODE &&
-		is_one_shot_gscan(&_params->params_gscan)) {
-		dhd_pno_initiate_gscan_request(dhd, 0, 1);
-	}
-}
-
-void
 dhd_pno_lock_batch_results(dhd_pub_t *dhd)
 {
 	dhd_pno_status_info_t *_pno_state;
@@ -1721,6 +1688,7 @@ dhd_pno_get_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type,
 			break;
 
 		default:
+			DHD_ERROR(("%s: Unrecognized cmd type - %d\n", __FUNCTION__, type));
 			break;
 	}
 
@@ -1921,6 +1889,7 @@ dhd_pno_set_cfg_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type,
 			break;
 		default:
 			err = BCME_BADARG;
+			DHD_ERROR(("%s: Unrecognized cmd type - %d\n", __FUNCTION__, type));
 			break;
 	}
 exit:
@@ -2060,8 +2029,7 @@ dhd_pno_set_for_gscan(dhd_pub_t *dhd, struct dhd_pno_gscan_params *gscan_params)
 		pfn_gscan_cfg_t->swc_rssi_window_size = 0;
 		pfn_gscan_cfg_t->lost_ap_window	= 0;
 	}
-	if (is_one_shot_gscan(gscan_params))
-		gscan_params->send_all_results_flag = GSCAN_SEND_ALL_RESULTS_MASK;
+
 	pfn_gscan_cfg_t->flags =
 		(gscan_params->send_all_results_flag & GSCAN_SEND_ALL_RESULTS_MASK);
 	pfn_gscan_cfg_t->count_of_channel_buckets = num_buckets_to_fw;
@@ -2135,7 +2103,7 @@ dhd_pno_set_for_gscan(dhd_pub_t *dhd, struct dhd_pno_gscan_params *gscan_params)
 			DHD_ERROR(("%s : failed to allocate wl_pfn_bssid_t array"
 				" (count: %d)",
 				__FUNCTION__, _params->params_hotlist.nbssid));
-			err = BCME_ERROR;
+			err = BCME_NOMEM;
 			_pno_state->pno_mode &= ~DHD_PNO_HOTLIST_MODE;
 			goto exit;
 		}
@@ -2237,6 +2205,7 @@ dhd_pno_gscan_create_channel_list(dhd_pub_t *dhd,
 		ch_bucket[i].bucket_end_index = num_channels - 1;
 		ch_bucket[i].bucket_freq_multiple = gscan_buckets[i].bucket_freq_multiple;
 		ch_bucket[i].flag = gscan_buckets[i].report_flag;
+		ch_bucket[i].flag |= CH_BUCKET_GSCAN;
 		if (max < gscan_buckets[i].bucket_freq_multiple)
 			max = gscan_buckets[i].bucket_freq_multiple;
 		nchan = WL_NUMCHANNELS - num_channels;
@@ -2254,8 +2223,8 @@ dhd_pno_gscan_create_channel_list(dhd_pub_t *dhd,
 		uint16 common_freq;
 		uint32 legacy_bucket_idx = _params->params_gscan.nchannel_buckets;
 
-		common_freq = find_gcf(_params->params_gscan.scan_fr,
-			_params1->params_legacy.scan_fr);
+		common_freq = gcd(_params->params_gscan.scan_fr,
+		         _params1->params_legacy.scan_fr);
 		max = gscan_buckets[0].bucket_freq_multiple;
 		/* GSCAN buckets */
 		for (i = 0; i < _params->params_gscan.nchannel_buckets; i++) {
@@ -3682,6 +3651,7 @@ dhd_pno_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 		} else
 			DHD_PNO(("%s : WLC_E_PFN_BEST_BATCHING"
 				"will skip this event\n", __FUNCTION__));
+		break;
 	}
 #else
 		break;

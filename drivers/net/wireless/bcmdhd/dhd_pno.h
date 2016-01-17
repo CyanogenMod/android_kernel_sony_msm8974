@@ -113,9 +113,7 @@ enum index_mode {
 	/* GSCAN includes hotlist scan and they do not run
 	 * independent of each other
 	 */
-#ifdef GSCAN_SUPPORT
 	INDEX_OF_GSCAN_PARAMS = INDEX_OF_HOTLIST_PARAMS,
-#endif /* GSCAN_SUPPORT */
 	INDEX_MODE_MAX
 };
 enum dhd_pno_status {
@@ -155,6 +153,7 @@ typedef enum dhd_pno_gscan_cmd_cfg {
 	DHD_PNO_GET_BATCH_RESULTS,
 	DHD_PNO_GET_CHANNEL_LIST
 } dhd_pno_gscan_cmd_cfg_t;
+#endif /* GSCAN_SUPPORT */
 
 typedef enum dhd_pno_mode {
 	/* Wi-Fi Legacy PNO Mode */
@@ -167,17 +166,6 @@ typedef enum dhd_pno_mode {
 	/* Wi-Fi Google Android SCAN Mode */
 	DHD_PNO_GSCAN_MODE = (1 << (3))
 } dhd_pno_mode_t;
-#else
-typedef enum dhd_pno_mode {
-	/* Wi-Fi Legacy PNO Mode */
-	DHD_PNO_NONE_MODE = 0,
-	DHD_PNO_LEGACY_MODE = (1 << (0)),
-	/* Wi-Fi Android BATCH SCAN Mode */
-	DHD_PNO_BATCH_MODE = (1 << (1)),
-	/* Wi-Fi Android Hotlist SCAN Mode */
-	DHD_PNO_HOTLIST_MODE = (1 << (2))
-} dhd_pno_mode_t;
-#endif /* GSCAN_SUPPORT */
 
 struct dhd_pno_ssid {
 	bool		hidden;
@@ -452,7 +440,6 @@ void * dhd_dev_process_full_gscan_result(struct net_device *dev,
 extern int dhd_dev_gscan_batch_cache_cleanup(struct net_device *dev);
 extern void dhd_dev_gscan_hotlist_cache_cleanup(struct net_device *dev, hotlist_type_t type);
 extern void dhd_dev_wait_batch_results_complete(struct net_device *dev);
-extern void dhd_dev_end_one_shot_gscan(struct net_device *dev);
 #endif /* GSCAN_SUPPORT */
 /* dhd pno fuctions */
 extern int dhd_pno_stop_for_ssid(dhd_pub_t *dhd);
@@ -496,7 +483,6 @@ extern void *dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *event_dat
 extern int dhd_gscan_batch_cache_cleanup(dhd_pub_t *dhd);
 extern void dhd_gscan_hotlist_cache_cleanup(dhd_pub_t *dhd, hotlist_type_t type);
 extern void dhd_wait_batch_results_complete(dhd_pub_t *dhd);
-extern void dhd_end_one_shot_gscan(dhd_pub_t *dhd);
 #endif /* GSCAN_SUPPORT */
 #endif 
 

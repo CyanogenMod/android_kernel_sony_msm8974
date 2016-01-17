@@ -23,7 +23,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_linux.c 548462 2015-04-13 09:02:48Z $
+ * $Id: dhd_linux.c 571132 2015-07-14 12:09:10Z $
  */
 
 #include <typedefs.h>
@@ -1851,6 +1851,13 @@ dhd_txflowcontrol(dhd_pub_t *dhdp, int ifidx, bool state)
 
 	ASSERT(dhd);
 
+#ifdef DHD_LOSSLESS_ROAMING
+	/* block flowcontrol during roaming */
+	if ((dhdp->dequeue_prec_map == 1 << PRIO_8021D_NC) && state == ON) {
+		return;
+	}
+#endif /* DHD_LOSSLESS_ROAMING */
+
 	if (ifidx == ALL_INTERFACES) {
 		/* Flow control on all active interfaces */
 		dhdp->txoff = state;
@@ -3272,6 +3279,9 @@ dhd_open(struct net_device *net)
 	DHD_OS_WAKE_LOCK(&dhd->pub);
 	dhd->pub.dongle_trap_occured = 0;
 	dhd->pub.hang_was_sent = 0;
+#ifdef DHD_LOSSLESS_ROAMING
+	dhd->pub.dequeue_prec_map = ALLPRIO;
+#endif /* DHD_LOSSLESS_ROAMING */
 
 #ifdef ENABLE_CONTROL_SCHED
 	ret = dhd_sysfs_create_node(net);
@@ -4227,8 +4237,11 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	char eventmask[WL_EVENTING_MASK_LEN];
 	char iovbuf[WL_EVENTING_MASK_LEN + 12];	/*  Room for "event_msgs" + '\0' + bitvec  */
 	uint32 buf_key_b4_m4 = 1;
+	uint8 msglen;
+	eventmsgs_ext_t *eventmask_msg = NULL;
+	char* iov_buf = NULL;
+	int ret2 = 0;
 #ifdef WLAIBSS
-	char iov_buf[WLC_IOCTL_SMLEN];
 	aibss_bcn_force_config_t bcn_config;
 	uint32 aibss;
 #endif
@@ -4244,7 +4257,6 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	int wlfc_enable = TRUE;
 #ifndef DISABLE_11N
 	uint32 hostreorder = 1;
-	int ret2 = 0;
 #endif /* DISABLE_11N */
 #endif /* PROP_TXSTATUS */
 
@@ -4306,6 +4318,10 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	uint32 ccx = 1;
 #endif
 
+#ifdef SET_RETRY_LIMIT
+	uint srl = CUSTOM_SRL_SETTING;
+	uint lrl = CUSTOM_LRL_SETTING;
+#endif /* SET_RETRY_LIMIT */
 #if defined(AP) || defined(WLP2P)
 	uint32 apsta = 1; /* Enable APSTA mode */
 #endif /* defined(AP) || defined(WLP2P) */
@@ -4323,6 +4339,9 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef USE_WL_TXBF
 	uint32 txbf = 1;
 #endif /* USE_WL_TXBF */
+#ifdef DISABLE_TXBFR
+	uint32 txbf_bfr_cap = 0;
+#endif /* DISABLE_TXBFR */
 #ifdef AMPDU_VO_ENABLE
 	struct ampdu_tid_control tid;
 #endif
@@ -4336,8 +4355,14 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef SUPPORT_2G_VHT
 	uint32 vht_features = 0x3; /* 2G enable | rates all */
 #endif /* SUPPORT_2G_VHT */
+#ifdef DISABLE_11N_PROPRIETARY_RATES
+	uint32 ht_features = 0;
+#endif /* DISABLE_11N_PROPRIETARY_RATES */
 #ifdef CUSTOM_PSPRETEND_THR
 	uint32 pspretend_thr = CUSTOM_PSPRETEND_THR;
+#endif
+#ifdef DISABLE_BCN_DLY
+	uint bcn_to_dly = 0;
 #endif
 #ifdef PKT_FILTER_SUPPORT
 	dhd_pkt_filter_enable = TRUE;
@@ -4432,6 +4457,16 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 			DHD_ERROR(("%s mpc for HostAPD failed  %d\n", __FUNCTION__, ret));
 		}
 #endif
+#ifdef SET_RETRY_LIMIT
+	if ((ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_SRL, (char *)&srl,
+		sizeof(srl), TRUE, 0)) < 0) {
+		DHD_ERROR(("%s Set SRL failed  %d\n", __FUNCTION__, ret));
+	}
+	if ((ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_LRL, (char *)&lrl,
+		sizeof(lrl), TRUE, 0)) < 0) {
+		DHD_ERROR(("%s Set LRL failed  %d\n", __FUNCTION__, ret));
+	}
+#endif /* SET_RETRY_LIMIT */
 	} else if ((!op_mode && dhd_get_fw_mode(dhd->info) == DHD_FLAG_MFG_MODE) ||
 		(op_mode == DHD_FLAG_MFG_MODE)) {
 #if defined(ARP_OFFLOAD_SUPPORT)
@@ -4598,6 +4633,12 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 			DHD_ERROR(("%s: set scan_nprobes failed %d\n", __FUNCTION__, ret));
 	}
 #endif
+
+#ifdef DISABLE_BCN_DLY
+	/* Set bcn_to_dly to delay link down until roam complete */
+	bcm_mkiovar("bcn_to_dly", (char *)&bcn_to_dly, 4, iovbuf, sizeof(iovbuf));
+	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+#endif
 	/* Setup assoc_retry_max count to reconnect target AP in dongle */
 	bcm_mkiovar("assoc_retry_max", (char *)&retry_max, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
@@ -4640,6 +4681,13 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 		DHD_ERROR(("%s Set txbf failed  %d\n", __FUNCTION__, ret));
 	}
 #endif /* USE_WL_TXBF */
+#ifdef DISABLE_TXBFR
+	bcm_mkiovar("txbf_bfr_cap", (char *)&txbf_bfr_cap, 4, iovbuf, sizeof(iovbuf));
+	if ((ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf,
+		sizeof(iovbuf), TRUE, 0)) < 0) {
+		DHD_ERROR(("%s Clear txbf_bfr_cap failed  %d\n", __FUNCTION__, ret));
+	}
+#endif /* DISABLE_TXBFR */
 #ifdef USE_WL_FRAMEBURST
 #ifdef DISABLE_WL_FRAMEBURST_SOFTAP
 	/* Disable Framebursting for SofAP */
@@ -4688,6 +4736,12 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	}
 #endif /* CUSTOM_AMPDU_BA_WSIZE || (WLAIBSS && CUSTOM_IBSS_AMPDU_BA_WSIZE) */
 
+	iov_buf = (char*)kmalloc(WLC_IOCTL_SMLEN, GFP_KERNEL);
+	if (iov_buf == NULL) {
+		DHD_ERROR(("failed to allocate %d bytes for iov_buf\n", WLC_IOCTL_SMLEN));
+		ret = BCME_NOMEM;
+		goto done;
+	}
 #ifdef WLAIBSS
 	/* Configure custom IBSS beacon transmission */
 	if (dhd->op_mode & DHD_FLAG_IBSS_MODE)
@@ -4735,6 +4789,12 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 		DHD_ERROR(("%s vht_features set failed %d\n", __FUNCTION__, ret));
 	}
 #endif /* SUPPORT_2G_VHT */
+#ifdef DISABLE_11N_PROPRIETARY_RATES
+	bcm_mkiovar("ht_features", (char *)&ht_features, 4, iovbuf, sizeof(iovbuf));
+	if ((ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0)) < 0) {
+		DHD_ERROR(("%s ht_features set failed %d\n", __FUNCTION__, ret));
+	}
+#endif /* DISABLE_11N_PROPRIETARY_RATES */
 #ifdef CUSTOM_PSPRETEND_THR
 	/* Turn off MPC in AP mode */
 	bcm_mkiovar("pspretend_threshold", (char *)&pspretend_thr, 4,
@@ -4822,6 +4882,9 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	setbit(eventmask, WLC_E_AIBSS_TXFAIL);
 #endif /* WLAIBSS */
 	setbit(eventmask, WLC_E_TRACE);
+#ifdef DHD_LOSSLESS_ROAMING
+	setbit(eventmask, WLC_E_ROAM_PREP);
+#endif /* DHD_LOSSLESS_ROAMING */
 
 	/* Write updated Event mask */
 	bcm_mkiovar("event_msgs", eventmask, WL_EVENTING_MASK_LEN, iovbuf, sizeof(iovbuf));
@@ -4829,6 +4892,46 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 		DHD_ERROR(("%s Set Event mask failed %d\n", __FUNCTION__, ret));
 		goto done;
 	}
+
+	/* make up event mask ext message iovar for event larger than 128 */
+	msglen = ROUNDUP(WLC_E_LAST, NBBY)/NBBY + EVENTMSGS_EXT_STRUCT_SIZE;
+	eventmask_msg = (eventmsgs_ext_t*)kmalloc(msglen, GFP_KERNEL);
+	if (eventmask_msg == NULL) {
+		DHD_ERROR(("failed to allocate %d bytes for event_msg_ext\n", msglen));
+		ret = BCME_NOMEM;
+		goto done;
+	}
+	bzero(eventmask_msg, msglen);
+	eventmask_msg->ver = EVENTMSGS_VER;
+	eventmask_msg->len = ROUNDUP(WLC_E_LAST, NBBY)/NBBY;
+
+	/* Read event_msgs_ext mask */
+	bcm_mkiovar("event_msgs_ext", (char *)eventmask_msg, msglen, iov_buf, WLC_IOCTL_SMLEN);
+	ret2  = dhd_wl_ioctl_cmd(dhd, WLC_GET_VAR, iov_buf, WLC_IOCTL_SMLEN, FALSE, 0);
+	if (ret2 != BCME_UNSUPPORTED)
+		ret = ret2;
+	if (ret2 == 0) { /* event_msgs_ext must be supported */
+		bcopy(iov_buf, eventmask_msg, msglen);
+#ifdef GSCAN_SUPPORT
+		setbit(eventmask_msg->mask, WLC_E_PFN_GSCAN_FULL_RESULT);
+		setbit(eventmask_msg->mask, WLC_E_PFN_SCAN_COMPLETE);
+		setbit(eventmask_msg->mask, WLC_E_PFN_SWC);
+#endif /* GSCAN_SUPPORT */
+
+		/* Write updated Event mask */
+		eventmask_msg->ver = EVENTMSGS_VER;
+		eventmask_msg->command = EVENTMSGS_SET_MASK;
+		eventmask_msg->len = ROUNDUP(WLC_E_LAST, NBBY)/NBBY;
+		bcm_mkiovar("event_msgs_ext", (char *)eventmask_msg,
+			msglen, iov_buf, WLC_IOCTL_SMLEN);
+		if ((ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR,
+			iov_buf, WLC_IOCTL_SMLEN, TRUE, 0)) < 0) {
+			DHD_ERROR(("%s write event mask ext failed %d\n", __FUNCTION__, ret));
+			goto done;
+		}
+	} else if (ret2 < 0) {
+		DHD_ERROR(("%s read event mask ext unsupported %d\n", __FUNCTION__, ret2));
+	} /* unsupported is ok */
 
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_SCAN_CHANNEL_TIME, (char *)&scan_assoc_time,
 		sizeof(scan_assoc_time), TRUE, 0);
@@ -4960,6 +5063,12 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #endif /* WL11U */
 
 done:
+
+	if (eventmask_msg)
+		kfree(eventmask_msg);
+	if (iov_buf)
+		kfree(iov_buf);
+
 	return ret;
 }
 
@@ -6658,14 +6767,6 @@ dhd_dev_retrieve_batch_scan(struct net_device *dev)
 	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
 
 	return (dhd_retreive_batch_scan_results(&dhd->pub));
-}
-
-void
-dhd_dev_end_one_shot_gscan(struct net_device *dev)
-{
-	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
-
-	return (dhd_end_one_shot_gscan(&dhd->pub));
 }
 #endif /* GSCAN_SUPPORT */
 

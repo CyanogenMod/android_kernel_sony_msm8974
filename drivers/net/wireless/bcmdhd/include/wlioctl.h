@@ -24,7 +24,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wlioctl.h 537632 2015-02-27 02:51:28Z $
+ * $Id: wlioctl.h 569188 2015-07-07 12:04:12Z $
  */
 
 #ifndef _wlioctl_h_
@@ -2550,7 +2550,7 @@ typedef struct wl_pfn_cfg {
 
 #define CH_BUCKET_REPORT_REGULAR            0
 #define CH_BUCKET_REPORT_FULL_RESULT        2
-#define CH_BUCKET_REPORT_ONE_SHOT           4
+#define CH_BUCKET_GSCAN                     4
 
 typedef struct wl_pfn_gscan_channel_bucket {
 	uint16 bucket_end_index;
@@ -3253,6 +3253,28 @@ typedef struct nbr_element {
 	uint8 pad;
 } nbr_element_t;
 
+typedef enum event_msgs_ext_command {
+	EVENTMSGS_NONE		=	0,
+	EVENTMSGS_SET_BIT	=	1,
+	EVENTMSGS_RESET_BIT	=	2,
+	EVENTMSGS_SET_MASK	=	3
+} event_msgs_ext_command_t;
+
+#define EVENTMSGS_VER 1
+#define EVENTMSGS_EXT_STRUCT_SIZE	OFFSETOF(eventmsgs_ext_t, mask[0])
+
+/* len-	for SET it would be mask size from the application to the firmware */
+/*		for GET it would be actual firmware mask size */
+/* maxgetsize -	is only used for GET. indicate max mask size that the */
+/*				application can read from the firmware */
+typedef struct eventmsgs_ext
+{
+	uint8	ver;
+	uint8	command;
+	uint8	len;
+	uint8	maxgetsize;
+	uint8	mask[1];
+} eventmsgs_ext_t;
 /* no default structure packing */
 #include <packed_section_end.h>
 
