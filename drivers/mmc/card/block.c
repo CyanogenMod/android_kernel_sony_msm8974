@@ -3243,14 +3243,12 @@ static void mmc_blk_shutdown(struct mmc_card *card)
 		}
 	}
 
-#ifdef CONFIG_MMC_CACHE_FEATURE
 	mmc_claim_host(card->host);
 	/* send cache off control */
 	rc = mmc_cache_ctrl(card->host, 0);
 	mmc_release_host(card->host);
 	if (rc)
 		goto cache_off_error;
-#endif
 
 	/* send power off notification */
 	if (mmc_card_mmc(card)) {
@@ -3266,13 +3264,11 @@ static void mmc_blk_shutdown(struct mmc_card *card)
 suspend_error:
 	pr_err("%s: mmc_queue_suspend returned error = %d",
 			mmc_hostname(card->host), rc);
-#ifdef CONFIG_MMC_CACHE_FEATURE
 	return;
 
 cache_off_error:
 	pr_err("%s: mmc_cache_ctrl returned error = %d",
 			mmc_hostname(card->host), rc);
-#endif
 }
 
 #ifdef CONFIG_PM

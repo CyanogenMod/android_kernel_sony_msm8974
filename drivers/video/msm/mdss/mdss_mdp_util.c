@@ -572,7 +572,7 @@ int mdss_mdp_get_img(struct msmfb_data *img, struct mdss_mdp_img_data *data)
 			return ret;
 		}
 
-		if (is_mdss_iommu_attached()) {
+		if (data->mapped) {
 			int domain;
 			if (data->flags & MDP_SECURE_OVERLAY_SESSION) {
 				domain = MDSS_IOMMU_DOMAIN_SECURE;

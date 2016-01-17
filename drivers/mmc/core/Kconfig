@@ -60,3 +60,10 @@ config MMC_DISABLE_STOP_REQUEST_SKHYNIX
 	help
 	  This selects disable stop request on the SkHynix-eMMC 4.5
 	  and 5.0 devices.
+config MMC_ENABLE_CACHECTRL_SKHYNIX
+	bool "Enable cache control on the SkHynix-eMMC 4.5"
+	depends on MMC
+	default n
+	help
+	  This selects enable cache control on the SkHynix-eMMC 4.5
+	  devices.

@@ -1463,6 +1463,14 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			host->caps2 &= ~MMC_CAP2_STOP_REQUEST;
 		}
 #endif
+
+#ifdef CONFIG_MMC_ENABLE_CACHECTRL_SKHYNIX
+		if (card->cid.manfid == CID_MANFID_HYNIX &&
+			!strncmp(card->cid.prod_name, prod_name_hynix_HBG4e_05,
+					 sizeof(prod_name_hynix_HBG4e_05))) {
+			host->caps2 |= MMC_CAP2_CACHE_CTRL;
+		}
+#endif
 	}
 
 	/*
@@ -1954,6 +1962,8 @@ out:
 	if (mmc_card_is_sleep(host->card)) {
 		mmc_restore_ios(host);
 		err = mmc_card_awake(host);
+		if (!err)
+			err = mmc_cache_ctrl(host, 1);
 	} else
 		err = mmc_init_card(host, host->ocr, host->card);
 #endif
