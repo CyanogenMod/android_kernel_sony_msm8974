@@ -2474,6 +2474,17 @@ static int tiocsetd(struct tty_struct *tty, int __user *p)
 	return ret;
 }
 
+static int tiocgetd(struct tty_struct *tty, int __user *p)
+{
+	struct tty_ldisc *ld;
+	int ret;
+
+	ld = tty_ldisc_ref_wait(tty);
+	ret = put_user(ld->ops->num, p);
+	tty_ldisc_deref(ld);
+	return ret;
+}
+
 /**
  *	send_break	-	performed time break
  *	@tty: device to break on
@@ -2687,7 +2698,7 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case TIOCGSID:
 		return tiocgsid(tty, real_tty, p);
 	case TIOCGETD:
-		return put_user(tty->ldisc->ops->num, (int __user *)p);
+		return tiocgetd(tty, p);
 	case TIOCSETD:
 		return tiocsetd(tty, p);
 	case TIOCVHANGUP:
